@@ -1,0 +1,10 @@
+{
+    "files.exclude": {
+        "**/*.import": true,
+        "**/.godot": true
+    },
+    "search.exclude": {
+        "**/*.import": true,
+        "**/.godot": true
+    }
+}
