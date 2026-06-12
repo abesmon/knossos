@@ -1,10 +1,12 @@
 {
     "files.exclude": {
         "**/*.import": true,
-        "**/.godot": true
+        "**/.godot": true,
+        "**/*.uid":true
     },
     "search.exclude": {
         "**/*.import": true,
-        "**/.godot": true
+        "**/.godot": true,
+        "**/*.uid":true
     }
 }

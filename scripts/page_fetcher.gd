@@ -1,0 +1,128 @@
+class_name PageFetcher
+extends Node
+
+## Сервис загрузки HTML по URL через HTTPRequest (без исполнения JS — Phase 1).
+## Сам нормализует адрес и резолвит относительные ссылки.
+
+signal fetched(html: String, final_url: String)
+signal failed(message: String, url: String)
+
+var _http: HTTPRequest
+var _requested_url: String = ""
+
+const USER_AGENT := "VRWeb/0.1 (Godot; +knossos)"
+
+
+func _ready() -> void:
+	_http = HTTPRequest.new()
+	# Многие сайты отдают gzip — пусть Godot распакует сам.
+	_http.accept_gzip = true
+	_http.use_threads = true
+	add_child(_http)
+	_http.request_completed.connect(_on_request_completed)
+
+
+## Загружает страницу. base_url — для разрешения относительного url.
+func fetch(url: String, base_url: String = "") -> void:
+	var resolved := resolve_url(url, base_url)
+	if resolved == "":
+		failed.emit("Пустой или некорректный адрес", url)
+		return
+	_requested_url = resolved
+	var headers := [
+		"User-Agent: " + USER_AGENT,
+		"Accept: text/html,application/xhtml+xml",
+	]
+	var err := _http.request(resolved, headers)
+	if err != OK:
+		failed.emit("Не удалось начать запрос (код %d)" % err, resolved)
+
+
+func _on_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		failed.emit("Сетевая ошибка (result %d)" % result, _requested_url)
+		return
+	if response_code >= 400:
+		failed.emit("HTTP %d" % response_code, _requested_url)
+		return
+	# Редирект на финальный URL (для корректного резолва относительных ссылок далее).
+	var final_url := _requested_url
+	for h in headers:
+		if h.to_lower().begins_with("location:"):
+			final_url = h.substr(9).strip_edges()
+	var html := body.get_string_from_utf8()
+	if html == "":
+		html = body.get_string_from_ascii()
+	fetched.emit(html, final_url)
+
+
+## Приводит адрес к абсолютному. Поддерживает: абсолютные http(s), //host,
+## /path, относительные пути и ссылки-якоря.
+static func resolve_url(url: String, base_url: String = "") -> String:
+	url = url.strip_edges()
+	if url == "":
+		return ""
+
+	if url.begins_with("http://") or url.begins_with("https://"):
+		return url
+	if url.begins_with("//"):
+		var scheme := "https:"
+		if base_url.begins_with("http://"):
+			scheme = "http:"
+		return scheme + url
+
+	if base_url == "":
+		# Нет базы — трактуем ввод как домен.
+		if url.contains(".") and not url.contains(" "):
+			return "https://" + url
+		return ""
+
+	var base := _split_base(base_url)
+	var origin: String = base["origin"]
+	var dir: String = base["dir"]
+
+	if url.begins_with("/"):
+		return origin + url
+	if url.begins_with("#"):
+		return base_url.get_slice("#", 0) + url
+	return _normalize_path(origin + dir + url)
+
+
+static func _split_base(base_url: String) -> Dictionary:
+	var scheme_end := base_url.find("://")
+	if scheme_end == -1:
+		return {"origin": "https://" + base_url, "dir": "/"}
+	var after := base_url.substr(scheme_end + 3)
+	var slash := after.find("/")
+	var host := after if slash == -1 else after.substr(0, slash)
+	var path := "/" if slash == -1 else after.substr(slash)
+	# Отрезаем query/fragment и имя файла, оставляя директорию.
+	path = path.get_slice("?", 0).get_slice("#", 0)
+	var last_slash := path.rfind("/")
+	var dir := "/" if last_slash <= 0 else path.substr(0, last_slash + 1)
+	return {"origin": base_url.substr(0, scheme_end + 3) + host, "dir": dir}
+
+
+static func _normalize_path(url: String) -> String:
+	# Схлопываем "/./" и "/../" в пути.
+	var scheme_end := url.find("://")
+	if scheme_end == -1:
+		return url
+	var origin := url.substr(0, scheme_end + 3)
+	var rest := url.substr(scheme_end + 3)
+	var slash := rest.find("/")
+	if slash == -1:
+		return url
+	var host := rest.substr(0, slash)
+	var path := rest.substr(slash)
+	var parts := path.split("/")
+	var out: Array = []
+	for p in parts:
+		if p == "" or p == ".":
+			continue
+		if p == "..":
+			if not out.is_empty():
+				out.pop_back()
+			continue
+		out.append(p)
+	return origin + host + "/" + "/".join(out)

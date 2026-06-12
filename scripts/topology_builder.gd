@@ -1,0 +1,389 @@
+class_name TopologyBuilder
+extends RefCounted
+
+## Фаза топологии (docs/html-to-3d-topology.md): дерево HtmlNode -> сериализуемый
+## артефакт §1 БЕЗ единой 3D-координаты. Геометрия его не касается — между ними
+## только этот Dictionary.
+##
+## Артефакт:
+## {
+##   "rooms": { id: Room },     # плоский словарь всех комнат/соединителей
+##   "root":  id,               # корневое пространство
+##   "labels": { anchorId: id } # цели якорей #id -> комната/объект
+## }
+## Room   = { id, kind:"room"|"connector", objects:[Object], children:[id], hints:{...} }
+## Object = { id, type, function:Transition|null, content:{...} }
+## Transition = { kind:"navigate", href } | { kind:"teleport", target } | { kind:"back" }
+
+const SKIP_TAGS := {
+	"script": true, "style": true, "meta": true, "link": true, "head": true,
+	"noscript": true, "svg": true, "title": true, "base": true, "template": true,
+	"#document": false,  # документ не скипаем, но и не объект — обрабатываем как контейнер
+}
+
+const HEADING_TAGS := {
+	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+}
+
+## Phrasing / inline-теги: их содержимое — часть текстового потока, а не отдельные
+## пространства. Контейнер, где ВСЁ содержимое такое, сворачивается в один rich-text
+## объект (абзац) с inline-ссылками, а не дробится на множество объектов.
+const PHRASING_TAGS := {
+	"a": true, "span": true, "em": true, "strong": true, "b": true, "i": true,
+	"u": true, "s": true, "strike": true, "small": true, "big": true, "sub": true,
+	"sup": true, "mark": true, "abbr": true, "cite": true, "q": true, "code": true,
+	"kbd": true, "samp": true, "var": true, "time": true, "label": true, "bdi": true,
+	"bdo": true, "wbr": true, "br": true, "tt": true, "ins": true, "del": true,
+	"font": true, "nobr": true, "ruby": true, "rt": true, "rp": true, "data": true,
+}
+
+# Внутреннее состояние построителя.
+var _rooms: Dictionary = {}      # id -> Room
+var _labels: Dictionary = {}     # anchorId -> id
+var _next_id: int = 0
+
+
+static func build(root: HtmlNode) -> Dictionary:
+	var b := TopologyBuilder.new()
+	return b._build(root)
+
+
+func _build(root: HtmlNode) -> Dictionary:
+	var body := _find_body(root)
+	var res := _process(body)
+	var top: Array = res["rooms"]
+	var loose: Array = res["loose"]
+
+	var root_id: int
+	if top.size() == 1 and loose.is_empty():
+		root_id = top[0]
+	else:
+		# Осталось несколько верхних пространств и/или свободные листья — оборачиваем.
+		var kind := "connector" if top.size() >= 2 else "room"
+		root_id = _make_room(kind, loose, top, null)
+
+	return {"rooms": _rooms, "root": root_id, "labels": _labels}
+
+
+func _find_body(root: HtmlNode) -> HtmlNode:
+	# Ищем <body>; если нет — работаем от корня документа.
+	var stack: Array[HtmlNode] = [root]
+	while not stack.is_empty():
+		var n: HtmlNode = stack.pop_back()
+		if n.tag == "body":
+			return n
+		for c in n.children:
+			stack.append(c)
+	return root
+
+
+## Возвращает { "rooms": [id...], "loose": [Object...] }.
+## rooms — уже сформированные пространства (комнаты/соединители).
+## loose — свободные листья-объекты, ещё не приписанные ни к одной комнате.
+func _process(node: HtmlNode) -> Dictionary:
+	var empty := {"rooms": [], "loose": []}
+	if node == null:
+		return empty
+
+	if node.is_text():
+		var t := node.text.strip_edges()
+		if t == "":
+			return empty
+		return {"rooms": [], "loose": [_text_object(t)]}
+
+	var tag := node.tag
+	if SKIP_TAGS.get(tag, false):
+		return empty
+	if _is_hidden(node):
+		return empty
+
+	# --- Листовые типы объектов (классификация по содержимому, §3) ---
+	match tag:
+		"img":
+			return {"rooms": [], "loose": [_leaf_object(node, "image", {
+				"src": node.get_attr("src"), "alt": node.get_attr("alt"),
+			})]}
+		"video", "audio", "iframe", "canvas", "embed":
+			return {"rooms": [], "loose": [_leaf_object(node, "media", {
+				"src": node.get_attr("src"), "text": node.collect_text(),
+			})]}
+		"button":
+			return {"rooms": [], "loose": [_leaf_object(node, "button", {
+				"text": node.collect_text(),
+			})]}
+		"input", "textarea", "select":
+			return {"rooms": [], "loose": [_leaf_object(node, "input", {
+				"text": node.get_attr("placeholder", node.get_attr("value", node.collect_text())),
+				"input_type": node.get_attr("type", "text"),
+			})]}
+		"ul", "ol":
+			# Гомогенный повтор -> один объект-коллекция (§7), а не N комнат.
+			return {"rooms": [], "loose": [_list_object(node)]}
+		"a":
+			return {"rooms": [], "loose": [_anchor_object(node)]}
+		"h1", "h2", "h3", "h4", "h5", "h6":
+			return {"rooms": [], "loose": [_leaf_object(node, "heading", {
+				"text": node.collect_text(), "level": int(tag.substr(1)),
+			})]}
+		"br", "hr":
+			return empty
+
+	# --- Абзац: чистый inline-контент сворачивается в ОДИН rich-text объект ---
+	# (текст + inline-ссылки одним блоком, без дробления на панели).
+	if _is_pure_inline(node):
+		var runs := _build_runs(node)
+		if _runs_have_text(runs):
+			return {"rooms": [], "loose": [_rich_text_object(node, runs)]}
+		return empty
+
+	# --- Контейнер: контракция снизу вверх (§4) ---
+	var child_rooms: Array = []
+	var child_loose: Array = []
+	for c in node.children:
+		var r := _process(c)
+		child_rooms.append_array(r["rooms"])
+		child_loose.append_array(r["loose"])
+
+	if child_rooms.size() >= 2:
+		# >=2 готовых комнаты -> узел становится соединителем; слияние вверх стоп.
+		# Свободные листья декорируют соединитель (§5).
+		var conn_id := _make_room("connector", child_loose, child_rooms, node)
+		return {"rooms": [conn_id], "loose": []}
+
+	if child_rooms.size() == 1 and child_loose.is_empty():
+		# Цепочка-«леса» с одним значимым ребёнком — схлопывается (§4.4),
+		# если CSS не требует сохранить контейнер как стену/пол.
+		if _has_visual_box(node):
+			var wrap_id := _make_room("room", [], child_rooms, node)
+			return {"rooms": [wrap_id], "loose": []}
+		return {"rooms": child_rooms, "loose": []}
+
+	if child_rooms.is_empty() and child_loose.is_empty():
+		return empty
+
+	# 0..1 комната + свободные листья -> формируем комнату из листьев,
+	# вложенную комнату (если есть) держим как ребёнка.
+	var room_id := _make_room("room", child_loose, child_rooms, node)
+	return {"rooms": [room_id], "loose": []}
+
+
+# --- Конструкторы пространства ---
+
+func _make_room(kind: String, objects: Array, children: Array, node) -> int:
+	var id := _alloc()
+	var weight := objects.size()
+	for child_id in children:
+		weight += int(_rooms[child_id]["hints"].get("weight", 0))
+	var hints := {"weight": weight}
+	if kind == "connector":
+		hints["degree"] = children.size()
+	if node != null:
+		var sem := _semantic_tag(node.tag)
+		if sem != "":
+			hints["semanticTag"] = sem
+		var css := _css_hints(node)
+		if not css.is_empty():
+			hints["css"] = css
+	_rooms[id] = {
+		"id": id, "kind": kind, "objects": objects,
+		"children": children, "hints": hints,
+	}
+	_register_anchor(node, id)
+	return id
+
+
+# --- Конструкторы объектов ---
+
+func _text_object(text: String) -> Dictionary:
+	return {"id": _alloc(), "type": "text", "function": null, "content": {"text": text}}
+
+
+func _leaf_object(node: HtmlNode, type: String, content: Dictionary) -> Dictionary:
+	var obj := {"id": _alloc(), "type": type, "function": null, "content": content}
+	_register_anchor(node, obj["id"])
+	return obj
+
+
+func _anchor_object(node: HtmlNode) -> Dictionary:
+	# Что это как объект — по содержимому; href навешивает функцию перехода (§3).
+	var type := "image" if node.has_descendant_tag("img") else "text"
+	var content := {"text": node.collect_text()}
+	if type == "image":
+		content["alt"] = node.collect_text()
+	var obj := {"id": _alloc(), "type": type, "function": _transition_for(node), "content": content}
+	_register_anchor(node, obj["id"])
+	return obj
+
+
+## true, если в поддереве нет блочных элементов — только текст и inline-теги.
+func _is_pure_inline(node: HtmlNode) -> bool:
+	for child in node.children:
+		if child.is_text():
+			continue
+		var t := child.tag
+		if SKIP_TAGS.get(t, false):
+			continue
+		if PHRASING_TAGS.has(t):
+			if not _is_pure_inline(child):
+				return false
+		else:
+			return false
+	return true
+
+
+## Линеаризует inline-поддерево в массив «прогонов» (runs) в порядке чтения.
+## run = { "text": String, "function": Transition|null }. Ссылки становятся
+## отдельными прогонами с функцией перехода; смежный обычный текст склеивается.
+func _build_runs(node: HtmlNode) -> Array:
+	var runs: Array = []
+	_collect_runs(node, runs)
+	return runs
+
+
+func _collect_runs(node: HtmlNode, runs: Array) -> void:
+	for child in node.children:
+		if child.is_text():
+			_append_text_run(runs, child.text)
+		elif SKIP_TAGS.get(child.tag, false):
+			continue
+		elif child.tag == "a":
+			var fn = _transition_for(child)
+			var text := child.collect_text()
+			if fn != null:
+				runs.append({"text": text, "function": fn})
+			else:
+				_append_text_run(runs, text)
+		elif PHRASING_TAGS.has(child.tag):
+			_collect_runs(child, runs)
+		else:
+			_append_text_run(runs, child.collect_text())
+
+
+func _append_text_run(runs: Array, text: String) -> void:
+	if text == "":
+		return
+	# Склеиваем с предыдущим текстовым прогоном (без функции), сохраняя пробелы.
+	if not runs.is_empty() and runs[-1].get("function", null) == null:
+		runs[-1]["text"] = str(runs[-1]["text"]) + text
+	else:
+		runs.append({"text": text, "function": null})
+
+
+func _runs_have_text(runs: Array) -> bool:
+	for r in runs:
+		if str(r.get("text", "")).strip_edges() != "":
+			return true
+	return false
+
+
+func _rich_text_object(node: HtmlNode, runs: Array) -> Dictionary:
+	var plain := ""
+	for r in runs:
+		plain += str(r["text"])
+	var obj := {
+		"id": _alloc(), "type": "text", "function": null,
+		"content": {"text": plain.strip_edges(), "runs": runs},
+	}
+	_register_anchor(node, obj["id"])
+	return obj
+
+
+func _list_object(node: HtmlNode) -> Dictionary:
+	var items: Array = []
+	for li in node.children:
+		if li.tag != "li":
+			continue
+		var item := {"text": li.collect_text(), "function": null}
+		# Если в элементе есть ссылка — функция перехода едет с элементом (§7).
+		var link := _find_first_anchor(li)
+		if link != null:
+			item["function"] = _transition_for(link)
+		items.append(item)
+	return {"id": _alloc(), "type": "list", "function": null, "content": {"items": items}}
+
+
+func _transition_for(anchor: HtmlNode):
+	if not anchor.has_attr("href"):
+		return null
+	var href := anchor.get_attr("href").strip_edges()
+	if href == "" or href == "#":
+		return null
+	if href.begins_with("#"):
+		return {"kind": "teleport", "target": href.substr(1)}
+	if href.begins_with("javascript:"):
+		return null
+	return {"kind": "navigate", "href": href}
+
+
+func _find_first_anchor(node: HtmlNode) -> HtmlNode:
+	for c in node.children:
+		if c.tag == "a":
+			return c
+		var nested := _find_first_anchor(c)
+		if nested != null:
+			return nested
+	return null
+
+
+# --- Хинты и якоря ---
+
+func _register_anchor(node, id: int) -> void:
+	if node == null:
+		return
+	var anchor_id: String = node.get_attr("id")
+	if anchor_id != "":
+		_labels[anchor_id] = id
+
+
+func _semantic_tag(tag: String) -> String:
+	match tag:
+		"main", "section", "article", "nav", "aside", "header", "footer", "body":
+			return tag
+	return ""
+
+
+func _css_hints(node: HtmlNode) -> Dictionary:
+	var css := {}
+	var style := node.get_attr("style").to_lower()
+	var bg := _extract_css_value(style, "background-color")
+	if bg == "":
+		bg = _extract_css_value(style, "background")
+	if bg != "":
+		css["bg"] = bg
+	if node.has_attr("bgcolor"):
+		css["bg"] = node.get_attr("bgcolor")
+	if style.contains("border"):
+		css["border"] = true
+	return css
+
+
+func _extract_css_value(style: String, prop: String) -> String:
+	var idx := style.find(prop + ":")
+	if idx == -1:
+		return ""
+	var start := idx + prop.length() + 1
+	var end := style.find(";", start)
+	if end == -1:
+		end = style.length()
+	return style.substr(start, end - start).strip_edges()
+
+
+func _has_visual_box(node: HtmlNode) -> bool:
+	# Контейнер с фоном/рамкой несёт визуальную информацию -> схлопывать нельзя (§4).
+	var css := _css_hints(node)
+	return css.has("bg") or css.has("border")
+
+
+func _is_hidden(node: HtmlNode) -> bool:
+	var style := node.get_attr("style").to_lower().replace(" ", "")
+	if style.contains("display:none") or style.contains("visibility:hidden"):
+		return true
+	if node.has_attr("hidden"):
+		return true
+	return false
+
+
+func _alloc() -> int:
+	var id := _next_id
+	_next_id += 1
+	return id

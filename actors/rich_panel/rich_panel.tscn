@@ -1,0 +1,25 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0vrwebrichpanel1"]
+
+[ext_resource type="Script" path="res://actors/rich_panel/rich_panel.gd" id="1_rich"]
+
+[node name="RichPanel" type="StaticBody3D"]
+script = ExtResource("1_rich")
+
+[node name="SubViewport" type="SubViewport" parent="."]
+disable_3d = true
+size = Vector2i(760, 120)
+render_target_update_mode = 1
+
+[node name="Background" type="ColorRect" parent="SubViewport"]
+offset_right = 760.0
+offset_bottom = 120.0
+color = Color(0.09, 0.1, 0.13, 1)
+
+[node name="RichTextLabel" type="RichTextLabel" parent="SubViewport"]
+offset_right = 760.0
+offset_bottom = 120.0
+bbcode_enabled = true
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
