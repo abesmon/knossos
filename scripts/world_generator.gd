@@ -37,6 +37,14 @@ const COLLIDE_K := 0.6          # сила расталкивания перес
 const RELAX_GAP := GRID * 0.75  # зазор-улица, заложенный в радиус круга комнаты, м
 const PLACE_MAX_RADIUS := 256   # потолок спирального поиска свободной клетки при снапе
 
+# --- Гравитация раскладки (безразмерная карта по сиду, проецируется на bbox) ---
+# Дополнительная мягкая сила: по сиду выбирается маленькая «карта гравитации» (палитра),
+# безразмерно проецируется на оценённый размах раскладки и тянет комнаты к высоким своим
+# значениям (gradient ascent по билинейно-интерполированному полю). Слабее пружин и притяжения
+# к сетке; жёсткий снэп (_snap_to_cells) всё равно последнее слово ⇒ сетка/непересечение целы.
+const GRAVITY_K := 0.9          # сила притяжения к высоким значениям карты (мягче пружин/сетки)
+const GRAVITY_COVER := 1.6      # над-покрытие: во сколько зона проекции шире оценённого размаха
+
 const WALL_HEIGHT := 3.2        # минимальная высота стен, м
 const WALL_THICK := 0.3
 const ROUTE_EXPAND := 16        # запас области поиска коридора вокруг пары комнат, клеток
@@ -81,6 +89,12 @@ var _room_wall_h: Dictionary = {} # roomId -> высота стен, м
 var _pos2: Dictionary = {}        # roomId -> Vector2: координаты центра при утряске, м
 var _radius: Dictionary = {}      # roomId -> float: безопасный радиус круга комнаты, м
 var _depth: Dictionary = {}       # roomId -> int: глубина от корня (листья глубже -> пружины сильнее)
+var _grav_map: Array = []         # 2D карта гравитации (по сиду): [ряд][столбец] -> float
+var _grav_name := ""              # имя выбранной карты (для отладочного вывода)
+var _grav_w := 0                  # столбцов в карте
+var _grav_h := 0                  # рядов в карте
+var _grav_origin := Vector2.ZERO  # левый-верхний угол зоны проекции, м (фикс)
+var _grav_extent := Vector2.ONE   # размах зоны проекции, м (фикс, оценка из площади)
 var _room_cell: Dictionary = {}   # roomId -> Vector2i: левый-верхний угол комнаты на сетке
 var _occ: Dictionary = {}         # Vector2i -> roomId | CORR
 var _corr_cells: Dictionary = {}  # Vector2i -> true: клетки полов-коридоров
@@ -272,6 +286,7 @@ func _relax_layout() -> void:
 	_rng.seed = _seed
 	_pos2[_root_id] = Vector2.ZERO
 	_init_positions(_root_id)
+	_setup_gravity()
 
 	var max_depth := 1
 	for id in _depth.keys():
@@ -284,6 +299,7 @@ func _relax_layout() -> void:
 		_apply_springs(disp, max_depth)
 		_apply_collision(disp)
 		_apply_grid_pull(disp)
+		_apply_gravity(disp)
 		var max_move := 0.0
 		for id in _rooms.keys():
 			var m: Vector2 = (disp[id] as Vector2).limit_length(RELAX_MAX_STEP)
@@ -361,6 +377,118 @@ func _apply_grid_pull(disp: Dictionary) -> void:
 		var snap_corner := Vector2(roundf(corner.x / GRID) * GRID, roundf(corner.y / GRID) * GRID)
 		var target: Vector2 = snap_corner + Vector2(half, half)
 		disp[id] += (target - _pos2[id]) * GRID_PULL
+
+
+## Гравитация: тянет комнату в сторону роста поля карты (gradient ascent по билинейной выборке).
+func _apply_gravity(disp: Dictionary) -> void:
+	if _grav_map.is_empty():
+		return
+	for id in _rooms.keys():
+		disp[id] += _grav_grad(_pos2[id]) * GRAVITY_K
+
+
+## Выбирает карту по сиду из палитры и задаёт фикс-зону проекции вокруг корня (в начале координат).
+## Размах оценивается из суммарной площади комнат (квадрат, упаковывающий их без зазоров),
+## расширенный GRAVITY_COVER ⇒ комнаты в норме не выходят за зону (за краями — зеркальное отражение).
+func _setup_gravity() -> void:
+	_grav_map = _pick_gravity_map(_seed)
+	_grav_h = _grav_map.size()
+	_grav_w = 0 if _grav_h == 0 else (_grav_map[0] as Array).size()
+	if _grav_w == 0:
+		return
+	var total_cells := 0.0
+	for id in _rooms.keys():
+		total_cells += float(_room_cells[id]) ** 2.0
+	var side: float = sqrt(maxf(total_cells, 1.0)) * GRID * GRAVITY_COVER
+	_grav_extent = Vector2(side, side)
+	_grav_origin = -_grav_extent * 0.5   # центр зоны — в начале координат (там же корень)
+	_print_gravity()
+
+
+## Отладочный вывод применённой гравитации: имя карты, её сетка значений и размах зоны проекции.
+func _print_gravity() -> void:
+	var grid_str := ""
+	for row in _grav_map:
+		var cells := PackedStringArray()
+		for v in row:
+			cells.append(str(int(v)))
+		grid_str += "\n    " + " ".join(cells)
+	print("[WorldGen] gravity: «%s» (%dx%d, k=%.3f), зона %.1fx%.1f м:%s"
+			% [_grav_name, _grav_w, _grav_h, GRAVITY_K, _grav_extent.x, _grav_extent.y, grid_str])
+
+
+## Палитра безразмерных карт гравитации. Сид выбирает одну. Значения: чем выше — тем сильнее
+## притягивает (0 — нейтраль). Билинейная интерполяция сглаживает грубые клетки в градиент.
+## Каждая запись: [имя, ряды-строки]. Имя кладётся в `_grav_name` для отладочного вывода.
+func _pick_gravity_map(seed_value: int) -> Array:
+	var palette := [
+		["крест",     ["00100", "00200", "12221", "00200", "00100"]],  # стягивает к центральному кресту
+		["два-полюса", ["101", "101", "101"]],                          # растаскивает влево/вправо
+		["диагональ", ["100", "010", "001"]],                           # вытягивает по диагонали
+		["кольцо",    ["111", "101", "111"]],                           # выталкивает к периметру
+		["холм",      ["00000", "01110", "01210", "01110", "00000"]],   # один центральный сгусток
+	]
+	var idx: int = abs(seed_value) % palette.size()
+	_grav_name = palette[idx][0]
+	return _parse_gravity_map(palette[idx][1])
+
+
+## Строки цифр -> 2D-массив float.
+func _parse_gravity_map(rows: Array) -> Array:
+	var out: Array = []
+	for row in rows:
+		var s: String = row
+		var line: Array = []
+		for i in s.length():
+			line.append(float(s.substr(i, 1).to_int()))
+		out.append(line)
+	return out
+
+
+## Билинейный градиент поля карты в мировой точке (направлен к росту значения).
+## Считается в нормированных uv-координатах ⇒ сила не зависит от масштаба зоны проекции.
+func _grav_grad(world: Vector2) -> Vector2:
+	var uv := _grav_uv(world)
+	var eu: float = 0.5 / float(max(1, _grav_w - 1))
+	var ev: float = 0.5 / float(max(1, _grav_h - 1))
+	var dx: float = _grav_sample_uv(uv + Vector2(eu, 0.0)) - _grav_sample_uv(uv - Vector2(eu, 0.0))
+	var dy: float = _grav_sample_uv(uv + Vector2(0.0, ev)) - _grav_sample_uv(uv - Vector2(0.0, ev))
+	return Vector2(dx, dy)
+
+
+func _grav_uv(world: Vector2) -> Vector2:
+	return Vector2((world.x - _grav_origin.x) / _grav_extent.x,
+			(world.y - _grav_origin.y) / _grav_extent.y)
+
+
+## Билинейная выборка карты по uv (вне [0,1] — зеркальное отражение, поле непрерывно на краях).
+func _grav_sample_uv(uv: Vector2) -> float:
+	var gx := _mirror_index(uv.x * float(_grav_w - 1), _grav_w)
+	var gy := _mirror_index(uv.y * float(_grav_h - 1), _grav_h)
+	var x0: int = int(floor(gx))
+	var y0: int = int(floor(gy))
+	var x1: int = min(x0 + 1, _grav_w - 1)
+	var y1: int = min(y0 + 1, _grav_h - 1)
+	var fx: float = gx - float(x0)
+	var fy: float = gy - float(y0)
+	var top: float = lerpf(_grav_at(x0, y0), _grav_at(x1, y0), fx)
+	var bot: float = lerpf(_grav_at(x0, y1), _grav_at(x1, y1), fx)
+	return lerpf(top, bot, fy)
+
+
+func _grav_at(x: int, y: int) -> float:
+	return (_grav_map[y] as Array)[x]
+
+
+## Отражает координату c в диапазон [0, n-1] (зеркальный тайлинг, период 2*(n-1)).
+func _mirror_index(c: float, n: int) -> float:
+	if n <= 1:
+		return 0.0
+	var period: float = 2.0 * float(n - 1)
+	var m: float = fposmod(c, period)
+	if m > float(n - 1):
+		m = period - m
+	return m
 
 
 ## Жёсткий снап на целочисленные клетки + дискретное расталкивание: точная сетка и зазор
