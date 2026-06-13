@@ -69,8 +69,10 @@ func _on_done(url: String, http: HTTPRequest, result: int, code: int,
 	_pump()
 
 
-## Декодирует байты в текстуру. Тип угадываем по Content-Type, иначе по расширению,
-## иначе перебором кодеков. SVG поддерживаем, если в сборке Godot есть кодек.
+## Декодирует байты в текстуру строго по типу (Content-Type, иначе расширение url).
+## Перебор кодеков НЕ делаем — это лишь засыпало бы консоль ошибками декодера на
+## каждой картинке; не распознали тип -> отдаём null, и картинка получит заглушку.
+## SVG поддерживаем, если в сборке Godot есть кодек.
 func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> Texture2D:
 	var hint := _content_type(headers)
 	if hint == "":
@@ -82,25 +84,16 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 	if hint.contains("png"):
 		err = img.load_png_from_buffer(body)
 	elif hint.contains("jpg") or hint.contains("jpeg"):
+		# Встроенный в Godot декодер (jpgd) не умеет grayscale-JPEG с сэмплингом ≠ 1×1
+		# (такие отдаёт, например, Wikimedia для ч/б фото). Не зовём декодер на заведомо
+		# неподдерживаемых — иначе спам ошибок в консоли; вместо текстуры будет заглушка.
+		if _jpeg_unsupported(body):
+			return null
 		err = img.load_jpg_from_buffer(body)
 	elif hint.contains("webp"):
 		err = img.load_webp_from_buffer(body)
 	elif hint.contains("svg") and img.has_method("load_svg_from_buffer"):
 		err = img.load_svg_from_buffer(body, 1.0)
-
-	# Тип не распознан или не совпал — пробуем популярные кодеки по очереди.
-	if err != OK:
-		for codec in ["png", "jpg", "webp"]:
-			var probe := Image.new()
-			var e := OK
-			match codec:
-				"png": e = probe.load_png_from_buffer(body)
-				"jpg": e = probe.load_jpg_from_buffer(body)
-				"webp": e = probe.load_webp_from_buffer(body)
-			if e == OK:
-				img = probe
-				err = OK
-				break
 
 	if err != OK or img.is_empty():
 		return null
@@ -121,3 +114,40 @@ func _content_type(headers: PackedStringArray) -> String:
 		if h.to_lower().begins_with("content-type:"):
 			return h.substr(13).strip_edges().to_lower()
 	return ""
+
+
+## true, если это JPEG, который встроенный декодер Godot (jpgd) не осилит:
+## одна компонента (grayscale) с фактором сэмплинга ≠ 1×1. Сканируем маркеры до SOF
+## и смотрим число компонент и H/V первой. Сомневаемся (не нашли SOF, обрезано) — false:
+## пусть декодер пробует сам.
+func _jpeg_unsupported(body: PackedByteArray) -> bool:
+	var n := body.size()
+	if n < 4 or body[0] != 0xFF or body[1] != 0xD8:
+		return false   # не JPEG — не наша забота
+	var i := 2
+	while i + 1 < n:
+		if body[i] != 0xFF:
+			i += 1
+			continue
+		var marker := body[i + 1]
+		# Маркеры без полей длины: SOI/EOI, RSTn, TEM.
+		if marker == 0xD8 or marker == 0xD9 or marker == 0x01 or (marker >= 0xD0 and marker <= 0xD7):
+			i += 2
+			continue
+		if i + 3 >= n:
+			return false
+		var seg_len := (body[i + 2] << 8) | body[i + 3]
+		# SOF0..SOF15, кроме DHT(C4)/JPG(C8)/DAC(CC).
+		if marker >= 0xC0 and marker <= 0xCF and marker != 0xC4 and marker != 0xC8 and marker != 0xCC:
+			# Поля SOF: len(2) prec(1) height(2) width(2) Nf(1), затем по 3 байта на компоненту.
+			if i + 9 >= n:
+				return false
+			var nf := body[i + 9]
+			if nf != 1:
+				return false   # цветной (3) jpgd тянет
+			if i + 11 >= n:
+				return false
+			var hv := body[i + 11]   # байт (Hi<<4 | Vi) первой компоненты
+			return (hv >> 4) > 1 or (hv & 0x0F) > 1
+		i += 2 + seg_len
+	return false
