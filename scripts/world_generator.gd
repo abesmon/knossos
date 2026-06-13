@@ -248,11 +248,18 @@ func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 			_build_panel(holder, local_pos, yaw, "▢ " + _obj_text(obj),
 				Color(0.5, 0.7, 0.5), 1.4, 40)
 		"list":
-			_build_panel(holder, local_pos, yaw, _list_text(obj),
-				Color(0.6, 0.6, 0.65), 2.2, 32)
+			# Со ссылками внутри -> кликабельный RichPanel; иначе дешёвый Label3D.
+			if _list_has_links(obj):
+				_build_rich_panel(_list_runs(obj), holder, local_pos, yaw, on_transition)
+			else:
+				_build_panel(holder, local_pos, yaw, _list_text(obj),
+					Color(0.6, 0.6, 0.65), 2.2, 32)
 		"table":
-			_build_panel(holder, local_pos, yaw, _table_text(obj),
-				Color(0.55, 0.6, 0.6), 2.4, 28)
+			if _table_has_links(obj):
+				_build_rich_panel(_table_runs(obj), holder, local_pos, yaw, on_transition)
+			else:
+				_build_panel(holder, local_pos, yaw, _table_text(obj),
+					Color(0.55, 0.6, 0.6), 2.4, 28)
 		_:
 			_build_panel(holder, local_pos, yaw, _obj_text(obj),
 				Color(0.85, 0.85, 0.85), 1.6, 36)
@@ -441,6 +448,23 @@ func _list_text(obj: Dictionary) -> String:
 	return "\n".join(lines)
 
 
+func _list_has_links(obj: Dictionary) -> bool:
+	for it in obj.get("content", {}).get("items", []):
+		if _runs_have_links(it.get("runs", [])):
+			return true
+	return false
+
+
+## Линеаризует список в прогоны для RichPanel: «•» + прогоны пункта (со ссылками) + перевод.
+func _list_runs(obj: Dictionary) -> Array:
+	var runs: Array = []
+	for it in obj.get("content", {}).get("items", []):
+		runs.append({"text": "•  ", "function": null})
+		_append_runs(runs, it.get("runs", []), str(it.get("text", "")))
+		runs.append({"text": "\n", "function": null})
+	return runs
+
+
 func _table_text(obj: Dictionary) -> String:
 	var content: Dictionary = obj.get("content", {})
 	var lines: PackedStringArray = []
@@ -453,6 +477,42 @@ func _table_text(obj: Dictionary) -> String:
 			cells.append(str(cell.get("text", "")))
 		lines.append(" | ".join(cells))
 	return "\n".join(lines)
+
+
+func _table_has_links(obj: Dictionary) -> bool:
+	for row in obj.get("content", {}).get("rows", []):
+		for cell in row.get("cells", []):
+			if _runs_have_links(cell.get("runs", [])):
+				return true
+	return false
+
+
+## Линеаризует таблицу в прогоны для RichPanel: подпись, строки через перевод, ячейки через «|».
+func _table_runs(obj: Dictionary) -> Array:
+	var content: Dictionary = obj.get("content", {})
+	var runs: Array = []
+	var caption: String = content.get("caption", "")
+	if caption.strip_edges() != "":
+		runs.append({"text": "▦ " + caption + "\n", "function": null})
+	for row in content.get("rows", []):
+		var cells: Array = row.get("cells", [])
+		for i in cells.size():
+			if i > 0:
+				runs.append({"text": "  |  ", "function": null})
+			var cell: Dictionary = cells[i]
+			_append_runs(runs, cell.get("runs", []), str(cell.get("text", "")))
+		runs.append({"text": "\n", "function": null})
+	return runs
+
+
+## Добавляет прогоны ячейки/пункта в общий поток; пусто -> запасной текстовый прогон.
+func _append_runs(out: Array, src_runs: Array, fallback_text: String) -> void:
+	if src_runs.is_empty():
+		if fallback_text != "":
+			out.append({"text": fallback_text, "function": null})
+		return
+	for r in src_runs:
+		out.append(r)
 
 
 func _truncate(s: String, n: int) -> String:

@@ -362,12 +362,10 @@ func _list_object(node: HtmlNode) -> Dictionary:
 	for li in node.children:
 		if li.tag != "li":
 			continue
-		var item := {"text": li.collect_text(), "function": null}
-		# Если в элементе есть ссылка — функция перехода едет с элементом (§7).
-		var link := _find_first_anchor(li)
-		if link != null:
-			item["function"] = _transition_for(link)
-		items.append(item)
+		# Содержимое элемента линеаризуется в «прогоны» (как абзац, §3): каждая <a href>
+		# внутри становится отдельным прогоном со своей Transition, текст склеивается.
+		# Так ссылки внутри пункта списка не теряются и остаются кликабельными в мире (§7).
+		items.append({"text": li.collect_text(), "runs": _build_runs(li)})
 	var obj := {"id": _alloc(), "type": "list", "function": null, "content": {"items": items}}
 	_record_source(obj["id"], node)
 	return obj
@@ -408,13 +406,11 @@ func _table_row(row_node: HtmlNode) -> Dictionary:
 	for c in row_node.children:
 		if c.tag != "td" and c.tag != "th":
 			continue
-		var cell := {"text": c.collect_text(), "function": null, "header": c.tag == "th"}
-		var link := _find_first_anchor(c)
-		if link != null:
-			cell["function"] = _transition_for(link)
+		# Содержимое ячейки линеаризуется в прогоны (как элемент списка): ссылки внутри
+		# становятся кликабельными прогонами и не теряются в мире (§7).
+		cells.append({"text": c.collect_text(), "runs": _build_runs(c), "header": c.tag == "th"})
 		if c.tag == "th":
 			is_header = true
-		cells.append(cell)
 	return {"cells": cells, "header": is_header}
 
 
@@ -429,16 +425,6 @@ func _transition_for(anchor: HtmlNode):
 	if href.begins_with("javascript:"):
 		return null
 	return {"kind": "navigate", "href": href}
-
-
-func _find_first_anchor(node: HtmlNode) -> HtmlNode:
-	for c in node.children:
-		if c.tag == "a":
-			return c
-		var nested := _find_first_anchor(c)
-		if nested != null:
-			return nested
-	return null
 
 
 # --- Хинты и якоря ---
