@@ -11,7 +11,7 @@ signal link_activated(transition: Dictionary)
 const GROUP := "rich_panel"
 const PANEL_WIDTH_PX := 760
 const PIXEL_PER_METER := 320.0   # перевод пикселей вьюпорта в метры квада
-const FONT_SIZE := 24
+const FONT_SIZE := 24            # дефолтный кегль вьюпорта, если мир не задал свой
 const MARGIN := 18
 
 var _runs: Array = []
@@ -19,6 +19,7 @@ var _metas: Array = []           # индекс url-меты -> Transition
 var _bbcode := ""
 var _w_px := PANEL_WIDTH_PX
 var _h_px := 120
+var _font_size := FONT_SIZE      # кегль вьюпорта; мир задаёт его из базы текста страницы
 
 @onready var _viewport: SubViewport = $SubViewport
 @onready var _bg: ColorRect = $SubViewport/Background
@@ -28,8 +29,11 @@ var _h_px := 120
 
 
 ## Вызывается ДО add_child: готовит bbcode и оценивает высоту панели.
-func setup(runs: Array) -> void:
+## font_world_m — желаемая мир-высота глифа (базовый текст страницы); <0 — дефолт.
+func setup(runs: Array, font_world_m: float = -1.0) -> void:
 	_runs = runs
+	if font_world_m > 0.0:
+		_font_size = max(8, int(round(font_world_m * PIXEL_PER_METER)))
 	_build_bbcode()
 	_estimate_height()
 
@@ -99,10 +103,10 @@ func _estimate_height() -> void:
 		plain += t
 		explicit_lines += t.count("\n")
 	var usable := float(_w_px - MARGIN * 2)
-	var chars_per_line: float = max(1.0, usable / (FONT_SIZE * 0.5))
+	var chars_per_line: float = max(1.0, usable / (_font_size * 0.5))
 	var wrapped := int(ceil(plain.length() / chars_per_line))
 	var lines: int = max(explicit_lines, wrapped)
-	var line_h := int(FONT_SIZE * 1.4)
+	var line_h := int(_font_size * 1.4)
 	_h_px = clampi(lines * line_h + MARGIN * 2, 80, 1500)
 
 
@@ -122,8 +126,8 @@ func _layout_viewport() -> void:
 	_label.offset_bottom = -MARGIN
 	_label.bbcode_enabled = true
 	_label.scroll_active = false
-	_label.add_theme_font_size_override("normal_font_size", FONT_SIZE)
-	_label.add_theme_font_size_override("bold_font_size", FONT_SIZE)
+	_label.add_theme_font_size_override("normal_font_size", _font_size)
+	_label.add_theme_font_size_override("bold_font_size", _font_size)
 	if not _label.meta_clicked.is_connected(_on_meta_clicked):
 		_label.meta_clicked.connect(_on_meta_clicked)
 	_label.text = _bbcode

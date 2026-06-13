@@ -56,6 +56,17 @@ func has_descendant_tag(target: String) -> bool:
 	return false
 
 
+## Первый потомок с указанным тегом (поиск в глубину) или null.
+func find_descendant(target: String) -> HtmlNode:
+	for c in children:
+		if c.tag == target:
+			return c
+		var found := c.find_descendant(target)
+		if found != null:
+			return found
+	return null
+
+
 ## Реконструирует HTML-разметку поддерева (для отладки: какой кусок страницы стал
 ## этим узлом топологии). Не байт-в-байт исходник — нормализованная пересборка
 ## дерева с отступами; этого достаточно, чтобы глазами сопоставить узел и контент.

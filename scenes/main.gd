@@ -87,8 +87,14 @@ func _rebuild_world(space: Dictionary, url: String) -> void:
 			continue
 		child.queue_free()
 
+	# Лоадер картинок живёт внутри мира: при следующей навигации мир сносится вместе с ним,
+	# незавершённые загрузки старой страницы умирают сами.
+	var image_loader := ImageLoader.new()
+	image_loader.name = "ImageLoader"
+	_world.add_child(image_loader)
+
 	var seed_value := int(hash(url))
-	var gen := WorldGenerator.generate(space, _world, seed_value, _activate_transition)
+	var gen := WorldGenerator.generate(space, _world, seed_value, _activate_transition, url, image_loader)
 	_label_positions = gen.label_positions
 	_player.teleport_to(gen.spawn_point)
 

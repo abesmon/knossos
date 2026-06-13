@@ -68,7 +68,13 @@ func _build(root: HtmlNode) -> Dictionary:
 		var kind := "connector" if top.size() >= 2 else "room"
 		root_id = _make_room(kind, loose, top, null)
 
-	var artifact := {"rooms": _rooms, "root": root_id, "labels": _labels}
+	# Типографика страницы: базовый кегль текста. Геометрия выводит из него единый
+	# масштаб «CSS-пиксель -> метр», относительно которого размеряет всё остальное
+	# (заголовки, картинки, таблицы). См. docs/html-to-3d-topology.md §F.
+	var artifact := {
+		"rooms": _rooms, "root": root_id, "labels": _labels,
+		"typography": {"base_px": _compute_base_px(body)},
+	}
 	if _debug:
 		artifact["sources"] = _sources
 	return artifact
@@ -109,9 +115,9 @@ func _process(node: HtmlNode) -> Dictionary:
 	# --- Листовые типы объектов (классификация по содержимому, §3) ---
 	match tag:
 		"img":
-			return {"rooms": [], "loose": [_leaf_object(node, "image", {
-				"src": node.get_attr("src"), "alt": node.get_attr("alt"),
-			})]}
+			var img_content := {"src": node.get_attr("src"), "alt": node.get_attr("alt")}
+			img_content.merge(_image_dims(node))
+			return {"rooms": [], "loose": [_leaf_object(node, "image", img_content)]}
 		"video", "audio", "iframe", "canvas", "embed":
 			return {"rooms": [], "loose": [_leaf_object(node, "media", {
 				"src": node.get_attr("src"), "text": node.collect_text(),
@@ -266,6 +272,10 @@ func _anchor_object(node: HtmlNode) -> Dictionary:
 	var content := {"text": node.collect_text()}
 	if type == "image":
 		content["alt"] = node.collect_text()
+		var img: HtmlNode = node.find_descendant("img")
+		if img != null:
+			content["src"] = img.get_attr("src")
+			content.merge(_image_dims(img))
 	var obj := {"id": _alloc(), "type": type, "function": _transition_for(node), "content": content}
 	_register_anchor(node, obj["id"])
 	_record_source(obj["id"], node)
@@ -464,6 +474,80 @@ func _css_hints(node: HtmlNode) -> Dictionary:
 	if style.contains("border"):
 		css["border"] = true
 	return css
+
+
+# --- Типографика и размеры (для масштаба геометрии) ---
+
+const DEFAULT_BASE_PX := 16.0  # дефолтный кегль <body> в браузере
+
+
+## Средневзвешенный (по длине текста) кегль страницы. Текст без явного font-size
+## считается базовым (16px); заголовки в среднее не входят — они масштабируются
+## геометрией отдельно по уровню. Так «база» отражает основной читаемый текст.
+func _compute_base_px(root: HtmlNode) -> float:
+	var acc := {"sum": 0.0, "weight": 0.0}
+	_accumulate_font_px(root, DEFAULT_BASE_PX, acc)
+	if acc["weight"] <= 0.0:
+		return DEFAULT_BASE_PX
+	return clampf(acc["sum"] / acc["weight"], 8.0, 40.0)
+
+
+func _accumulate_font_px(node: HtmlNode, inherited_px: float, acc: Dictionary) -> void:
+	if node.is_text():
+		var t := node.text.strip_edges()
+		if t != "":
+			var w := float(t.length())
+			acc["sum"] += inherited_px * w
+			acc["weight"] += w
+		return
+	if SKIP_TAGS.get(node.tag, false):
+		return
+	if HEADING_TAGS.has(node.tag):
+		return  # текст заголовков в базу не считаем
+	var px := inherited_px
+	var declared := _font_size_px(node)
+	if declared > 0.0:
+		px = declared
+	for c in node.children:
+		_accumulate_font_px(c, px, acc)
+
+
+func _font_size_px(node: HtmlNode) -> float:
+	var style := node.get_attr("style").to_lower()
+	return _length_px(_extract_css_value(style, "font-size"))
+
+
+## Картинка -> {width_px?, height_px?} из атрибутов width/height или inline-стиля
+## (CSS перекрывает атрибут). Относительные/процентные значения игнорируются —
+## остаётся только то, что геометрия может перевести в метры через base_px.
+func _image_dims(node: HtmlNode) -> Dictionary:
+	var w := _length_px(node.get_attr("width"))
+	var h := _length_px(node.get_attr("height"))
+	var style := node.get_attr("style").to_lower()
+	var sw := _length_px(_extract_css_value(style, "width"))
+	var sh := _length_px(_extract_css_value(style, "height"))
+	if sw > 0.0:
+		w = sw
+	if sh > 0.0:
+		h = sh
+	var dims := {}
+	if w > 0.0:
+		dims["width_px"] = w
+	if h > 0.0:
+		dims["height_px"] = h
+	return dims
+
+
+## Абсолютная длина в CSS-пикселях: «600», «600px» -> 600.0; em/%/прочее -> -1.0.
+func _length_px(value: String) -> float:
+	value = value.strip_edges().to_lower()
+	if value == "":
+		return -1.0
+	if value.ends_with("px"):
+		value = value.substr(0, value.length() - 2).strip_edges()
+	if value.is_valid_float():
+		return value.to_float()
+	return -1.0
 
 
 func _extract_css_value(style: String, prop: String) -> String:

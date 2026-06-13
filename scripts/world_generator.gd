@@ -19,6 +19,17 @@ const WALL_HEIGHT := 3.2
 const WALL_THICK := 0.3
 const CORRIDOR_WIDTH := 3.0
 
+# --- Масштаб: единый перевод CSS-пикселей страницы в метры мира ---
+# База — кегль основного текста (typography.base_px). Одна строка базового текста
+# занимает M_PER_BASE_LINE метров; всё остальное (заголовки, картинки, таблицы)
+# размеряется тем же коэффициентом _m_per_px, то есть пропорционально этому тексту.
+const M_PER_BASE_LINE := 0.18   # мир-высота глифа базового текста, м
+const LABEL_PIXEL_SIZE := 0.006 # Label3D: 1px кегля Godot -> м (как было)
+const PANEL_WIDTH_M := 2.2      # ширина текстовой таблички-Label3D, м
+const IMAGE_FALLBACK_EM := 20.0 # ширина картинки без размеров в HTML, в «эмах» базы
+# Относительные кегли заголовков (дефолты браузера, h1..h6) в долях базового текста.
+const HEADING_EM := {1: 2.0, 2: 1.5, 3: 1.17, 4: 1.0, 5: 0.83, 6: 0.67}
+
 var _space: Dictionary
 var _rooms: Dictionary
 var _seed: int
@@ -26,6 +37,10 @@ var _rng := RandomNumberGenerator.new()
 var _positions: Dictionary = {}   # roomId -> Vector3 (центр пола)
 var _object_room: Dictionary = {} # objectId -> roomId (для резолва якорей на объекты)
 var _measure_cache: Dictionary = {}
+var _base_url: String = ""        # для резолва относительных src картинок
+var _image_loader: ImageLoader = null  # прогрессивная подгрузка текстур (может быть null)
+var _base_px := 16.0              # базовый кегль текста страницы (typography.base_px)
+var _m_per_px := M_PER_BASE_LINE / 16.0  # масштаб CSS-пиксель -> метр
 
 # Результат генерации, нужный main: где ставить игрока, и таблица меток.
 var spawn_point := Vector3.ZERO
@@ -33,8 +48,12 @@ var label_positions: Dictionary = {}   # anchorId -> Vector3
 
 
 ## Строит геометрию в parent (Node3D). Возвращает себя для доступа к spawn_point.
-static func generate(space: Dictionary, parent: Node3D, seed_value: int, on_transition: Callable) -> WorldGenerator:
+## base_url + image_loader — для прогрессивной подгрузки картинок (могут быть пустыми).
+static func generate(space: Dictionary, parent: Node3D, seed_value: int, on_transition: Callable,
+		base_url: String = "", image_loader: ImageLoader = null) -> WorldGenerator:
 	var g := WorldGenerator.new()
+	g._base_url = base_url
+	g._image_loader = image_loader
 	g._build(space, parent, seed_value, on_transition)
 	return g
 
@@ -44,6 +63,11 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 	_rooms = space.get("rooms", {})
 	_seed = seed_value
 	_rng.seed = seed_value
+	# Масштаб мира из типографики страницы: базовый кегль -> метры на пиксель.
+	_base_px = float(space.get("typography", {}).get("base_px", 16.0))
+	if _base_px <= 0.0:
+		_base_px = 16.0
+	_m_per_px = M_PER_BASE_LINE / _base_px
 	var root_id: int = space.get("root", -1)
 	if root_id == -1 or not _rooms.has(root_id):
 		return
@@ -215,9 +239,17 @@ func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable) -
 
 
 func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> void:
-	# Объект с функцией перехода — это портал (поверх любого типа, §3 топологии).
 	var fn = obj.get("function", null)
-	if fn != null and typeof(fn) == TYPE_DICTIONARY:
+	var is_link: bool = fn != null and typeof(fn) == TYPE_DICTIONARY
+
+	# Картинка (в т.ч. картинка-ссылка) -> реальная текстура на квад, подгружается прогрессивно.
+	# Несёт функцию перехода прямо в панели, поэтому отдельным порталом её НЕ оборачиваем.
+	if obj.get("type", "") == "image":
+		_build_image_panel(obj, holder, local_pos, yaw, fn if is_link else null, on_transition)
+		return
+
+	# Объект с функцией перехода — это портал (поверх любого типа, §3 топологии).
+	if is_link:
 		var portal: Portal = PORTAL_SCENE.instantiate()
 		portal.setup(fn, _obj_text(obj))
 		holder.add_child(portal)
@@ -234,59 +266,79 @@ func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 			_build_rich_panel(runs, holder, local_pos, yaw, on_transition)
 			return
 
+	# Кегль каждого типа выражен в CSS-пикселях относительно базового текста страницы;
+	# в метры его переводит общий масштаб (_godot_font / _px_to_m).
 	match obj.get("type", "text"):
 		"heading":
+			var level: int = int(obj.get("content", {}).get("level", 2))
+			var px: float = _base_px * float(HEADING_EM.get(level, 1.0))
 			_build_panel(holder, local_pos, yaw, _obj_text(obj),
-				Color(0.95, 0.85, 0.4), 2.4, 64)
-		"image":
-			_build_panel(holder, local_pos, yaw, "🖼 " + _obj_text(obj),
-				Color(0.4, 0.5, 0.7), 1.8, 40)
+				Color(0.95, 0.85, 0.4), px)
 		"media":
 			_build_panel(holder, local_pos, yaw, "▷ " + _obj_text(obj),
-				Color(0.25, 0.25, 0.3), 2.0, 40)
+				Color(0.25, 0.25, 0.3), _base_px)
 		"button", "input":
 			_build_panel(holder, local_pos, yaw, "▢ " + _obj_text(obj),
-				Color(0.5, 0.7, 0.5), 1.4, 40)
+				Color(0.5, 0.7, 0.5), _base_px)
 		"list":
 			# Со ссылками внутри -> кликабельный RichPanel; иначе дешёвый Label3D.
 			if _list_has_links(obj):
 				_build_rich_panel(_list_runs(obj), holder, local_pos, yaw, on_transition)
 			else:
 				_build_panel(holder, local_pos, yaw, _list_text(obj),
-					Color(0.6, 0.6, 0.65), 2.2, 32)
+					Color(0.6, 0.6, 0.65), _base_px)
 		"table":
 			if _table_has_links(obj):
 				_build_rich_panel(_table_runs(obj), holder, local_pos, yaw, on_transition)
 			else:
 				_build_panel(holder, local_pos, yaw, _table_text(obj),
-					Color(0.55, 0.6, 0.6), 2.4, 28)
+					Color(0.55, 0.6, 0.6), _base_px * 0.9)
 		_:
 			_build_panel(holder, local_pos, yaw, _obj_text(obj),
-				Color(0.85, 0.85, 0.85), 1.6, 36)
+				Color(0.85, 0.85, 0.85), _base_px)
 
 
-func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, color: Color, height: float, font_size: int) -> void:
+## Текстовая табличка-Label3D. font_css_px — кегль текста в CSS-пикселях страницы;
+## и кегль шрифта, и высота таблички выводятся из него общим масштабом мира.
+func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, color: Color, font_css_px: float) -> void:
 	var node := Node3D.new()
 	holder.add_child(node)
 	node.position = local_pos
 	node.rotation.y = yaw
+	var font := _godot_font(font_css_px)
+	var glyph_m := _px_to_m(font_css_px)
+	var clipped := _truncate(text, 220)
+	var height := _panel_height(clipped, glyph_m)
 	# Тонкая «табличка».
-	_add_box(node, Vector3(2.2, height, 0.15), Vector3(0, height * 0.5, 0), color, false)
+	_add_box(node, Vector3(PANEL_WIDTH_M, height, 0.15), Vector3(0, height * 0.5, 0), color, false)
 	var label := Label3D.new()
-	label.text = _truncate(text, 220)
-	label.font_size = font_size
-	label.outline_size = max(8, int(font_size * 0.25))
-	label.pixel_size = 0.006
-	label.width = 360
+	label.text = clipped
+	label.font_size = font
+	label.outline_size = max(8, int(font * 0.25))
+	label.pixel_size = LABEL_PIXEL_SIZE
+	# Перенос по ширине таблички: width в пикселях кегля -> метры = width * pixel_size.
+	label.width = int(PANEL_WIDTH_M / LABEL_PIXEL_SIZE)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.position = Vector3(0, height * 0.5, 0.1)
 	node.add_child(label)
 
 
+## Высота таблички под текст: оценка числа строк (явные переносы + перенос по ширине)
+## на мир-высоту глифа. Так короткий заголовок — низкая табличка, абзац — высокая.
+func _panel_height(text: String, glyph_m: float) -> float:
+	var char_w: float = max(0.001, glyph_m * 0.5)
+	var per_line: float = max(1.0, PANEL_WIDTH_M / char_w)
+	var explicit := 1 + text.count("\n")
+	var wrapped := int(ceil(text.length() / per_line))
+	var lines: int = max(explicit, wrapped)
+	return clampf(lines * glyph_m * 1.5 + 0.4, 1.0, 6.0)
+
+
 func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> void:
 	var panel: RichPanel = RICH_PANEL_SCENE.instantiate()
-	panel.setup(runs)
+	# Кегль абзаца — базовый текст страницы, как и у дешёвых Label3D-табличек.
+	panel.setup(runs, _px_to_m(_base_px))
 	holder.add_child(panel)
 	panel.rotation.y = yaw
 	# Центрируем панель по высоте на уровне глаз, не утапливая в пол.
@@ -294,6 +346,32 @@ func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: flo
 	panel.position = local_pos + Vector3(0, max(1.6, half + 0.3), 0)
 	if on_transition.is_valid():
 		panel.link_activated.connect(on_transition)
+
+
+## Картинка: ставит ImagePanel с заглушкой и просит лоадер подтянуть текстуру.
+## transition != null -> картинка-ссылка (кликабельна, шлёт переход в общий обработчик).
+func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float,
+		transition, on_transition: Callable) -> void:
+	var content: Dictionary = obj.get("content", {})
+	var alt: String = str(content.get("alt", content.get("text", "")))
+	# Размеры картинки из HTML (width/height в px) в метры тем же масштабом, что и текст:
+	# картинка оказывается во столько раз крупнее строки, во сколько на странице. 0 = не задано.
+	var want_w := _px_to_m(float(content.get("width_px", 0.0)))
+	var want_h := _px_to_m(float(content.get("height_px", 0.0)))
+	# Картинка без размеров в HTML стартует с ~20em базового текста по ширине.
+	var fallback_w := _px_to_m(_base_px * IMAGE_FALLBACK_EM)
+	var panel := ImagePanel.new()
+	panel.setup(alt, transition, want_w, want_h, fallback_w)
+	holder.add_child(panel)
+	panel.position = local_pos
+	panel.rotation.y = yaw
+	if transition != null and on_transition.is_valid():
+		panel.link_activated.connect(on_transition)
+
+	var src: String = str(content.get("src", ""))
+	if src != "" and _image_loader != null:
+		var url := PageFetcher.resolve_url(src, _base_url)
+		panel.request_load(url, _image_loader)
 
 
 func _runs_have_links(runs: Array) -> bool:
@@ -343,6 +421,18 @@ func _resolve_labels(labels: Dictionary) -> void:
 			label_positions[anchor_id] = _positions[_object_room[target_id]] + Vector3(0, 1.0, 0)
 
 
+# --- Масштаб (CSS-пиксели страницы -> метры мира) ---
+
+func _px_to_m(px: float) -> float:
+	return px * _m_per_px
+
+
+## Кегль Label3D (в пикселях Godot) для текста с CSS-кеглем css_px: мир-высота глифа
+## получается = css_px * _m_per_px, а Label3D даёт font_size * LABEL_PIXEL_SIZE метров.
+func _godot_font(css_px: float) -> int:
+	return max(8, int(round(css_px * _m_per_px / LABEL_PIXEL_SIZE)))
+
+
 # --- Низкоуровневые помощники ---
 
 func _add_wall_x(holder: Node3D, x: float, color: Color) -> void:
@@ -379,23 +469,25 @@ func _add_box(holder: Node3D, size: Vector3, local_pos: Vector3, color: Color, c
 
 func _perimeter_slots(count: int, inset: float) -> Array:
 	# Возвращает [{pos, yaw}] равномерно по 4 сторонам, лицом к центру.
+	# Порядок — по часовой стрелке (слева направо, сверху вниз).
+	# Вид сверху от точки спавна: -Z = верх (дальняя стена), +X = право, +Z = низ, -X = лево.
 	var slots: Array = []
 	var per_side := int(ceil(count / 4.0))
 	var step := (inset * 2.0) / float(per_side + 1)
-	# Стороны: 0=+Z(перед, к выходу не ставим первым), 1=-X, 2=-Z, 3=+X
+	# dir задаёт направление обхода стены, чтобы общий путь шёл по часовой стрелке.
 	var sides := [
-		{"axis": Vector3(1, 0, 0), "base": Vector3(0, 0, -inset), "yaw": 0.0},        # задняя стена, лицом +Z
-		{"axis": Vector3(0, 0, 1), "base": Vector3(-inset, 0, 0), "yaw": PI * 0.5},   # левая
-		{"axis": Vector3(1, 0, 0), "base": Vector3(0, 0, inset), "yaw": PI},          # передняя
-		{"axis": Vector3(0, 0, 1), "base": Vector3(inset, 0, 0), "yaw": -PI * 0.5},   # правая
+		{"axis": Vector3(1, 0, 0), "base": Vector3(0, 0, -inset), "yaw": 0.0,        "dir": 1.0},   # задняя (верх): слева направо
+		{"axis": Vector3(0, 0, 1), "base": Vector3(inset, 0, 0),  "yaw": -PI * 0.5,  "dir": 1.0},   # правая: сверху вниз
+		{"axis": Vector3(1, 0, 0), "base": Vector3(0, 0, inset),  "yaw": PI,         "dir": -1.0},  # передняя (низ): справа налево
+		{"axis": Vector3(0, 0, 1), "base": Vector3(-inset, 0, 0), "yaw": PI * 0.5,   "dir": -1.0},  # левая: снизу вверх
 	]
 	var placed := 0
 	for s in range(4):
 		for k in range(per_side):
 			if placed >= count:
 				break
-			var offset: float = -inset + step * (k + 1)
 			var side: Dictionary = sides[s]
+			var offset: float = (-inset + step * (k + 1)) * (side["dir"] as float)
 			var pos: Vector3 = side["base"] + (side["axis"] as Vector3) * offset
 			slots.append({"pos": pos, "yaw": side["yaw"]})
 			placed += 1
