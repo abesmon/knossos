@@ -163,16 +163,39 @@ func _process(node: HtmlNode) -> Dictionary:
 		var conn_id := _make_room("connector", child_loose, child_rooms, node)
 		return {"rooms": [conn_id], "loose": []}
 
-	if child_rooms.size() == 1 and child_loose.is_empty():
-		# Цепочка-«леса» с одним значимым ребёнком — схлопывается (§4.4),
-		# если CSS не требует сохранить контейнер как стену/пол.
-		if _has_visual_box(node):
-			var wrap_id := _make_room("room", [], child_rooms, node)
-			return {"rooms": [wrap_id], "loose": []}
-		return {"rooms": child_rooms, "loose": []}
+	if child_rooms.size() == 1:
+		# Неветвящийся узел: ровно одно дочернее пространство. Узел лежит на «пути»,
+		# а не на границе комнаты, поэтому комнату-в-комнате не плодим (§4.4, правило B).
+		var only_id: int = child_rooms[0]
+		if child_loose.is_empty():
+			# Чистая цепочка-«леса»: один ребёнок, своих листьев нет — схлопываем.
+			# CSS-box (стена/пол) требует сохранить контейнер как отдельное пространство.
+			if _has_visual_box(node):
+				var wrap_id := _make_room("room", [], child_rooms, node)
+				return {"rooms": [wrap_id], "loose": []}
+			_register_anchor(node, only_id)  # якорь схлопнутого контейнера не теряем
+			return {"rooms": [only_id], "loose": []}
+		# Один ребёнок + свои свободные листья. Линейная цепочка: листья ВЛИВАЮТСЯ в
+		# единственную комнату, узел схлопывается — не оборачиваем комнату в комнату.
+		# Стоп: box узла (стена) либо ребёнок-соединитель / визуальная карточка
+		# (own css) — туда контент сверху не вливаем, оставляем как вложенное.
+		var only: Dictionary = _rooms[only_id]
+		if not _has_visual_box(node) and only["kind"] == "room" and not only["hints"].has("css"):
+			only["objects"] = child_loose + only["objects"]
+			only["hints"]["weight"] = int(only["hints"].get("weight", 0)) + child_loose.size()
+			var sem := _semantic_tag(node.tag)
+			if sem != "" and not only["hints"].has("semanticTag"):
+				only["hints"]["semanticTag"] = sem
+			_register_anchor(node, only_id)
+			_record_source(only_id, node)
+			return {"rooms": [only_id], "loose": []}
+		var wrap_id2 := _make_room("room", child_loose, child_rooms, node)
+		return {"rooms": [wrap_id2], "loose": []}
 
-	if child_rooms.is_empty() and child_loose.is_empty():
+	if child_loose.is_empty():
 		return empty
+
+	# Отсюда: дочерних комнат нет, есть только свободные листья.
 
 	# Обёртка вокруг одних заголовков — это подпись, а не комната (§5). Заголовок —
 	# label к контенту, что идёт после него; он не «якорит» собственное пространство.
@@ -180,12 +203,21 @@ func _process(node: HtmlNode) -> Dictionary:
 	# к ближайшему выжившему пространству-предку, где встают объектами-соседями с этим
 	# контентом. Так чинится «div.mw-heading вокруг <h3>», который иначе боксился в комнату
 	# на уровень ниже соседних абзацев. CSS-box (стена/рамка) блокирует схлопывание (§4).
-	if child_rooms.is_empty() and _all_headings(child_loose) and not _has_visual_box(node):
+	if _all_headings(child_loose) and not _has_visual_box(node):
 		return {"rooms": [], "loose": child_loose}
 
-	# 0..1 комната + свободные листья -> формируем комнату из листьев,
-	# вложенную комнату (если есть) держим как ребёнка.
-	var room_id := _make_room("room", child_loose, child_rooms, node)
+	# Правило A: контейнер вокруг ОДНОГО листа комнатой не становится — лист всплывает
+	# наверх как loose и кластеризуется с соседями на ближайшем выжившем пространстве.
+	# Так распускаются «леса» вокруг одиночного списка/картинки/текста, а тонкие сиблинги
+	# (по 1 листу в каждом) собираются в одну комнату, а не в россыпь комнат-одиночек.
+	# Стоп: семантический тег (section/article/nav/... — настоящее пространство) или
+	# CSS-box (визуальная карточка) — там одиночный лист остаётся собственной комнатой.
+	if child_loose.size() == 1 and _semantic_tag(node.tag) == "" and not _has_visual_box(node):
+		_register_anchor(node, child_loose[0]["id"])  # якорь обёртки -> на сам объект
+		return {"rooms": [], "loose": child_loose}
+
+	# >=2 листьев (или семантика/box) -> кристаллизуем комнату из листьев.
+	var room_id := _make_room("room", child_loose, [], node)
 	return {"rooms": [room_id], "loose": []}
 
 
