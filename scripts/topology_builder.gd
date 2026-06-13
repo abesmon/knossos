@@ -1,15 +1,25 @@
 class_name TopologyBuilder
 extends RefCounted
 
-## Фаза топологии (docs/html-to-3d-topology.md): дерево HtmlNode -> сериализуемый
-## артефакт §1 БЕЗ единой 3D-координаты. Геометрия его не касается — между ними
-## только этот Dictionary.
+## Фаза топологии (docs/content-sectioning.md): дерево HtmlNode -> сериализуемый
+## артефакт БЕЗ единой 3D-координаты. Геометрия его не касается — между ними только
+## этот Dictionary.
+##
+## МОДЕЛЬ: иерархия комнат строится по ОГЛАВЛЕНИЮ ЗАГОЛОВКОВ, а не по вложенности DOM.
+##   1. Линеаризация (§2): обход контента в порядке чтения -> поток маркеров
+##      HEADING(rank) / object / anchor / css. Контейнеры схлопываются полностью.
+##   2. Сегментация (§4): стек по рангам. Заголовок ранга R закрывает секции ранга ≥R и
+##      открывает новую; контент до следующего заголовка — наполнение секции. Секция ->
+##      комната; подсекции (заголовки младше) -> вложенные комнаты.
+##   3. Внутри секции — ПЛОСКИЙ список терминальных объектов, без под-комнат (§6).
+## Нет заголовков -> одна корневая комната с плоским мешком объектов.
 ##
 ## Артефакт:
 ## {
 ##   "rooms": { id: Room },     # плоский словарь всех комнат/соединителей
 ##   "root":  id,               # корневое пространство
-##   "labels": { anchorId: id } # цели якорей #id -> комната/объект
+##   "labels": { anchorId: id }, # цели якорей #id -> комната/объект
+##   "typography": { base_px }   # базовый кегль текста (масштаб геометрии)
 ## }
 ## Room   = { id, kind:"room"|"connector", objects:[Object], children:[id], hints:{...} }
 ## Object = { id, type, function:Transition|null, content:{...} }
@@ -27,7 +37,7 @@ const HEADING_TAGS := {
 
 ## Phrasing / inline-теги: их содержимое — часть текстового потока, а не отдельные
 ## пространства. Контейнер, где ВСЁ содержимое такое, сворачивается в один rich-text
-## объект (абзац) с inline-ссылками, а не дробится на множество объектов.
+## объект (абзац) с inline-ссылками — либо распознаётся как визуальный заголовок.
 const PHRASING_TAGS := {
 	"a": true, "span": true, "em": true, "strong": true, "b": true, "i": true,
 	"u": true, "s": true, "strike": true, "small": true, "big": true, "sub": true,
@@ -35,12 +45,14 @@ const PHRASING_TAGS := {
 	"kbd": true, "samp": true, "var": true, "time": true, "label": true, "bdi": true,
 	"bdo": true, "wbr": true, "br": true, "tt": true, "ins": true, "del": true,
 	"font": true, "nobr": true, "ruby": true, "rt": true, "rp": true, "data": true,
+	"center": true,
 }
 
 # Внутреннее состояние построителя.
 var _rooms: Dictionary = {}      # id -> Room
 var _labels: Dictionary = {}     # anchorId -> id
 var _next_id: int = 0
+var _base_px: float = 16.0       # базовый кегль страницы (нужен детектору заголовков)
 var _debug: bool = false         # собирать ли карту id -> исходный HTML (только для отладки)
 var _sources: Dictionary = {}    # id -> реконструированный HTML (заполняется при _debug)
 
@@ -56,24 +68,17 @@ static func build(root: HtmlNode, debug: bool = false) -> Dictionary:
 
 func _build(root: HtmlNode) -> Dictionary:
 	var body := _find_body(root)
-	var res := _process(body)
-	var top: Array = res["rooms"]
-	var loose: Array = res["loose"]
+	# Типографику считаем ПЕРВОЙ: базовый кегль нужен детектору визуальных заголовков
+	# (ранг — от относительного размера к base_px) и масштабу геометрии (§13 старого дока).
+	_base_px = _compute_base_px(body)
 
-	var root_id: int
-	if top.size() == 1 and loose.is_empty():
-		root_id = top[0]
-	else:
-		# Осталось несколько верхних пространств и/или свободные листья — оборачиваем.
-		var kind := "connector" if top.size() >= 2 else "room"
-		root_id = _make_room(kind, loose, top, null)
+	var stream: Array = []
+	_linearize(body, stream)
+	var root_id := _segment(stream, body)
 
-	# Типографика страницы: базовый кегль текста. Геометрия выводит из него единый
-	# масштаб «CSS-пиксель -> метр», относительно которого размеряет всё остальное
-	# (заголовки, картинки, таблицы). См. docs/html-to-3d-topology.md §F.
 	var artifact := {
 		"rooms": _rooms, "root": root_id, "labels": _labels,
-		"typography": {"base_px": _compute_base_px(body)},
+		"typography": {"base_px": _base_px},
 	}
 	if _debug:
 		artifact["sources"] = _sources
@@ -92,165 +97,216 @@ func _find_body(root: HtmlNode) -> HtmlNode:
 	return root
 
 
-## Возвращает { "rooms": [id...], "loose": [Object...] }.
-## rooms — уже сформированные пространства (комнаты/соединители).
-## loose — свободные листья-объекты, ещё не приписанные ни к одной комнате.
-func _process(node: HtmlNode) -> Dictionary:
-	var empty := {"rooms": [], "loose": []}
-	if node == null:
-		return empty
+# --- Фаза 1: линеаризация в поток маркеров (порядок чтения) ---
 
+## Маркеры потока:
+##   {kind:"heading", rank, obj, node} — заголовок (явный или визуальный)
+##   {kind:"object",  obj}             — терминальный объект (image/text/list/table/...)
+##   {kind:"anchor",  id}              — id схлопнутого контейнера (для labels)
+##   {kind:"css",     css}            — визуальный box контейнера (bg/border) для хинтов
+func _linearize(node: HtmlNode, stream: Array) -> void:
+	if node == null:
+		return
 	if node.is_text():
 		var t := node.text.strip_edges()
-		if t == "":
-			return empty
-		return {"rooms": [], "loose": [_text_object(t)]}
+		if t != "":
+			stream.append({"kind": "object", "obj": _text_object(t)})
+		return
 
 	var tag := node.tag
 	if SKIP_TAGS.get(tag, false):
-		return empty
+		return
 	if _is_hidden(node):
-		return empty
+		return
 
-	# --- Листовые типы объектов (классификация по содержимому, §3) ---
+	# --- Терминальные объекты (классификация по содержимому, §3 старого дока) ---
 	match tag:
 		"img":
 			var img_content := {"src": node.get_attr("src"), "alt": node.get_attr("alt")}
 			img_content.merge(_image_dims(node))
-			return {"rooms": [], "loose": [_leaf_object(node, "image", img_content)]}
+			stream.append({"kind": "object", "obj": _leaf_object(node, "image", img_content)})
+			return
 		"video", "audio", "iframe", "canvas", "embed":
-			return {"rooms": [], "loose": [_leaf_object(node, "media", {
+			stream.append({"kind": "object", "obj": _leaf_object(node, "media", {
 				"src": node.get_attr("src"), "text": node.collect_text(),
-			})]}
+			})})
+			return
 		"button":
-			return {"rooms": [], "loose": [_leaf_object(node, "button", {
+			stream.append({"kind": "object", "obj": _leaf_object(node, "button", {
 				"text": node.collect_text(),
-			})]}
+			})})
+			return
 		"input", "textarea", "select":
-			return {"rooms": [], "loose": [_leaf_object(node, "input", {
+			stream.append({"kind": "object", "obj": _leaf_object(node, "input", {
 				"text": node.get_attr("placeholder", node.get_attr("value", node.collect_text())),
 				"input_type": node.get_attr("type", "text"),
-			})]}
+			})})
+			return
 		"ul", "ol":
 			# Гомогенный повтор -> один объект-коллекция (§7), а не N комнат.
-			return {"rooms": [], "loose": [_list_object(node)]}
+			stream.append({"kind": "object", "obj": _list_object(node)})
+			return
 		"table":
 			# Таблица — цельный объект (§7), а не россыпь комнат из <tr>/<td>.
-			# Это буквально объект-таблица, стоящий В комнате, как и список.
-			return {"rooms": [], "loose": [_table_object(node)]}
+			stream.append({"kind": "object", "obj": _table_object(node)})
+			return
+		"form":
+			# Форма — цельный интерактивный объект-коллекция (как список/таблица).
+			stream.append({"kind": "object", "obj": _form_object(node)})
+			return
 		"a":
-			return {"rooms": [], "loose": [_anchor_object(node)]}
+			stream.append({"kind": "object", "obj": _anchor_object(node)})
+			return
 		"h1", "h2", "h3", "h4", "h5", "h6":
-			return {"rooms": [], "loose": [_leaf_object(node, "heading", {
-				"text": node.collect_text(), "level": int(tag.substr(1)),
-			})]}
+			# Явный заголовок: ранг = уровень тега (намерение автора бьёт кегль, §3.1).
+			stream.append(_heading_marker(node, int(tag.substr(1))))
+			return
 		"br", "hr":
-			return empty
+			return
 
-	# --- Абзац: чистый inline-контент сворачивается в ОДИН rich-text объект ---
-	# (текст + inline-ссылки одним блоком, без дробления на панели).
+	# --- Чистый inline-блок: визуальный заголовок ЛИБО абзац (rich-text) ---
 	if _is_pure_inline(node):
-		var runs := _build_runs(node)
-		if _runs_have_text(runs):
-			return {"rooms": [], "loose": [_rich_text_object(node, runs)]}
-		return empty
+		var rank := HeadingDetector.visual_rank(node, _base_px)
+		if rank > 0:
+			stream.append(_heading_marker(node, rank))
+		else:
+			var runs := _build_runs(node)
+			if _runs_have_text(runs):
+				stream.append({"kind": "object", "obj": _rich_text_object(node, runs)})
+		return
 
-	# --- Контейнер: контракция снизу вверх (§4) ---
-	var child_rooms: Array = []
-	var child_loose: Array = []
+	# --- Контейнер: схлопывается полностью; комнат не порождает (§6) ---
+	# Сохраняем id (якорь) и визуальный box контейнера как pending-маркеры — сегментатор
+	# прикрепит их к ближайшей открывающейся секции (если за ними сразу идёт заголовок)
+	# или к текущей секции (если пошёл контент). См. _segment.
+	if node.has_attr("id"):
+		stream.append({"kind": "anchor", "id": node.get_attr("id")})
+	var box := _css_hints(node)
+	if not box.is_empty():
+		stream.append({"kind": "css", "css": box})
 	for c in node.children:
-		var r := _process(c)
-		child_rooms.append_array(r["rooms"])
-		child_loose.append_array(r["loose"])
-
-	if child_rooms.size() >= 2:
-		# >=2 готовых комнаты -> узел становится соединителем; слияние вверх стоп.
-		# Свободные листья декорируют соединитель (§5).
-		var conn_id := _make_room("connector", child_loose, child_rooms, node)
-		return {"rooms": [conn_id], "loose": []}
-
-	if child_rooms.size() == 1:
-		# Неветвящийся узел: ровно одно дочернее пространство. Узел лежит на «пути»,
-		# а не на границе комнаты, поэтому комнату-в-комнате не плодим (§4.4, правило B).
-		var only_id: int = child_rooms[0]
-		if child_loose.is_empty():
-			# Чистая цепочка-«леса»: один ребёнок, своих листьев нет — схлопываем.
-			# CSS-box (стена/пол) требует сохранить контейнер как отдельное пространство.
-			if _has_visual_box(node):
-				var wrap_id := _make_room("room", [], child_rooms, node)
-				return {"rooms": [wrap_id], "loose": []}
-			_register_anchor(node, only_id)  # якорь схлопнутого контейнера не теряем
-			return {"rooms": [only_id], "loose": []}
-		# Один ребёнок + свои свободные листья. Линейная цепочка: листья ВЛИВАЮТСЯ в
-		# единственную комнату, узел схлопывается — не оборачиваем комнату в комнату.
-		# Стоп: box узла (стена) либо ребёнок-соединитель / визуальная карточка
-		# (own css) — туда контент сверху не вливаем, оставляем как вложенное.
-		var only: Dictionary = _rooms[only_id]
-		if not _has_visual_box(node) and only["kind"] == "room" and not only["hints"].has("css"):
-			only["objects"] = child_loose + only["objects"]
-			only["hints"]["weight"] = int(only["hints"].get("weight", 0)) + child_loose.size()
-			var sem := _semantic_tag(node.tag)
-			if sem != "" and not only["hints"].has("semanticTag"):
-				only["hints"]["semanticTag"] = sem
-			_register_anchor(node, only_id)
-			_record_source(only_id, node)
-			return {"rooms": [only_id], "loose": []}
-		var wrap_id2 := _make_room("room", child_loose, child_rooms, node)
-		return {"rooms": [wrap_id2], "loose": []}
-
-	if child_loose.is_empty():
-		return empty
-
-	# Отсюда: дочерних комнат нет, есть только свободные листья.
-
-	# Обёртка вокруг одних заголовков — это подпись, а не комната (§5). Заголовок —
-	# label к контенту, что идёт после него; он не «якорит» собственное пространство.
-	# Контейнер комнатой не становится: заголовки всплывают наверх как loose и прилипают
-	# к ближайшему выжившему пространству-предку, где встают объектами-соседями с этим
-	# контентом. Так чинится «div.mw-heading вокруг <h3>», который иначе боксился в комнату
-	# на уровень ниже соседних абзацев. CSS-box (стена/рамка) блокирует схлопывание (§4).
-	if _all_headings(child_loose) and not _has_visual_box(node):
-		return {"rooms": [], "loose": child_loose}
-
-	# Правило A: контейнер вокруг ОДНОГО листа комнатой не становится — лист всплывает
-	# наверх как loose и кластеризуется с соседями на ближайшем выжившем пространстве.
-	# Так распускаются «леса» вокруг одиночного списка/картинки/текста, а тонкие сиблинги
-	# (по 1 листу в каждом) собираются в одну комнату, а не в россыпь комнат-одиночек.
-	# Стоп: семантический тег (section/article/nav/... — настоящее пространство) или
-	# CSS-box (визуальная карточка) — там одиночный лист остаётся собственной комнатой.
-	if child_loose.size() == 1 and _semantic_tag(node.tag) == "" and not _has_visual_box(node):
-		_register_anchor(node, child_loose[0]["id"])  # якорь обёртки -> на сам объект
-		return {"rooms": [], "loose": child_loose}
-
-	# >=2 листьев (или семантика/box) -> кристаллизуем комнату из листьев.
-	var room_id := _make_room("room", child_loose, [], node)
-	return {"rooms": [room_id], "loose": []}
+		_linearize(c, stream)
 
 
-# --- Конструкторы пространства ---
+func _heading_marker(node: HtmlNode, rank: int) -> Dictionary:
+	var obj := _leaf_object(node, "heading", {
+		"text": node.collect_text(), "level": clampi(rank, 1, 6),
+	})
+	return {"kind": "heading", "rank": rank, "obj": obj, "node": node}
 
-func _make_room(kind: String, objects: Array, children: Array, node) -> int:
+
+# --- Фаза 2: сегментация по рангам заголовков (стек) ---
+
+## Строит дерево секций из потока §1 и материализует его в комнаты. Возвращает root id.
+func _segment(stream: Array, body: HtmlNode) -> int:
+	var root_sec := _new_section(0, null, body)   # rank 0 — преамбула (до первого заголовка)
+	var stack: Array = [root_sec]
+	var pending_anchors: Array = []
+	var pending_css: Dictionary = {}
+
+	for item in stream:
+		match item["kind"]:
+			"heading":
+				var r: int = item["rank"]
+				# Закрываем все секции равного/младшего ранга (§4).
+				while stack.size() > 1 and int(stack[-1]["rank"]) >= r:
+					stack.pop_back()
+				var sec := _new_section(r, item["obj"], item["node"])
+				(stack[-1]["children"] as Array).append(sec)
+				stack.append(sec)
+				# Контейнер обрамлял ИМЕННО этот заголовок -> его id/box едут в новую секцию.
+				_flush_pending(sec, pending_anchors, pending_css)
+				pending_anchors = []
+				pending_css = {}
+			"object":
+				# Контент пошёл в текущую секцию -> pending принадлежит ей.
+				_flush_pending(stack[-1], pending_anchors, pending_css)
+				pending_anchors = []
+				pending_css = {}
+				(stack[-1]["objects"] as Array).append(item["obj"])
+			"anchor":
+				pending_anchors.append(item["id"])
+			"css":
+				_merge_into(pending_css, item["css"])
+
+	_flush_pending(stack[-1], pending_anchors, pending_css)
+
+	# Пустая корневая обёртка (нет своего наполнения и ровно один ребёнок) — не плодим
+	# лишнюю комнату-в-комнате: верхняя секция документа становится корнем сама.
+	if root_sec["title"] == null and (root_sec["objects"] as Array).is_empty() \
+			and (root_sec["anchors"] as Array).is_empty() and (root_sec["css"] as Dictionary).is_empty() \
+			and (root_sec["children"] as Array).size() == 1:
+		return _materialize_section((root_sec["children"] as Array)[0])
+	return _materialize_section(root_sec)
+
+
+func _new_section(rank: int, title, node) -> Dictionary:
+	return {
+		"rank": rank, "title": title, "node": node,
+		"objects": [], "children": [], "anchors": [], "css": {},
+	}
+
+
+func _flush_pending(sec: Dictionary, anchors: Array, css: Dictionary) -> void:
+	for aid in anchors:
+		(sec["anchors"] as Array).append(aid)
+	_merge_into(sec["css"], css)
+
+
+## Рекурсивно превращает дерево секций в комнаты артефакта. Возвращает id комнаты.
+func _materialize_section(sec: Dictionary) -> int:
+	var child_ids: Array = []
+	for child in sec["children"]:
+		child_ids.append(_materialize_section(child))
+
+	var objects: Array = []
+	if sec["title"] != null:
+		objects.append(sec["title"])   # заголовок секции — первый объект (подпись комнаты)
+	objects.append_array(sec["objects"])
+
 	var id := _alloc()
 	var weight := objects.size()
-	for child_id in children:
-		weight += int(_rooms[child_id]["hints"].get("weight", 0))
+	for cid in child_ids:
+		weight += int(_rooms[cid]["hints"].get("weight", 0))
+
+	# Соединитель — секция, чья роль ТОЛЬКО ветвиться: ≥2 детей и никакого своего наполнения.
+	# Иначе обычная комната (возможно с детьми). Степень — хинт геометрии (§6 старого дока).
+	var kind := "connector" if (child_ids.size() >= 2 and objects.is_empty()) else "room"
 	var hints := {"weight": weight}
-	if kind == "connector":
-		hints["degree"] = children.size()
+	if child_ids.size() >= 2:
+		hints["degree"] = child_ids.size()
+
+	var node = sec["node"]
 	if node != null:
 		var sem := _semantic_tag(node.tag)
 		if sem != "":
 			hints["semanticTag"] = sem
-		var css := _css_hints(node)
-		if not css.is_empty():
-			hints["css"] = css
+	var css := {}
+	_merge_into(css, sec["css"])
+	if node != null:
+		_merge_into(css, _css_hints(node))
+	if not css.is_empty():
+		hints["css"] = css
+
 	_rooms[id] = {
 		"id": id, "kind": kind, "objects": objects,
-		"children": children, "hints": hints,
+		"children": child_ids, "hints": hints,
 	}
-	_register_anchor(node, id)
+
+	# Якоря: id-ы схлопнутых контейнеров секции + id самого заголовка -> на эту комнату
+	# (teleport #id приводит игрока в комнату секции, а не в объект-подпись).
+	for aid in sec["anchors"]:
+		_labels[aid] = id
+	if node != null and node.get_attr("id") != "":
+		_labels[node.get_attr("id")] = id
 	_record_source(id, node)
 	return id
+
+
+func _merge_into(dst: Dictionary, src: Dictionary) -> void:
+	for k in src:
+		if not dst.has(k):
+			dst[k] = src[k]
 
 
 # --- Конструкторы объектов ---
@@ -299,8 +355,8 @@ func _is_pure_inline(node: HtmlNode) -> bool:
 
 
 ## Линеаризует inline-поддерево в массив «прогонов» (runs) в порядке чтения.
-## run = { "text": String, "function": Transition|null }. Ссылки становятся
-## отдельными прогонами с функцией перехода; смежный обычный текст склеивается.
+## run = { "text": String, "function": Transition|null }. Ссылки становятся отдельными
+## прогонами с функцией перехода; смежный обычный текст склеивается.
 func _build_runs(node: HtmlNode) -> Array:
 	var runs: Array = []
 	_collect_runs(node, runs)
@@ -336,17 +392,6 @@ func _append_text_run(runs: Array, text: String) -> void:
 		runs.append({"text": text, "function": null})
 
 
-## true, если непустой набор loose-листьев состоит ИСКЛЮЧИТЕЛЬНО из заголовков.
-## Такой контейнер — обёртка-подпись, а не комната (см. ветку схлопывания в _process).
-func _all_headings(objects: Array) -> bool:
-	if objects.is_empty():
-		return false
-	for o in objects:
-		if o.get("type", "") != "heading":
-			return false
-	return true
-
-
 func _runs_have_text(runs: Array) -> bool:
 	for r in runs:
 		if str(r.get("text", "")).strip_edges() != "":
@@ -374,16 +419,15 @@ func _list_object(node: HtmlNode) -> Dictionary:
 			continue
 		# Содержимое элемента линеаризуется в «прогоны» (как абзац, §3): каждая <a href>
 		# внутри становится отдельным прогоном со своей Transition, текст склеивается.
-		# Так ссылки внутри пункта списка не теряются и остаются кликабельными в мире (§7).
 		items.append({"text": li.collect_text(), "runs": _build_runs(li)})
 	var obj := {"id": _alloc(), "type": "list", "function": null, "content": {"items": items}}
+	_register_anchor(node, obj["id"])
 	_record_source(obj["id"], node)
 	return obj
 
 
 ## Таблица -> один объект-коллекция (§7). Строки собираются сквозь обёртки
-## <thead>/<tbody>/<tfoot>; ячейка = { text, function?, header } (как элемент списка
-## в §3: <a> внутри едет с ячейкой функцией перехода). <caption> -> подпись.
+## <thead>/<tbody>/<tfoot>; ячейка = { text, runs, header }. <caption> -> подпись.
 func _table_object(node: HtmlNode) -> Dictionary:
 	var rows: Array = []
 	_collect_table_rows(node, rows)
@@ -416,12 +460,42 @@ func _table_row(row_node: HtmlNode) -> Dictionary:
 	for c in row_node.children:
 		if c.tag != "td" and c.tag != "th":
 			continue
-		# Содержимое ячейки линеаризуется в прогоны (как элемент списка): ссылки внутри
-		# становятся кликабельными прогонами и не теряются в мире (§7).
 		cells.append({"text": c.collect_text(), "runs": _build_runs(c), "header": c.tag == "th"})
 		if c.tag == "th":
 			is_header = true
 	return {"cells": cells, "header": is_header}
+
+
+## Форма -> объект-коллекция: поля (input/textarea/select/button) собираются сквозь
+## обёртки. content.text — плоская сводка полей (дешёвый рендер без спец-актора формы).
+func _form_object(node: HtmlNode) -> Dictionary:
+	var fields: Array = []
+	_collect_form_fields(node, fields)
+	var summary := ""
+	for f in fields:
+		summary += "[" + str(f["input_type"]) + "] " + str(f["text"]) + "  "
+	var obj := {
+		"id": _alloc(), "type": "form", "function": null,
+		"content": {"fields": fields, "text": summary.strip_edges(), "action": node.get_attr("action")},
+	}
+	_register_anchor(node, obj["id"])
+	_record_source(obj["id"], node)
+	return obj
+
+
+func _collect_form_fields(node: HtmlNode, fields: Array) -> void:
+	for c in node.children:
+		match c.tag:
+			"input", "textarea", "select":
+				fields.append({
+					"input_type": c.get_attr("type", "text"),
+					"text": c.get_attr("placeholder", c.get_attr("value", c.collect_text())),
+				})
+			"button":
+				fields.append({"input_type": "button", "text": c.collect_text()})
+			_:
+				if not c.is_text():
+					_collect_form_fields(c, fields)
 
 
 func _transition_for(anchor: HtmlNode):
@@ -518,8 +592,7 @@ func _font_size_px(node: HtmlNode) -> float:
 
 
 ## Картинка -> {width_px?, height_px?} из атрибутов width/height или inline-стиля
-## (CSS перекрывает атрибут). Относительные/процентные значения игнорируются —
-## остаётся только то, что геометрия может перевести в метры через base_px.
+## (CSS перекрывает атрибут). Относительные/процентные значения игнорируются.
 func _image_dims(node: HtmlNode) -> Dictionary:
 	var w := _length_px(node.get_attr("width"))
 	var h := _length_px(node.get_attr("height"))
@@ -559,12 +632,6 @@ func _extract_css_value(style: String, prop: String) -> String:
 	if end == -1:
 		end = style.length()
 	return style.substr(start, end - start).strip_edges()
-
-
-func _has_visual_box(node: HtmlNode) -> bool:
-	# Контейнер с фоном/рамкой несёт визуальную информацию -> схлопывать нельзя (§4).
-	var css := _css_hints(node)
-	return css.has("bg") or css.has("border")
 
 
 func _is_hidden(node: HtmlNode) -> bool:
