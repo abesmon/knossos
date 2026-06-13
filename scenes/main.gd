@@ -40,6 +40,10 @@ func _ready() -> void:
 
 	_set_status("Введите адрес и go! — WASD ходьба, двойной пробел — полёт, ЛКМ/E — портал, Esc — мышь")
 
+	# При запуске сразу ставим фокус в адресную строку, чтобы можно было печатать
+	# без лишнего клика (focus_entered отпускает мышь).
+	_address.grab_focus()
+
 
 func _on_go() -> void:
 	var url := _address.text.strip_edges()
