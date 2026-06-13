@@ -19,6 +19,13 @@ const WALL_HEIGHT := 3.2
 const WALL_THICK := 0.3
 const CORRIDOR_WIDTH := 3.0
 
+# --- Расстановка объектов по стенам (см. docs/html-to-3d-topology.md §F) ---
+const OBJECT_INSET := 1.2       # отступ объекта от своей стены внутрь комнаты, м
+const CORNER_MARGIN := 1.0      # отступ крайних объектов от углов вдоль стены, м
+const SIDE_CAP := 3             # объектов на одну боковую стену до переполнения
+# Свободная центральная полоса прохода на входной/выходной стене: объекты туда не лезут.
+const PASSAGE_CLEAR := CORRIDOR_WIDTH + 1.2
+
 # --- Масштаб: единый перевод CSS-пикселей страницы в метры мира ---
 # База — кегль основного текста (typography.base_px). Одна строка базового текста
 # занимает M_PER_BASE_LINE метров; всё остальное (заголовки, картинки, таблицы)
@@ -229,13 +236,70 @@ func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable) -
 	var objects: Array = room["objects"]
 	if objects.is_empty():
 		return
-	# Расставляем объекты по периметру комнаты, лицом к центру.
-	var inset := ROOM_SIZE * 0.5 - 1.2
-	var slots := _perimeter_slots(objects.size(), inset)
-	for i in objects.size():
-		var obj: Dictionary = objects[i]
+	var has_parent := _has_parent(room["id"])
+	var has_children: bool = not room["children"].is_empty()
+
+	# Заголовок-«вывеска». Первый заголовок комнаты — её титул: вешаем НАД входным
+	# проёмом (-Z), двусторонним текстом (читается и снаружи при подходе, и изнутри).
+	# Второй заголовок, если есть выход, — над выходным проёмом (+Z). Заголовки висят
+	# у верха стены, выше головы, поэтому проходу не мешают (см. docs §F).
+	var headings: Array = []
+	var rest: Array = []
+	for obj in objects:
+		if obj.get("type", "") == "heading":
+			headings.append(obj)
+		else:
+			rest.append(obj)
+
+	var taken := 0
+	if not headings.is_empty():
+		_build_sign(headings[0], holder, -1.0)
+		taken = 1
+	if has_children and headings.size() > taken:
+		_build_sign(headings[taken], holder, 1.0)
+		taken += 1
+	# Лишние заголовки (редкость) — обычными объектами на стены.
+	for i in range(taken, headings.size()):
+		rest.append(headings[i])
+
+	# Остальные объекты — начиная по левую руку вошедшего и далее по часовой стрелке,
+	# по боковым стенам; входную/выходную стены трогаем только при переполнении (§F).
+	var slots := _object_slots(rest.size(), has_parent, has_children)
+	for i in rest.size():
 		var slot: Dictionary = slots[i]
-		_build_object(obj, holder, slot["pos"], slot["yaw"], on_transition)
+		_build_object(rest[i], holder, slot["pos"], slot["yaw"], on_transition)
+
+
+## Заголовок-вывеска над проёмом на стене z_sign (-1 = вход, +1 = выход): две надписи
+## спина-к-спине, у верха стены. Двусторонность — чтобы титул читался с обеих сторон
+## прохода; высокое положение оставляет сам проём свободным.
+func _build_sign(obj: Dictionary, holder: Node3D, z_sign: float) -> void:
+	var level: int = int(obj.get("content", {}).get("level", 2))
+	var px: float = _base_px * float(HEADING_EM.get(level, 1.0))
+	var text := _truncate(_obj_text(obj), 120)
+	var glyph_m := _px_to_m(px)
+	var y: float = WALL_HEIGHT - max(0.5, glyph_m * 0.8)
+	var z: float = z_sign * (ROOM_SIZE * 0.5 - 0.15)
+	var pos := Vector3(0, y, z)
+	# yaw=0 — лицом в +Z, yaw=PI — лицом в -Z; вместе перекрывают обе стороны проёма.
+	_add_sign_label(holder, pos, 0.0, text, Color(0.95, 0.85, 0.4), px)
+	_add_sign_label(holder, pos, PI, text, Color(0.95, 0.85, 0.4), px)
+
+
+func _add_sign_label(holder: Node3D, pos: Vector3, yaw: float, text: String, color: Color, css_px: float) -> void:
+	var label := Label3D.new()
+	label.text = text
+	label.font_size = _godot_font(css_px)
+	label.outline_size = max(8, int(label.font_size * 0.25))
+	label.pixel_size = LABEL_PIXEL_SIZE
+	label.modulate = color
+	label.double_sided = false  # каждая надпись односторонняя; пара даёт корректный текст с двух сторон
+	label.width = int((ROOM_SIZE - 1.0) / LABEL_PIXEL_SIZE)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.position = pos
+	label.rotation.y = yaw
+	holder.add_child(label)
 
 
 func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> void:
@@ -467,31 +531,107 @@ func _add_box(holder: Node3D, size: Vector3, local_pos: Vector3, color: Color, c
 		holder.add_child(body)
 
 
-func _perimeter_slots(count: int, inset: float) -> Array:
-	# Возвращает [{pos, yaw}] равномерно по 4 сторонам, лицом к центру.
-	# Порядок — по часовой стрелке (слева направо, сверху вниз).
-	# Вид сверху от точки спавна: -Z = верх (дальняя стена), +X = право, +Z = низ, -X = лево.
-	var slots: Array = []
-	var per_side := int(ceil(count / 4.0))
-	var step := (inset * 2.0) / float(per_side + 1)
-	# dir задаёт направление обхода стены, чтобы общий путь шёл по часовой стрелке.
-	var sides := [
-		{"axis": Vector3(1, 0, 0), "base": Vector3(0, 0, -inset), "yaw": 0.0,        "dir": 1.0},   # задняя (верх): слева направо
-		{"axis": Vector3(0, 0, 1), "base": Vector3(inset, 0, 0),  "yaw": -PI * 0.5,  "dir": 1.0},   # правая: сверху вниз
-		{"axis": Vector3(1, 0, 0), "base": Vector3(0, 0, inset),  "yaw": PI,         "dir": -1.0},  # передняя (низ): справа налево
-		{"axis": Vector3(0, 0, 1), "base": Vector3(-inset, 0, 0), "yaw": PI * 0.5,   "dir": -1.0},  # левая: снизу вверх
+## Слоты [{pos, yaw}] для count объектов, лицом к центру, в порядке «по левую руку
+## вошедшего и далее по часовой стрелке». Вошедший идёт из входа в +Z (для корня без
+## родителя — смотрит в -Z), его левая рука — стена +X (для корня -X). Сначала
+## заполняются боковые стены (левая, затем правая); входная (-Z) и выходная (+Z) стены
+## используются только при переполнении и только по краям от прохода — проём остаётся
+## свободным (см. docs §F). Глухая поперечная стена (без проёма) предпочитается открытой.
+func _object_slots(count: int, has_parent: bool, has_children: bool) -> Array:
+	if count <= 0:
+		return []
+	var perp := ROOM_SIZE * 0.5 - OBJECT_INSET
+	var along := ROOM_SIZE * 0.5 - CORNER_MARGIN
+	var left_x: float = 1.0 if has_parent else -1.0  # левая рука вошедшего
+
+	# Боковые стены в порядке приоритета: левая, потом правая.
+	var walls: Array = [
+		_wall_x(left_x, perp, along),
+		_wall_x(-left_x, perp, along),
 	]
-	var placed := 0
-	for s in range(4):
-		for k in range(per_side):
-			if placed >= count:
-				break
-			var side: Dictionary = sides[s]
-			var offset: float = (-inset + step * (k + 1)) * (side["dir"] as float)
-			var pos: Vector3 = side["base"] + (side["axis"] as Vector3) * offset
-			slots.append({"pos": pos, "yaw": side["yaw"]})
-			placed += 1
+	# Поперечные стены (вход/выход) — переполнение, по краям от прохода. Глухие — раньше.
+	var z_walls: Array = [
+		_wall_z(1.0, perp, along, has_children),   # выход (+Z)
+		_wall_z(-1.0, perp, along, has_parent),    # вход (-Z)
+	]
+	z_walls.sort_custom(func(a, b): return int(a["open"]) < int(b["open"]))
+	walls.append_array(z_walls)
+
+	# Раскладка по числу: боковые стены балансируются и заполняются первыми, остаток
+	# уходит на поперечные.
+	var left_n: int = min(SIDE_CAP, int(ceil(count / 2.0)))
+	var right_n: int = min(SIDE_CAP, count - left_n)
+	var rem: int = count - left_n - right_n
+	var z0_n: int = int(ceil(rem / 2.0))
+	var counts := [left_n, right_n, z0_n, rem - z0_n]
+
+	var slots: Array = []
+	for i in walls.size():
+		slots.append_array(_slots_on_wall(walls[i], counts[i]))
 	return slots
+
+
+## Боковая стена (ось X). sign: +1 = +X, -1 = -X. dir держит обход по часовой стрелке.
+func _wall_x(wall_sign: float, perp: float, along: float) -> Dictionary:
+	return {
+		"kind": "x", "sign": wall_sign, "perp": perp, "along": along,
+		"yaw": -PI * 0.5 if wall_sign > 0.0 else PI * 0.5,
+		"dir": 1.0 if wall_sign > 0.0 else -1.0,
+		"open": false, "band": 0.0,
+	}
+
+
+## Поперечная стена (ось Z). sign: +1 = +Z (выход), -1 = -Z (вход). open — есть ли там
+## проём (тогда центральную полосу PASSAGE_CLEAR держим свободной).
+func _wall_z(wall_sign: float, perp: float, along: float, open: bool) -> Dictionary:
+	return {
+		"kind": "z", "sign": wall_sign, "perp": perp, "along": along,
+		"yaw": PI if wall_sign > 0.0 else 0.0,
+		"dir": -1.0 if wall_sign > 0.0 else 1.0,
+		"open": open, "band": PASSAGE_CLEAR * 0.5 if open else 0.0,
+	}
+
+
+func _slots_on_wall(wall: Dictionary, n: int) -> Array:
+	if n <= 0:
+		return []
+	var along: float = wall["along"]
+	var band: float = wall["band"]
+	var ts: Array
+	if band > 0.0:
+		ts = _edge_params(along, band, n)   # две зоны по краям от прохода
+	else:
+		ts = _even_params(-along, along, n)
+		if wall["dir"] < 0.0:
+			ts.reverse()
+	var out: Array = []
+	for t in ts:
+		out.append({"pos": _wall_pos(wall, t), "yaw": wall["yaw"]})
+	return out
+
+
+func _wall_pos(wall: Dictionary, t: float) -> Vector3:
+	var perp: float = wall["perp"]
+	if wall["kind"] == "x":
+		return Vector3(wall["sign"] * perp, 0.0, t)
+	return Vector3(t, 0.0, wall["sign"] * perp)
+
+
+## n позиций, равномерно распределённых внутри (lo, hi).
+func _even_params(lo: float, hi: float, n: int) -> Array:
+	var out: Array = []
+	var step := (hi - lo) / float(n + 1)
+	for i in range(n):
+		out.append(lo + step * (i + 1))
+	return out
+
+
+## n позиций по краям стены, минуя центральную полосу [-band, band] вокруг прохода.
+func _edge_params(along: float, band: float, n: int) -> Array:
+	var n_left: int = int(ceil(n / 2.0))
+	var out := _even_params(-along, -band, n_left)
+	out.append_array(_even_params(band, along, n - n_left))
+	return out
 
 
 func _has_parent(id: int) -> bool:
