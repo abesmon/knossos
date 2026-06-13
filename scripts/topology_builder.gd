@@ -41,10 +41,16 @@ const PHRASING_TAGS := {
 var _rooms: Dictionary = {}      # id -> Room
 var _labels: Dictionary = {}     # anchorId -> id
 var _next_id: int = 0
+var _debug: bool = false         # собирать ли карту id -> исходный HTML (только для отладки)
+var _sources: Dictionary = {}    # id -> реконструированный HTML (заполняется при _debug)
 
 
-static func build(root: HtmlNode) -> Dictionary:
+## debug=true добавляет в артефакт ключ "sources" (id -> HTML-кусок, из которого собран
+## узел/объект) для отладочной визуализации. В проде (main.gd) debug=false — артефакт
+## остаётся чистым контрактом топология↔геометрия без разметки.
+static func build(root: HtmlNode, debug: bool = false) -> Dictionary:
 	var b := TopologyBuilder.new()
+	b._debug = debug
 	return b._build(root)
 
 
@@ -62,7 +68,10 @@ func _build(root: HtmlNode) -> Dictionary:
 		var kind := "connector" if top.size() >= 2 else "room"
 		root_id = _make_room(kind, loose, top, null)
 
-	return {"rooms": _rooms, "root": root_id, "labels": _labels}
+	var artifact := {"rooms": _rooms, "root": root_id, "labels": _labels}
+	if _debug:
+		artifact["sources"] = _sources
+	return artifact
 
 
 func _find_body(root: HtmlNode) -> HtmlNode:
@@ -119,6 +128,10 @@ func _process(node: HtmlNode) -> Dictionary:
 		"ul", "ol":
 			# Гомогенный повтор -> один объект-коллекция (§7), а не N комнат.
 			return {"rooms": [], "loose": [_list_object(node)]}
+		"table":
+			# Таблица — цельный объект (§7), а не россыпь комнат из <tr>/<td>.
+			# Это буквально объект-таблица, стоящий В комнате, как и список.
+			return {"rooms": [], "loose": [_table_object(node)]}
 		"a":
 			return {"rooms": [], "loose": [_anchor_object(node)]}
 		"h1", "h2", "h3", "h4", "h5", "h6":
@@ -161,6 +174,15 @@ func _process(node: HtmlNode) -> Dictionary:
 	if child_rooms.is_empty() and child_loose.is_empty():
 		return empty
 
+	# Обёртка вокруг одних заголовков — это подпись, а не комната (§5). Заголовок —
+	# label к контенту, что идёт после него; он не «якорит» собственное пространство.
+	# Контейнер комнатой не становится: заголовки всплывают наверх как loose и прилипают
+	# к ближайшему выжившему пространству-предку, где встают объектами-соседями с этим
+	# контентом. Так чинится «div.mw-heading вокруг <h3>», который иначе боксился в комнату
+	# на уровень ниже соседних абзацев. CSS-box (стена/рамка) блокирует схлопывание (§4).
+	if child_rooms.is_empty() and _all_headings(child_loose) and not _has_visual_box(node):
+		return {"rooms": [], "loose": child_loose}
+
 	# 0..1 комната + свободные листья -> формируем комнату из листьев,
 	# вложенную комнату (если есть) держим как ребёнка.
 	var room_id := _make_room("room", child_loose, child_rooms, node)
@@ -189,6 +211,7 @@ func _make_room(kind: String, objects: Array, children: Array, node) -> int:
 		"children": children, "hints": hints,
 	}
 	_register_anchor(node, id)
+	_record_source(id, node)
 	return id
 
 
@@ -201,6 +224,7 @@ func _text_object(text: String) -> Dictionary:
 func _leaf_object(node: HtmlNode, type: String, content: Dictionary) -> Dictionary:
 	var obj := {"id": _alloc(), "type": type, "function": null, "content": content}
 	_register_anchor(node, obj["id"])
+	_record_source(obj["id"], node)
 	return obj
 
 
@@ -212,6 +236,7 @@ func _anchor_object(node: HtmlNode) -> Dictionary:
 		content["alt"] = node.collect_text()
 	var obj := {"id": _alloc(), "type": type, "function": _transition_for(node), "content": content}
 	_register_anchor(node, obj["id"])
+	_record_source(obj["id"], node)
 	return obj
 
 
@@ -269,6 +294,17 @@ func _append_text_run(runs: Array, text: String) -> void:
 		runs.append({"text": text, "function": null})
 
 
+## true, если непустой набор loose-листьев состоит ИСКЛЮЧИТЕЛЬНО из заголовков.
+## Такой контейнер — обёртка-подпись, а не комната (см. ветку схлопывания в _process).
+func _all_headings(objects: Array) -> bool:
+	if objects.is_empty():
+		return false
+	for o in objects:
+		if o.get("type", "") != "heading":
+			return false
+	return true
+
+
 func _runs_have_text(runs: Array) -> bool:
 	for r in runs:
 		if str(r.get("text", "")).strip_edges() != "":
@@ -285,6 +321,7 @@ func _rich_text_object(node: HtmlNode, runs: Array) -> Dictionary:
 		"content": {"text": plain.strip_edges(), "runs": runs},
 	}
 	_register_anchor(node, obj["id"])
+	_record_source(obj["id"], node)
 	return obj
 
 
@@ -299,7 +336,54 @@ func _list_object(node: HtmlNode) -> Dictionary:
 		if link != null:
 			item["function"] = _transition_for(link)
 		items.append(item)
-	return {"id": _alloc(), "type": "list", "function": null, "content": {"items": items}}
+	var obj := {"id": _alloc(), "type": "list", "function": null, "content": {"items": items}}
+	_record_source(obj["id"], node)
+	return obj
+
+
+## Таблица -> один объект-коллекция (§7). Строки собираются сквозь обёртки
+## <thead>/<tbody>/<tfoot>; ячейка = { text, function?, header } (как элемент списка
+## в §3: <a> внутри едет с ячейкой функцией перехода). <caption> -> подпись.
+func _table_object(node: HtmlNode) -> Dictionary:
+	var rows: Array = []
+	_collect_table_rows(node, rows)
+	var caption := ""
+	for c in node.children:
+		if c.tag == "caption":
+			caption = c.collect_text()
+			break
+	var obj := {
+		"id": _alloc(), "type": "table", "function": null,
+		"content": {"caption": caption, "rows": rows},
+	}
+	_register_anchor(node, obj["id"])
+	_record_source(obj["id"], node)
+	return obj
+
+
+func _collect_table_rows(node: HtmlNode, rows: Array) -> void:
+	for c in node.children:
+		match c.tag:
+			"tr":
+				rows.append(_table_row(c))
+			"thead", "tbody", "tfoot":
+				_collect_table_rows(c, rows)
+
+
+func _table_row(row_node: HtmlNode) -> Dictionary:
+	var cells: Array = []
+	var is_header := false
+	for c in row_node.children:
+		if c.tag != "td" and c.tag != "th":
+			continue
+		var cell := {"text": c.collect_text(), "function": null, "header": c.tag == "th"}
+		var link := _find_first_anchor(c)
+		if link != null:
+			cell["function"] = _transition_for(link)
+		if c.tag == "th":
+			is_header = true
+		cells.append(cell)
+	return {"cells": cells, "header": is_header}
 
 
 func _transition_for(anchor: HtmlNode):
@@ -333,6 +417,13 @@ func _register_anchor(node, id: int) -> void:
 	var anchor_id: String = node.get_attr("id")
 	if anchor_id != "":
 		_labels[anchor_id] = id
+
+
+## Запоминает исходный HTML узла/объекта (только в режиме отладки).
+func _record_source(id: int, node) -> void:
+	if not _debug or node == null:
+		return
+	_sources[id] = node.to_html()
 
 
 func _semantic_tag(tag: String) -> String:

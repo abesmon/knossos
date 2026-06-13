@@ -54,3 +54,32 @@ func has_descendant_tag(target: String) -> bool:
 		if c.has_descendant_tag(target):
 			return true
 	return false
+
+
+## Реконструирует HTML-разметку поддерева (для отладки: какой кусок страницы стал
+## этим узлом топологии). Не байт-в-байт исходник — нормализованная пересборка
+## дерева с отступами; этого достаточно, чтобы глазами сопоставить узел и контент.
+func to_html(indent: int = 0) -> String:
+	var pad := "  ".repeat(indent)
+	if is_text():
+		return pad + text.strip_edges()
+	if tag == DOCUMENT:
+		var parts: PackedStringArray = []
+		for c in children:
+			parts.append(c.to_html(indent))
+		return "\n".join(parts)
+
+	var attr_str := ""
+	for k in attributes:
+		attr_str += " %s=\"%s\"" % [k, attributes[k]]
+	var open_tag := "<%s%s>" % [tag, attr_str]
+
+	if children.is_empty():
+		return pad + open_tag
+	# Один текстовый ребёнок — инлайним, чтобы не плодить переносы.
+	if children.size() == 1 and children[0].is_text():
+		return "%s%s%s</%s>" % [pad, open_tag, children[0].text.strip_edges(), tag]
+	var inner: PackedStringArray = []
+	for c in children:
+		inner.append(c.to_html(indent + 1))
+	return "%s%s\n%s\n%s</%s>" % [pad, open_tag, "\n".join(inner), pad, tag]

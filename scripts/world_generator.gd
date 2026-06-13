@@ -250,6 +250,9 @@ func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 		"list":
 			_build_panel(holder, local_pos, yaw, _list_text(obj),
 				Color(0.6, 0.6, 0.65), 2.2, 32)
+		"table":
+			_build_panel(holder, local_pos, yaw, _table_text(obj),
+				Color(0.55, 0.6, 0.6), 2.4, 28)
 		_:
 			_build_panel(holder, local_pos, yaw, _obj_text(obj),
 				Color(0.85, 0.85, 0.85), 1.6, 36)
@@ -435,6 +438,20 @@ func _list_text(obj: Dictionary) -> String:
 	var lines: PackedStringArray = []
 	for it in items:
 		lines.append("• " + str(it.get("text", "")))
+	return "\n".join(lines)
+
+
+func _table_text(obj: Dictionary) -> String:
+	var content: Dictionary = obj.get("content", {})
+	var lines: PackedStringArray = []
+	var caption: String = content.get("caption", "")
+	if caption.strip_edges() != "":
+		lines.append("▦ " + caption)
+	for row in content.get("rows", []):
+		var cells: PackedStringArray = []
+		for cell in row.get("cells", []):
+			cells.append(str(cell.get("text", "")))
+		lines.append(" | ".join(cells))
 	return "\n".join(lines)
 
 

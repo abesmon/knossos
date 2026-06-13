@@ -1,0 +1,19 @@
+[gd_scene load_steps=3 format=3 uid="uid://iyn2fxc0ti2n"]
+
+[ext_resource type="PackedScene" uid="uid://bl40q3bqfvck6" path="res://actors/nav_bar/nav_bar.tscn" id="1_77qn7"]
+[ext_resource type="Script" uid="uid://cdru03g2sute0" path="res://scenes/topology_debug.gd" id="2_dbg"]
+
+[node name="TopologyDebug" type="Node"]
+script = ExtResource("2_dbg")
+
+[node name="UI" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="PanelContainer" parent="UI" instance=ExtResource("1_77qn7")]
+layout_mode = 1
