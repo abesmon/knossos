@@ -8,5 +8,6 @@
         "**/*.import": true,
         "**/.godot": true,
         "**/*.uid":true
-    }
+    },
+    "godotTools.editorPath.godot4": "/Applications/Godot 4.4.1.app"
 }

@@ -39,6 +39,11 @@ func interact_at(_point: Vector3) -> void:
 	activate()
 
 
+## Портал кликабелен целиком — прицел над ним всегда «активен» (см. Player._aim_active_at).
+func is_active_at(_point: Vector3) -> bool:
+	return true
+
+
 func get_kind() -> String:
 	return transition.get("kind", "")
 

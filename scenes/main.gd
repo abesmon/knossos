@@ -13,6 +13,7 @@ const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 var _fetcher: PageFetcher
 var _player: Player
 var _status: Label
+var _cross: Label
 var _current_url: String = ""
 var _history: Array[String] = []
 var _label_positions: Dictionary = {}
@@ -29,6 +30,7 @@ func _ready() -> void:
 	_fetcher.failed.connect(_on_failed)
 
 	_player = PLAYER_SCENE.instantiate()
+	_player.aim_target_changed.connect(_on_aim_target_changed)
 	_world.add_child(_player)
 
 	_go.pressed.connect(_on_go)
@@ -149,14 +151,15 @@ func _setup_environment() -> void:
 
 func _setup_ui_extras() -> void:
 	var ui: Control = $UI
-	# Прицел по центру экрана.
-	var cross := Label.new()
-	cross.text = "+"
-	cross.set_anchors_preset(Control.PRESET_CENTER)
-	cross.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	cross.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(cross)
+	# Прицел по центру экрана. Внешний вид меняется при наведении на активный объект
+	# (см. _on_aim_target_changed).
+	_cross = Label.new()
+	_cross.set_anchors_preset(Control.PRESET_CENTER)
+	_cross.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_cross.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(_cross)
+	_on_aim_target_changed(false)
 
 	# Строка статуса внизу.
 	_status = Label.new()
@@ -166,6 +169,21 @@ func _setup_ui_extras() -> void:
 	_status.offset_top = -32
 	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_status)
+
+
+## Подсветка прицела: над кликабельным/портальным объектом он становится кружком
+## (акцентный цвет и крупнее), иначе — нейтральный плюс.
+func _on_aim_target_changed(active: bool) -> void:
+	if _cross == null:
+		return
+	if active:
+		_cross.text = "○"
+		_cross.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2))
+		_cross.add_theme_font_size_override("font_size", 28)
+	else:
+		_cross.text = "+"
+		_cross.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
+		_cross.add_theme_font_size_override("font_size", 18)
 
 
 func _set_status(text: String) -> void:

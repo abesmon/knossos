@@ -20,6 +20,8 @@ var _bbcode := ""
 var _w_px := PANEL_WIDTH_PX
 var _h_px := 120
 var _font_size := FONT_SIZE      # кегль вьюпорта; мир задаёт его из базы текста страницы
+var _probing := false            # is_active_at «кликает» вхолостую, чтобы узнать, есть ли ссылка
+var _probe_hit := false          # результат такого пробного клика
 
 @onready var _viewport: SubViewport = $SubViewport
 @onready var _bg: ColorRect = $SubViewport/Background
@@ -50,15 +52,38 @@ func _ready() -> void:
 
 ## Маппит точку попадания луча в пиксель вьюпорта и «кликает» там за игрока.
 func interact_at(point: Vector3) -> void:
+	var px := _point_to_px(point)
+	if px.x < 0.0:
+		return
+	_push_click(px)
+
+
+## Под прицелом ли реальная inline-ссылка (а не просто текст)? Нужно Player'у для
+## подсветки курсора. У RichTextLabel нет публичного «meta под точкой», а meta_hover по
+## синтетическому движению мыши во вьюпорте не срабатывает (в отличие от клика). Поэтому
+## «кликаем» вхолостую под флагом _probing: _on_meta_clicked не выполняет переход, а лишь
+## выставляет _probe_hit — так мы переиспользуем единственный рабочий канал hit-теста.
+func is_active_at(point: Vector3) -> bool:
+	var px := _point_to_px(point)
+	if px.x < 0.0:
+		return false
+	_probing = true
+	_probe_hit = false
+	_push_click(px)
+	_probing = false
+	return _probe_hit
+
+
+## Точка попадания луча -> пиксель вьюпорта. Vector2(-1, -1) — квад ещё не построен.
+func _point_to_px(point: Vector3) -> Vector2:
 	var quad := _mesh.mesh as QuadMesh
 	if quad == null:
-		return
+		return Vector2(-1, -1)
 	var local := to_local(point)
 	var size := quad.size
 	var u := clampf((local.x + size.x * 0.5) / size.x, 0.0, 1.0)
 	var v := clampf((size.y * 0.5 - local.y) / size.y, 0.0, 1.0)
-	var px := Vector2(u * _viewport.size.x, v * _viewport.size.y)
-	_push_click(px)
+	return Vector2(u * _viewport.size.x, v * _viewport.size.y)
 
 
 func _push_click(px: Vector2) -> void:
@@ -71,6 +96,10 @@ func _push_click(px: Vector2) -> void:
 
 
 func _on_meta_clicked(meta: Variant) -> void:
+	# Пробный клик из is_active_at: только фиксируем попадание по ссылке, без перехода.
+	if _probing:
+		_probe_hit = true
+		return
 	var idx := int(str(meta))
 	if idx >= 0 and idx < _metas.size():
 		link_activated.emit(_metas[idx])

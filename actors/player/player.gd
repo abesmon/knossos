@@ -6,6 +6,10 @@ extends CharacterBody3D
 ## Сам не выполняет навигацию: активирует объект под прицелом через interact_at,
 ## объект (Portal/RichPanel) сам сообщает переход наружу.
 
+## Прицел навёлся на активный (кликабельный/портальный) объект или ушёл с него.
+## main подписывается и подсвечивает курсор-прицел.
+signal aim_target_changed(active: bool)
+
 @export var walk_speed := 5.0
 @export var run_speed := 9.0
 @export var fly_speed := 10.0
@@ -19,6 +23,7 @@ var _spawn := Vector3(0, 1, 0)
 var _looking := false
 var _flying := false
 var _last_space_time := -1.0
+var _aim_active := false
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _ray: RayCast3D = $Camera3D/RayCast3D
@@ -76,10 +81,29 @@ func _physics_process(delta: float) -> void:
 	else:
 		_walk(delta)
 	move_and_slide()
+	_update_aim()
 
 	# Респаун при падении в пустоту — только в обычном режиме.
 	if not _flying and global_position.y < fall_limit:
 		teleport_to(_spawn)
+
+
+## Следит, наведён ли прицел на активный объект, и сообщает наружу только при смене
+## состояния (чтобы main не дёргал UI каждый кадр).
+func _update_aim() -> void:
+	var active := _aim_active_at_ray()
+	if active != _aim_active:
+		_aim_active = active
+		aim_target_changed.emit(active)
+
+
+func _aim_active_at_ray() -> bool:
+	if _ray == null or not _ray.is_colliding():
+		return false
+	var col := _ray.get_collider()
+	if col == null or not col.has_method("is_active_at"):
+		return false
+	return col.is_active_at(_ray.get_collision_point())
 
 
 func _walk(delta: float) -> void:
