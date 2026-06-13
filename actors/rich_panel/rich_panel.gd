@@ -95,19 +95,30 @@ func _build_bbcode() -> void:
 
 
 func _estimate_height() -> void:
-	# Без рендера: грубая оценка по длине текста и переносам.
+	_h_px = estimate_height_px(_runs, _font_size, _w_px)
+
+
+## Оценка высоты панели (px) по длине текста и переносам — БЕЗ рендера. static, чтобы
+## WorldGenerator мог замерить будущую панель тем же кодом, что и сама панель (футпринт
+## для раскладки и фактическая геометрия совпадают). См. WorldGenerator._measure_object.
+static func estimate_height_px(runs: Array, font_size: int, w_px: int = PANEL_WIDTH_PX) -> int:
 	var plain := ""
 	var explicit_lines := 1
-	for r in _runs:
+	for r in runs:
 		var t := str(r.get("text", ""))
 		plain += t
 		explicit_lines += t.count("\n")
-	var usable := float(_w_px - MARGIN * 2)
-	var chars_per_line: float = max(1.0, usable / (_font_size * 0.5))
+	var usable := float(w_px - MARGIN * 2)
+	var chars_per_line: float = max(1.0, usable / (font_size * 0.5))
 	var wrapped := int(ceil(plain.length() / chars_per_line))
 	var lines: int = max(explicit_lines, wrapped)
-	var line_h := int(_font_size * 1.4)
-	_h_px = clampi(lines * line_h + MARGIN * 2, 80, 1500)
+	var line_h := int(font_size * 1.4)
+	return clampi(lines * line_h + MARGIN * 2, 80, 1500)
+
+
+## Та же оценка в метрах квада — удобна геометрии.
+static func estimate_height_m(runs: Array, font_size: int) -> float:
+	return float(estimate_height_px(runs, font_size)) / PIXEL_PER_METER
 
 
 func _layout_viewport() -> void:
