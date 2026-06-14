@@ -182,82 +182,9 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 		_world.add_child(vrweb["root"])
 
 	# Внешние ресурсы (<ExtResource path="<url>">) качаются и вставляются асинхронно —
-	# прогрессивная подгрузка, как у картинок <img>.
-	_inject_ext_resources(vrweb.get("ext", {}), image_loader)
-
-
-## Качает внешние ресурсы <ExtResource> и вставляет их, когда готовы. Текстуры — через
-## ImageLoader (свой декод картинок); аудио/меши/GLTF-сцены — через VrwebResourceLoader (сырые
-## байты + декод). Оба лоадера живут в мире и сносятся при навигации с незавершёнными запросами.
-## Цель — либо свойство узла/ресурса (prop), либо вставка GLTF-сцены ребёнком (<ExtScene>, child).
-func _inject_ext_resources(ext: Dictionary, image_loader: ImageLoader) -> void:
-	var defs: Dictionary = ext.get("defs", {})
-	var targets: Array = ext.get("targets", [])
-	if defs.is_empty() or targets.is_empty():
-		return
-
-	# Лоадер сырых байтов нужен для всего, кроме текстур; создаём лениво.
-	var res_loader: VrwebResourceLoader = null
-
-	for target in targets:
-		var def: Dictionary = defs.get(target["id"], {})
-		if def.is_empty():
-			continue
-		var url: String = def["url"]
-		var type: String = def["type"]
-		var obj: Object = target["obj"]
-
-		# <ExtScene>: вставляем скачанную GLTF/GLB-сцену ребёнком плейсхолдера.
-		if target.get("child", false):
-			res_loader = _ensure_res_loader(res_loader)
-			res_loader.request_bytes(url, func(bytes):
-				var scene := VrwebResourceLoader.build_gltf_scene(bytes)
-				if scene == null:
-					return
-				if is_instance_valid(obj):
-					obj.add_child(scene)
-				else:
-					scene.free())
-			continue
-
-		var prop: String = target["prop"]
-		if VrwebBuilder.TEXTURE_TYPES.has(type):
-			image_loader.request_image(url, func(tex):
-				if tex != null and is_instance_valid(obj):
-					obj.set(prop, tex))
-		elif VrwebBuilder.AUDIO_TYPES.has(type):
-			res_loader = _ensure_res_loader(res_loader)
-			res_loader.request_bytes(url, func(bytes):
-				var stream := VrwebResourceLoader.decode_audio(bytes, type)
-				if stream != null and is_instance_valid(obj):
-					obj.set(prop, stream)
-					# autoplay декларативно: проигрыватель не стартует сам, т.к. поток пришёл
-					# асинхронно после _ready — запускаем вручную, если попросили autoplay.
-					if _is_audio_player(obj) and obj.autoplay and not obj.playing:
-						obj.play())
-		elif VrwebBuilder.MESH_TYPES.has(type):
-			res_loader = _ensure_res_loader(res_loader)
-			res_loader.request_bytes(url, func(bytes):
-				var mesh := VrwebResourceLoader.extract_first_mesh(bytes)
-				if mesh != null and is_instance_valid(obj):
-					obj.set(prop, mesh))
-		else:
-			push_warning("[VRWeb] ExtResource type «%s» пока не поддержан" % type)
-
-
-## Узел — один из аудиопроигрывателей (есть свойства autoplay/playing и метод play()).
-func _is_audio_player(obj: Object) -> bool:
-	return obj is AudioStreamPlayer or obj is AudioStreamPlayer2D or obj is AudioStreamPlayer3D
-
-
-## Создаёт VrwebResourceLoader в мире при первой необходимости (один на навигацию).
-func _ensure_res_loader(loader: VrwebResourceLoader) -> VrwebResourceLoader:
-	if loader != null:
-		return loader
-	loader = VrwebResourceLoader.new()
-	loader.name = "VrwebResourceLoader"
-	_world.add_child(loader)
-	return loader
+	# прогрессивная подгрузка, как у картинок <img>. Общая логика с дебаг-превью редактора
+	# вынесена в VrwebExtInjector; оба лоадера живут в мире и сносятся при навигации.
+	VrwebExtInjector.inject(vrweb.get("ext", {}), image_loader, _world)
 
 
 ## Единый обработчик переходов от порталов и inline-ссылок RichPanel.

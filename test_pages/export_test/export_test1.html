@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>VRWeb export</title></head>
+<body>
+  <h1>text</h1>
+  <vrweb mode="combine">
+    <WorldEnvironment environment="SubResource:::r0"/>
+    <DirectionalLight3D transform="Transform3D(-0.866023, -0.433016, 0.250001, 0, 0.499998, 0.866027, -0.500003, 0.749999, -0.43301, 0, 0, 0)" shadow_enabled="true"/>
+    <MeshInstance3D mesh="SubResource:::r1" surface_material_override/0="null"/>
+    <StaticBody3D>
+      <CollisionShape3D shape="SubResource:::r2"/>
+    </StaticBody3D>
+    <MeshInstance3D transform="Transform3D(0.88, 0, 0, 0, 0.88, 0, 0, 0, 0.88, 2.30038, 0.552675, 1.73754)" mesh="SubResource:::r3" skeleton="NodePath(&quot;../tree&quot;)" surface_material_override/0="null">
+      <MeshInstance3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.938552, 0)" mesh="SubResource:::r4" skeleton="NodePath(&quot;../../tree2&quot;)" surface_material_override/0="null"/>
+    </MeshInstance3D>
+    <MeshInstance3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.907127, 0)" mesh="SubResource:::r3" surface_material_override/0="null">
+      <MeshInstance3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.938552, 0)" mesh="SubResource:::r4" surface_material_override/0="null"/>
+    </MeshInstance3D>
+  <Resource id="r0" type="Environment" background_mode="2" sky="SubResource:::r5" tonemap_mode="2"/>
+  <Resource id="r1" type="PlaneMesh" size="Vector2(10, 10)"/>
+  <Resource id="r2" type="WorldBoundaryShape3D"/>
+  <Resource id="r3" type="CapsuleMesh" material="SubResource:::r6"/>
+  <Resource id="r4" type="SphereMesh" material="SubResource:::r7" radius="1.5"/>
+  <Resource id="r5" type="Sky" sky_material="SubResource:::r8"/>
+  <Resource id="r6" type="StandardMaterial3D" albedo_color="Color(0.299409, 0.150233, 0.0836129, 1)"/>
+  <Resource id="r7" type="StandardMaterial3D" albedo_color="Color(0, 0.53975, 0.266038, 1)"/>
+  <Resource id="r8" type="ProceduralSkyMaterial" sky_horizon_color="Color(0.662243, 0.671743, 0.686743, 1)" ground_horizon_color="Color(0.662243, 0.671743, 0.686743, 1)"/>
+  </vrweb>
+</body>
+</html>

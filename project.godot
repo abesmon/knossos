@@ -24,6 +24,10 @@ NetworkManager="*res://scripts/network_manager.gd"
 
 window/stretch/mode="canvas_items"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/vrweb_tools/plugin.cfg")
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"

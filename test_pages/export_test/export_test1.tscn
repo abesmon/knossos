@@ -1,0 +1,79 @@
+[gd_scene load_steps=12 format=3 uid="uid://b5nfrodmgdvye"]
+
+[ext_resource type="Script" uid="uid://hxm3us5xfd06" path="res://addons/vrweb_tools/vrweb_ext_resource.gd" id="1_goakn"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_clffv"]
+sky_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
+ground_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
+
+[sub_resource type="Sky" id="Sky_goakn"]
+sky_material = SubResource("ProceduralSkyMaterial_clffv")
+
+[sub_resource type="Environment" id="Environment_o7e54"]
+background_mode = 2
+sky = SubResource("Sky_goakn")
+tonemap_mode = 2
+
+[sub_resource type="Resource" id="Resource_o7e54"]
+script = ExtResource("1_goakn")
+url = "https://placehold.co/600x400"
+type = "Texture2D"
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_clffv"]
+size = Vector2(10, 10)
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_goakn"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_o7e54"]
+albedo_color = Color(0.299409, 0.150233, 0.0836129, 1)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_ntw51"]
+material = SubResource("StandardMaterial3D_o7e54")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cnviw"]
+albedo_color = Color(0, 0.53975, 0.266038, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_plxem"]
+material = SubResource("StandardMaterial3D_cnviw")
+radius = 1.5
+
+[node name="Node3D" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_o7e54")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.866023, -0.433016, 0.250001, 0, 0.499998, 0.866027, -0.500003, 0.749999, -0.43301, 0, 0, 0)
+shadow_enabled = true
+
+[node name="Sprite3D" type="Sprite3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.26833, 1.00327, 0)
+metadata/vrweb_ext = {
+"texture": SubResource("Resource_o7e54")
+}
+
+[node name="ground" type="MeshInstance3D" parent="."]
+mesh = SubResource("PlaneMesh_clffv")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
+shape = SubResource("WorldBoundaryShape3D_goakn")
+
+[node name="tree2" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.88, 0, 0, 0, 0.88, 0, 0, 0, 0.88, 2.30038, 0.552675, 1.73754)
+mesh = SubResource("CapsuleMesh_ntw51")
+skeleton = NodePath("../tree")
+
+[node name="leaves" type="MeshInstance3D" parent="tree2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.938552, 0)
+mesh = SubResource("SphereMesh_plxem")
+skeleton = NodePath("../../tree2")
+
+[node name="tree" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.907127, 0)
+mesh = SubResource("CapsuleMesh_ntw51")
+
+[node name="leaves" type="MeshInstance3D" parent="tree"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.938552, 0)
+mesh = SubResource("SphereMesh_plxem")
