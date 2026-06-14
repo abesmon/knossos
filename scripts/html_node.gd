@@ -9,6 +9,7 @@ const TEXT := "#text"
 const DOCUMENT := "#document"
 
 var tag: String = ""
+var raw_tag: String = ""            ## имя тега в исходном регистре (для vrweb: классы Godot PascalCase)
 var text: String = ""               ## заполнен только для #text
 var attributes: Dictionary = {}     ## { имя: значение } в нижнем регистре по ключу
 var children: Array[HtmlNode] = []
@@ -16,6 +17,7 @@ var children: Array[HtmlNode] = []
 
 func _init(p_tag: String = "") -> void:
 	tag = p_tag
+	raw_tag = p_tag
 
 
 func add_child(node: HtmlNode) -> void:

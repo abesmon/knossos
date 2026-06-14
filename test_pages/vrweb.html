@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb-теги — демо</title>
+  <style>
+    body { background-color: #141821; }
+    section { background-color: #1c2433; }
+  </style>
+</head>
+<body>
+  <header><h1>Собственный синтаксис VRWeb</h1></header>
+
+  <section>
+    <h2>Что это</h2>
+    <p>Блок &lt;vrweb&gt; ниже описывает 3D-объекты напрямую узлами Godot. В режиме
+       combine они добавляются поверх сцены, собранной из этого HTML. Поставьте
+       mode="exclusive", чтобы HTML игнорировался и осталась только сцена vrweb.</p>
+  </section>
+
+  <!-- Сцена VRWeb: пол + парящий ящик с коллизией. Обычный браузер игнорирует <vrweb>. -->
+  <vrweb mode="combine">
+    <!-- Пол -->
+    <MeshInstance3D mesh="SubResource:::FloorMesh"
+                    transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.05, 0)">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::FloorShape"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+
+    <!-- Парящий ящик -->
+    <MeshInstance3D mesh="SubResource:::BoxMesh"
+                    transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.5, 0)">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::BoxShape"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+
+    <!-- Точечный свет над ящиком -->
+    <OmniLight3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 4, 0)"
+                 omni_range="12" light_energy="3"/>
+
+    <!-- Картинка ИЗ ИНТЕРНЕТА: текстура качается асинхронно после сборки и инжектируется -->
+    <Sprite3D texture="ExtResource:::WebIcon" pixel_size="0.005"
+              transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2.5, -3)"/>
+
+    <!-- Меш ИЗ ИНТЕРНЕТА (GLB): извлекаем первый Mesh и кладём в MeshInstance3D -->
+    <MeshInstance3D mesh="ExtResource:::DuckMesh"
+                    transform="Transform3D(0.05, 0, 0, 0, 0.05, 0, 0, 0, 0.05, -7, 0.1, 2)"/>
+
+    <!-- Целая GLTF-сцена ИЗ ИНТЕРНЕТА вставляется ребёнком этого узла -->
+    <ExtScene src="ExtResource:::DuckScene"
+              transform="Transform3D(0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, -13, 0.1, 2)"/>
+
+    <!-- Звук ИЗ ИНТЕРНЕТА: autoplay стартует, как только поток скачается -->
+    <AudioStreamPlayer3D stream="ExtResource:::Ambient" autoplay="true"
+                         transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.5, 2)"/>
+
+    <!-- Правила спавна: случайная точка из списка, игрок смотрит вдоль -Z трансформа -->
+    <VRWebSpawner mode="random">
+      <SpawnerPoint transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 1.6, 3)"/>
+      <SpawnerPoint transform="Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -13, 1.6, -3)"/>
+    </VRWebSpawner>
+
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(10, 0.1, 10)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(10, 0.1, 10)"/>
+    <Resource id="BoxMesh" type="BoxMesh" size="Vector3(1, 1, 1)"/>
+    <Resource id="BoxShape" type="BoxShape3D" size="Vector3(1, 1, 1)"/>
+
+    <!-- path может быть любым http(s)-URL (или относительным/локальным vrweb-адресом) -->
+    <ExtResource id="WebIcon" type="Texture2D" path="https://godotengine.org/assets/press/icon_color.png"/>
+    <ExtResource id="DuckMesh" type="Mesh" path="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb"/>
+    <ExtResource id="DuckScene" type="PackedScene" path="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb"/>
+    <ExtResource id="Ambient" type="AudioStreamOggVorbis" path="https://upload.wikimedia.org/wikipedia/commons/c/c8/Example.ogg"/>
+  </vrweb>
+
+  <footer><p>назад на <a href="index.html">главную</a></p></footer>
+</body>
+</html>

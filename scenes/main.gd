@@ -109,10 +109,14 @@ func _on_fetched(html: String, final_url: String) -> void:
 
 	var t0 := Time.get_ticks_msec()
 	var doc := HtmlParser.parse(html)
+	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
+	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
+	# final_url — база для резолва путей внешних ресурсов (<ExtResource>).
+	var vrweb := VrwebBuilder.build(doc, final_url)
 	# debug=true: топология записывает провенанс (id -> исходный HTML), а WorldGenerator
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
-	_rebuild_world(space, final_url)
+	_rebuild_world(space, final_url, vrweb)
 	# Переход назад/вперёд: возвращаем игрока туда, где он стоял на этой странице, поверх
 	# дефолтного спавна из _rebuild_world. Мир детерминирован по URL, поза остаётся валидной.
 	if _pending_restore_pose != null:
@@ -133,7 +137,7 @@ func _on_failed(message: String, url: String) -> void:
 	_set_status("Ошибка: %s (%s)" % [message, url])
 
 
-func _rebuild_world(space: Dictionary, url: String) -> void:
+func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 	# Сносим старое пространство, игрока сохраняем.
 	for child in _world.get_children():
 		if child == _player:
@@ -153,11 +157,107 @@ func _rebuild_world(space: Dictionary, url: String) -> void:
 	_world.add_child(_remote_view)
 	_remote_view.setup(_player)
 
-	var seed_value := int(hash(PageFetcher.seed_key(url)))
-	var gen := WorldGenerator.generate(space, _world, seed_value, _activate_transition, url, image_loader)
-	_label_positions = gen.label_positions
-	# Спавн «у первого объекта страницы, лицом к нему» (WorldGenerator._compute_spawn).
-	_player.teleport_to(gen.spawn_point, gen.spawn_look_at if gen.has_spawn_look else null)
+	# mode="exclusive" — HTML-сцену не строим вовсе, в мире только узлы vrweb.
+	var exclusive: bool = vrweb.get("found", false) and vrweb.get("mode", "") == VrwebBuilder.MODE_EXCLUSIVE
+	var gen: WorldGenerator = null
+	if exclusive:
+		_label_positions = {}
+	else:
+		var seed_value := int(hash(PageFetcher.seed_key(url)))
+		gen = WorldGenerator.generate(space, _world, seed_value, _activate_transition, url, image_loader)
+		_label_positions = gen.label_positions
+
+	# Спавн: приоритет у <VRWebSpawner>, затем спавн HTML-топологии «у первого объекта»,
+	# затем (exclusive без спавнера) дефолт у начала координат лицом к сцене.
+	var spawn: Dictionary = vrweb.get("spawn", {})
+	if spawn.has("point"):
+		_player.teleport_to(spawn["point"], spawn.get("look_at"))
+	elif gen != null:
+		_player.teleport_to(gen.spawn_point, gen.spawn_look_at if gen.has_spawn_look else null)
+	else:
+		_player.teleport_to(Vector3(0, 1.6, 5), Vector3(0, 1.6, 0))
+
+	# Узлы vrweb добавляются поверх (combine) либо как единственное содержимое (exclusive).
+	if vrweb.get("found", false) and vrweb.get("root") != null:
+		_world.add_child(vrweb["root"])
+
+	# Внешние ресурсы (<ExtResource path="<url>">) качаются и вставляются асинхронно —
+	# прогрессивная подгрузка, как у картинок <img>.
+	_inject_ext_resources(vrweb.get("ext", {}), image_loader)
+
+
+## Качает внешние ресурсы <ExtResource> и вставляет их, когда готовы. Текстуры — через
+## ImageLoader (свой декод картинок); аудио/меши/GLTF-сцены — через VrwebResourceLoader (сырые
+## байты + декод). Оба лоадера живут в мире и сносятся при навигации с незавершёнными запросами.
+## Цель — либо свойство узла/ресурса (prop), либо вставка GLTF-сцены ребёнком (<ExtScene>, child).
+func _inject_ext_resources(ext: Dictionary, image_loader: ImageLoader) -> void:
+	var defs: Dictionary = ext.get("defs", {})
+	var targets: Array = ext.get("targets", [])
+	if defs.is_empty() or targets.is_empty():
+		return
+
+	# Лоадер сырых байтов нужен для всего, кроме текстур; создаём лениво.
+	var res_loader: VrwebResourceLoader = null
+
+	for target in targets:
+		var def: Dictionary = defs.get(target["id"], {})
+		if def.is_empty():
+			continue
+		var url: String = def["url"]
+		var type: String = def["type"]
+		var obj: Object = target["obj"]
+
+		# <ExtScene>: вставляем скачанную GLTF/GLB-сцену ребёнком плейсхолдера.
+		if target.get("child", false):
+			res_loader = _ensure_res_loader(res_loader)
+			res_loader.request_bytes(url, func(bytes):
+				var scene := VrwebResourceLoader.build_gltf_scene(bytes)
+				if scene == null:
+					return
+				if is_instance_valid(obj):
+					obj.add_child(scene)
+				else:
+					scene.free())
+			continue
+
+		var prop: String = target["prop"]
+		if VrwebBuilder.TEXTURE_TYPES.has(type):
+			image_loader.request_image(url, func(tex):
+				if tex != null and is_instance_valid(obj):
+					obj.set(prop, tex))
+		elif VrwebBuilder.AUDIO_TYPES.has(type):
+			res_loader = _ensure_res_loader(res_loader)
+			res_loader.request_bytes(url, func(bytes):
+				var stream := VrwebResourceLoader.decode_audio(bytes, type)
+				if stream != null and is_instance_valid(obj):
+					obj.set(prop, stream)
+					# autoplay декларативно: проигрыватель не стартует сам, т.к. поток пришёл
+					# асинхронно после _ready — запускаем вручную, если попросили autoplay.
+					if _is_audio_player(obj) and obj.autoplay and not obj.playing:
+						obj.play())
+		elif VrwebBuilder.MESH_TYPES.has(type):
+			res_loader = _ensure_res_loader(res_loader)
+			res_loader.request_bytes(url, func(bytes):
+				var mesh := VrwebResourceLoader.extract_first_mesh(bytes)
+				if mesh != null and is_instance_valid(obj):
+					obj.set(prop, mesh))
+		else:
+			push_warning("[VRWeb] ExtResource type «%s» пока не поддержан" % type)
+
+
+## Узел — один из аудиопроигрывателей (есть свойства autoplay/playing и метод play()).
+func _is_audio_player(obj: Object) -> bool:
+	return obj is AudioStreamPlayer or obj is AudioStreamPlayer2D or obj is AudioStreamPlayer3D
+
+
+## Создаёт VrwebResourceLoader в мире при первой необходимости (один на навигацию).
+func _ensure_res_loader(loader: VrwebResourceLoader) -> VrwebResourceLoader:
+	if loader != null:
+		return loader
+	loader = VrwebResourceLoader.new()
+	loader.name = "VrwebResourceLoader"
+	_world.add_child(loader)
+	return loader
 
 
 ## Единый обработчик переходов от порталов и inline-ссылок RichPanel.

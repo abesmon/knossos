@@ -62,6 +62,7 @@ static func parse(html: String) -> HtmlNode:
 				i = gt + 1
 				continue
 			var node := HtmlNode.new(tag_name)
+			node.raw_tag = parsed["raw_name"]
 			node.attributes = parsed["attrs"]
 			stack[-1].add_child(node)
 			i = gt + 1
@@ -125,6 +126,7 @@ static func _parse_open_tag(raw: String) -> Dictionary:
 	while i < n and not _is_space(raw[i]):
 		name += raw[i]
 		i += 1
+	var raw_name := name           # исходный регистр (vrweb-теги — классы Godot, PascalCase)
 	name = name.to_lower()
 
 	while i < n:
@@ -161,7 +163,7 @@ static func _parse_open_tag(raw: String) -> Dictionary:
 		if attr_name != "":
 			attrs[attr_name] = _decode_entities(value)
 
-	return {"name": name, "attrs": attrs}
+	return {"name": name, "raw_name": raw_name, "attrs": attrs}
 
 
 static func _is_space(c: String) -> bool:
