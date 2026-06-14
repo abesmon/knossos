@@ -60,6 +60,28 @@ func teleport_to(point: Vector3, face_target: Variant = null) -> void:
 		_face_point(face_target)
 
 
+## Снимок позы для истории навигации: позиция тела, поворот по горизонтали (yaw) и
+## наклон камеры (pitch). Возвращается как Dictionary, см. restore_pose.
+func get_pose() -> Dictionary:
+	return {
+		"position": global_position,
+		"yaw": rotation.y,
+		"pitch": look_pitch(),
+	}
+
+
+## Восстанавливает позу из снимка get_pose (переход назад/вперёд по истории): ставит
+## игрока ровно туда, где он стоял, вместо дефолтного спавна страницы.
+func restore_pose(pose: Dictionary) -> void:
+	var point: Vector3 = pose.get("position", global_position)
+	_spawn = point
+	global_position = point
+	velocity = Vector3.ZERO
+	rotation.y = pose.get("yaw", rotation.y)
+	if _camera != null:
+		_camera.rotation.x = pose.get("pitch", _camera.rotation.x)
+
+
 ## Разворот корпуса по горизонтали к точке (камера смотрит вдоль локального -Z) + сброс
 ## наклона камеры в уровень.
 func _face_point(target: Vector3) -> void:

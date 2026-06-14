@@ -11,6 +11,8 @@ const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 @onready var _world: Node3D = $world
 @onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/address bar"
 @onready var _go: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/go"
+@onready var _back_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/back_btn"
+@onready var _fwd_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/fwd_btn"
 @onready var _settings_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/settings"
 
 var _fetcher: PageFetcher
@@ -18,7 +20,13 @@ var _player: Player
 var _status: Label
 var _cross: Label
 var _current_url: String = ""
-var _history: Array[String] = []
+# Браузерная история: список записей {url, pose} и индекс текущей. Переход назад/вперёд
+# двигает _history_index; новая навигация обрезает «вперёд» и добавляет запись.
+var _history: Array[Dictionary] = []
+var _history_index: int = -1
+# Поза игрока (get_pose), которую нужно восстановить после загрузки при переходе по
+# истории, вместо дефолтного спавна страницы. null — обычная навигация.
+var _pending_restore_pose: Variant = null
 var _label_positions: Dictionary = {}
 var _loading: bool = false
 
@@ -47,6 +55,9 @@ func _ready() -> void:
 	_world.add_child(_player)
 
 	_go.pressed.connect(_on_go)
+	_back_btn.pressed.connect(_on_back_pressed)
+	_fwd_btn.pressed.connect(_on_fwd_pressed)
+	_update_nav_buttons()
 	_address.text_submitted.connect(func(_t): _on_go())
 	# При клике в адресную строку отпускаем мышь, чтобы можно было печатать.
 	_address.focus_entered.connect(func(): _player.capture_mouse(false))
@@ -75,8 +86,15 @@ func _on_go() -> void:
 func _navigate(url: String, base: String, push_history: bool) -> void:
 	_loading = true
 	_set_status("Загрузка %s …" % url)
-	if push_history and _current_url != "":
-		_history.append(_current_url)
+	if push_history:
+		# Уходим со страницы по новой ссылке: запоминаем позу в текущей записи, обрезаем
+		# ветку «вперёд» (как браузер) и добавляем новую запись. URL запишется финальным
+		# (после возможного редиректа) в _on_fetched.
+		_capture_current_pose()
+		_history.resize(_history_index + 1)
+		_history.append({"url": url, "pose": null})
+		_history_index = _history.size() - 1
+	_update_nav_buttons()
 	_fetcher.fetch(url, base)
 
 
@@ -84,6 +102,9 @@ func _on_fetched(html: String, final_url: String) -> void:
 	_loading = false
 	_current_url = final_url
 	_address.text = final_url
+	# Запись истории хранит финальный URL (после редиректа) — по нему пойдёт назад/вперёд.
+	if _history_index >= 0 and _history_index < _history.size():
+		_history[_history_index]["url"] = final_url
 	_set_status("Сборка пространства…")
 
 	var t0 := Time.get_ticks_msec()
@@ -92,6 +113,11 @@ func _on_fetched(html: String, final_url: String) -> void:
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
 	_rebuild_world(space, final_url)
+	# Переход назад/вперёд: возвращаем игрока туда, где он стоял на этой странице, поверх
+	# дефолтного спавна из _rebuild_world. Мир детерминирован по URL, поза остаётся валидной.
+	if _pending_restore_pose != null:
+		_player.restore_pose(_pending_restore_pose)
+		_pending_restore_pose = null
 	var dt := Time.get_ticks_msec() - t0
 
 	var room_count: int = space.get("rooms", {}).size()
@@ -150,12 +176,58 @@ func _activate_transition(transition: Dictionary) -> void:
 			_go_back()
 
 
+## Кнопка «назад» в navbar: уводим мышь обратно в игру (клик по UI её отпустил) и идём
+## по истории.
+func _on_back_pressed() -> void:
+	_back_btn.release_focus()
+	_go_back()
+	_player.capture_mouse(true)
+
+
+func _on_fwd_pressed() -> void:
+	_fwd_btn.release_focus()
+	_go_forward()
+	_player.capture_mouse(true)
+
+
 func _go_back() -> void:
-	if _history.is_empty():
-		_set_status("История пуста")
+	if _history_index <= 0:
+		_set_status("Назад некуда")
 		return
-	var prev: String = _history.pop_back()
-	_navigate(prev, "", false)
+	_capture_current_pose()
+	_history_index -= 1
+	_load_history_entry()
+
+
+func _go_forward() -> void:
+	if _history_index >= _history.size() - 1:
+		_set_status("Вперёд некуда")
+		return
+	_capture_current_pose()
+	_history_index += 1
+	_load_history_entry()
+
+
+## Загружает запись истории под текущим _history_index, попросив восстановить сохранённую
+## позу игрока. push_history=false — индекс уже выставлен вызывающим.
+func _load_history_entry() -> void:
+	var entry: Dictionary = _history[_history_index]
+	_pending_restore_pose = entry.get("pose")
+	_navigate(entry["url"], "", false)
+
+
+## Сохраняет текущую позу игрока в активной записи истории — чтобы вернуться сюда позже.
+func _capture_current_pose() -> void:
+	if _history_index >= 0 and _history_index < _history.size():
+		_history[_history_index]["pose"] = _player.get_pose()
+
+
+## Доступность кнопок назад/вперёд по положению в истории.
+func _update_nav_buttons() -> void:
+	if _back_btn != null:
+		_back_btn.disabled = _history_index <= 0
+	if _fwd_btn != null:
+		_fwd_btn.disabled = _history_index >= _history.size() - 1
 
 
 # --- Мультиплеер ---
