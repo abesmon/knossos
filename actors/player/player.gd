@@ -62,6 +62,12 @@ func _face_point(target: Vector3) -> void:
 		_camera.rotation.x = 0.0
 
 
+## Наклон взгляда камеры (питч, рад): >0 — вверх, <0 — вниз. Транслируется по сети,
+## чтобы лицо аватара слегка наклонялось туда же, куда смотрит игрок.
+func look_pitch() -> float:
+	return _camera.rotation.x if _camera != null else 0.0
+
+
 func capture_mouse(on: bool) -> void:
 	_looking = on
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE

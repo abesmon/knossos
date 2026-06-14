@@ -67,6 +67,25 @@ text = "Ник"
 layout_mode = 2
 placeholder_text = "Имя в комнате"
 
+[node name="FaceLabel" type="Label" parent="Panel/Margin/VBox"]
+layout_mode = 2
+text = "Лицо (PNG/JPG, сохранится как 256×256)"
+
+[node name="FaceRow" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Preview" type="TextureRect" parent="Panel/Margin/VBox/FaceRow"]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Pick" type="Button" parent="Panel/Margin/VBox/FaceRow"]
+layout_mode = 2
+size_flags_vertical = 4
+text = "Выбрать…"
+
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 12
@@ -79,3 +98,12 @@ text = "Отмена"
 [node name="Save" type="Button" parent="Panel/Margin/VBox/Buttons"]
 layout_mode = 2
 text = "Сохранить"
+
+[node name="FaceDialog" type="FileDialog" parent="."]
+title = "Выберите изображение лица"
+initial_position = 1
+size = Vector2i(640, 480)
+ok_button_text = "Открыть"
+file_mode = 0
+access = 2
+filters = PackedStringArray("*.png, *.jpg, *.jpeg, *.webp ; Изображения")

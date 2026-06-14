@@ -7,6 +7,7 @@ extends Node
 
 var _got_chat := false
 var _got_state := false
+var _got_face := false
 var _nick := "t"
 
 
@@ -23,6 +24,7 @@ func _ready() -> void:
 	NetworkManager.connection_changed.connect(func(o): print("[%s] CONN online=%s" % [_nick, o]))
 	NetworkManager.chat_received.connect(_on_chat)
 	NetworkManager.state_received.connect(_on_state)
+	NetworkManager.identity_received.connect(_on_identity)
 
 	NetworkManager.connect_to_server()
 	NetworkManager.join_room("testroom")
@@ -32,12 +34,20 @@ func _ready() -> void:
 
 	# Шлём позицию ~5 секунд, чтобы дать handshake завершиться.
 	for i in range(50):
-		NetworkManager.send_state(Vector3(i, 0, 0), 0.0)
+		NetworkManager.send_state(Vector3(i, 0, 0), 0.0, 0.3)
 		await get_tree().create_timer(0.1).timeout
 
 	await get_tree().create_timer(1.0).timeout
-	print("[%s] RESULT chat=%s state=%s" % [_nick, _got_chat, _got_state])
-	get_tree().quit(0 if (_got_chat and _got_state) else 1)
+	print("[%s] RESULT chat=%s state=%s face=%s" % [_nick, _got_chat, _got_state, _got_face])
+	get_tree().quit(0 if (_got_chat and _got_state and _got_face) else 1)
+
+
+func _on_identity(id: int, nick: String, face: Texture2D) -> void:
+	_got_face = face != null
+	print("[%s] IDENTITY from %d: nick=%s face=%s %s" % [
+		_nick, id, nick, face != null,
+		("%dx%d" % [face.get_width(), face.get_height()]) if face != null else "",
+	])
 
 
 func _on_chat(id: int, text: String) -> void:
@@ -45,7 +55,7 @@ func _on_chat(id: int, text: String) -> void:
 	print("[%s] CHAT from %d: %s" % [_nick, id, text])
 
 
-func _on_state(id: int, pos: Vector3, _yaw: float) -> void:
+func _on_state(id: int, pos: Vector3, _yaw: float, pitch: float) -> void:
 	if not _got_state:
-		print("[%s] STATE from %d: %s" % [_nick, id, pos])
+		print("[%s] STATE from %d: %s pitch=%s" % [_nick, id, pos, pitch])
 		_got_state = true

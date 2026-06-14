@@ -14,6 +14,7 @@ const SEND_HZ := 15.0
 
 var _player: Node3D
 var _capsules := {}   # peer_id -> RemotePlayer
+var _faces := {}      # peer_id -> Texture2D (карточка могла прийти до создания капсулы)
 var _send_accum := 0.0
 
 
@@ -23,6 +24,8 @@ func setup(player: Node3D) -> void:
 	NetworkManager.peer_joined.connect(_on_peer_joined)
 	NetworkManager.peer_left.connect(_on_peer_left)
 	NetworkManager.state_received.connect(_on_state_received)
+	NetworkManager.identity_received.connect(_on_identity_received)
+	NetworkManager.chat_received.connect(_on_chat_received)
 
 
 func _exit_tree() -> void:
@@ -31,6 +34,8 @@ func _exit_tree() -> void:
 		NetworkManager.peer_joined.disconnect(_on_peer_joined)
 		NetworkManager.peer_left.disconnect(_on_peer_left)
 		NetworkManager.state_received.disconnect(_on_state_received)
+		NetworkManager.identity_received.disconnect(_on_identity_received)
+		NetworkManager.chat_received.disconnect(_on_chat_received)
 
 
 func _physics_process(delta: float) -> void:
@@ -39,7 +44,7 @@ func _physics_process(delta: float) -> void:
 	_send_accum += delta
 	if _send_accum >= 1.0 / SEND_HZ:
 		_send_accum = 0.0
-		NetworkManager.send_state(_player.global_position, _player.rotation.y)
+		NetworkManager.send_state(_player.global_position, _player.rotation.y, _player.look_pitch())
 
 
 func _on_peer_joined(id: int, nick: String) -> void:
@@ -49,17 +54,38 @@ func _on_peer_joined(id: int, nick: String) -> void:
 		cap.set_nick(nick)
 
 
-func _on_state_received(id: int, position: Vector3, look_yaw: float) -> void:
+func _on_state_received(id: int, position: Vector3, look_yaw: float, look_pitch: float) -> void:
 	var cap: RemotePlayer = _capsules.get(id)
 	if cap == null:
 		cap = REMOTE_PLAYER.instantiate()
 		cap.set_nick(NetworkManager.nick_of(id))
+		if _faces.has(id):
+			cap.set_face(_faces[id])   # карточка пришла раньше первого state
 		add_child(cap)
 		_capsules[id] = cap
-	cap.set_state(position, look_yaw)
+	cap.set_state(position, look_yaw, look_pitch)
+
+
+## Пришла карточка пира: запоминаем лицо и обновляем ник/лицо, если капсула уже есть.
+func _on_identity_received(id: int, nick: String, face: Texture2D) -> void:
+	if face != null:
+		_faces[id] = face
+	var cap: RemotePlayer = _capsules.get(id)
+	if cap != null:
+		cap.set_nick(nick)
+		if face != null:
+			cap.set_face(face)
+
+
+## Сообщение чата от пира — показываем бабл над его капсулой (если она уже есть).
+func _on_chat_received(id: int, text: String) -> void:
+	var cap: RemotePlayer = _capsules.get(id)
+	if cap != null:
+		cap.set_chat(text)
 
 
 func _on_peer_left(id: int) -> void:
+	_faces.erase(id)
 	var cap: RemotePlayer = _capsules.get(id)
 	if cap != null:
 		cap.queue_free()

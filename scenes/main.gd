@@ -186,6 +186,8 @@ func _on_settings_closed() -> void:
 
 func _on_settings_changed() -> void:
 	_sync_online()
+	# Ник/лицо могли поменяться — разошлём обновлённую карточку уже подключённым пирам.
+	NetworkManager.broadcast_identity()
 
 
 ## Приводит сетевое состояние в соответствие настройкам: онлайн — подключаемся и входим
@@ -238,6 +240,7 @@ func _build_chat_ui(ui: Control) -> void:
 	_chat_input = LineEdit.new()
 	_chat_input.placeholder_text = "Сообщение… (Enter)"
 	_chat_input.custom_minimum_size = Vector2(400, 0)
+	_chat_input.max_length = NetworkManager.MAX_CHAT_CHARS   # не ввести больше лимита
 	_chat_input.text_submitted.connect(_on_chat_submitted)
 	_chat_input.focus_entered.connect(func(): _player.capture_mouse(false))
 	_chat_root.add_child(_chat_input)
@@ -247,7 +250,7 @@ func _build_chat_ui(ui: Control) -> void:
 
 
 func _on_chat_submitted(text: String) -> void:
-	text = text.strip_edges()
+	text = text.strip_edges().left(NetworkManager.MAX_CHAT_CHARS)
 	_chat_input.clear()
 	if text == "":
 		return

@@ -1,13 +1,18 @@
 extends Node
 
 ## Глобальные настройки приложения (autoload «Settings»).
-## Хранит онлайн-режим, адрес сигнального сервера и ник; персистит в user://settings.cfg.
-## Экран настроек (scenes/settings) редактирует эти значения и зовёт save();
+## Хранит онлайн-режим, адрес сигнального сервера, ник и текстуру «лица»; персистит в
+## user://. Экран настроек (scenes/settings) редактирует значения и зовёт save();
 ## NetworkManager и main слушают сигнал changed.
 
 signal changed
 
 const PATH := "user://settings.cfg"
+## Лицо аватара. Всегда храним в user:// как 256×256 PNG (с альфой) — это и отдаётся по
+## сети другим игрокам. При первом запуске копируем сюда дефолт.
+const FACE_PATH := "user://face.png"
+const DEFAULT_FACE := "res://resources/default_face.png"
+const FACE_SIZE := 256
 
 var online_enabled: bool = false
 var signaling_url: String = "ws://localhost:8080"
@@ -18,6 +23,42 @@ func _ready() -> void:
 	load_settings()
 	if nick.strip_edges() == "":
 		nick = "Guest-%04d" % (randi() % 10000)
+	_ensure_face()
+
+
+## Гарантирует, что user://face.png существует — при первом запуске кладёт дефолт.
+func _ensure_face() -> void:
+	if FileAccess.file_exists(FACE_PATH):
+		return
+	var tex := load(DEFAULT_FACE) as Texture2D
+	if tex != null:
+		tex.get_image().save_png(FACE_PATH)
+
+
+## PNG-байты текущего лица (256×256, с альфой) — то, что уходит другим игрокам по сети.
+func face_png() -> PackedByteArray:
+	if FileAccess.file_exists(FACE_PATH):
+		return FileAccess.get_file_as_bytes(FACE_PATH)
+	return PackedByteArray()
+
+
+## Текстура текущего лица для превью в настройках.
+func face_texture() -> Texture2D:
+	var img := Image.new()
+	if FileAccess.file_exists(FACE_PATH) and img.load(FACE_PATH) == OK:
+		return ImageTexture.create_from_image(img)
+	return load(DEFAULT_FACE) as Texture2D
+
+
+## Загружает выбранный пользователем файл как лицо: ресайз до 256×256 (сохраняя альфу)
+## и запись в user://face.png. Возвращает успех.
+func set_face_from_file(path: String) -> bool:
+	var img := Image.new()
+	if img.load(path) != OK:
+		return false
+	img.convert(Image.FORMAT_RGBA8)   # гарантируем канал альфы (прозрачность)
+	img.resize(FACE_SIZE, FACE_SIZE, Image.INTERPOLATE_LANCZOS)
+	return img.save_png(FACE_PATH) == OK
 
 
 func load_settings() -> void:

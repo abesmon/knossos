@@ -14,10 +14,16 @@ extends Node
 
 signal peer_joined(id: int, nick: String)
 signal peer_left(id: int)
-signal state_received(id: int, position: Vector3, look_yaw: float)
+signal state_received(id: int, position: Vector3, look_yaw: float, look_pitch: float)
 signal chat_received(id: int, text: String)
+## Пир прислал свою «карточку»: ник + текстуру лица (приходит при установке p2p).
+signal identity_received(id: int, nick: String, face: Texture2D)
 ## online — есть ли активное подключение к сигнальному серверу.
 signal connection_changed(online: bool)
+
+## Жёсткий лимит длины сообщения чата — режем и на отправке, и на приёме, чтобы нигде
+## (лог, бабл) не отрисовывалось больше.
+const MAX_CHAT_CHARS := 280
 
 const ICE_SERVERS := {
 	"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
@@ -36,12 +42,17 @@ var _connections := {}     # peer_id -> WebRTCPeerConnection
 var _nicks := {}           # peer_id -> String
 
 
+func _ready() -> void:
+	# Как только p2p-канал к пиру открылся — шлём ему свою карточку (ник + лицо).
+	multiplayer.peer_connected.connect(_on_mp_peer_connected)
+
+
 func is_online() -> bool:
 	return _ws != null and _ws.get_ready_state() == WebSocketPeer.STATE_OPEN
 
 
 ## Доступен ли нативный WebRTC-аддон (для десктопа его надо положить в addons/webrtc).
-static func webrtc_available() -> bool:
+func webrtc_available() -> bool:
 	return ClassDB.class_exists("WebRTCPeerConnection") \
 		and ClassDB.class_exists("WebRTCMultiplayerPeer")
 
@@ -90,18 +101,31 @@ func leave_room() -> void:
 	_teardown_mesh()
 
 
-## Широковещательно разослать свою позицию и поворот (вызывается ~15 Гц).
-func send_state(position: Vector3, look_yaw: float) -> void:
+## Широковещательно разослать свою позицию, поворот (yaw) и наклон взгляда (pitch).
+## Вызывается ~15 Гц.
+func send_state(position: Vector3, look_yaw: float, look_pitch: float) -> void:
 	if not _can_rpc():
 		return
-	rpc("_recv_state", position, look_yaw)
+	rpc("_recv_state", position, look_yaw, look_pitch)
+
+
+## Разослать свою карточку (ник + лицо) всем — например, после смены лица в настройках.
+func broadcast_identity() -> void:
+	if _can_rpc():
+		rpc("_recv_identity", Settings.nick, Settings.face_png())
+
+
+func _on_mp_peer_connected(id: int) -> void:
+	# Отдаём новому пиру свою карточку. Лицо — PNG-байты, ник — строка.
+	if _can_rpc():
+		rpc_id(id, "_recv_identity", Settings.nick, Settings.face_png())
 
 
 ## Разослать сообщение чата остальным (локальное эхо — на стороне вызывающего).
 func send_chat(text: String) -> void:
 	if not _can_rpc():
 		return
-	rpc("_recv_chat", text)
+	rpc("_recv_chat", text.left(MAX_CHAT_CHARS))
 
 
 func nick_of(id: int) -> String:
@@ -253,10 +277,28 @@ func _on_remote_candidate(id: int, data) -> void:
 # --- RPC (поверх mesh) ---
 
 @rpc("any_peer", "unreliable_ordered", "call_remote")
-func _recv_state(position: Vector3, look_yaw: float) -> void:
-	state_received.emit(multiplayer.get_remote_sender_id(), position, look_yaw)
+func _recv_state(position: Vector3, look_yaw: float, look_pitch: float) -> void:
+	state_received.emit(multiplayer.get_remote_sender_id(), position, look_yaw, look_pitch)
 
 
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_chat(text: String) -> void:
-	chat_received.emit(multiplayer.get_remote_sender_id(), text)
+	# Режем и на приёме — пир мог быть с модифицированным клиентом.
+	chat_received.emit(multiplayer.get_remote_sender_id(), text.left(MAX_CHAT_CHARS))
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_identity(nick: String, face_png: PackedByteArray) -> void:
+	var id := multiplayer.get_remote_sender_id()
+	_nicks[id] = nick if nick != "" else "Guest-%d" % id
+	identity_received.emit(id, _nicks[id], _decode_face(face_png))
+
+
+## PNG-байты -> текстура (или null, если пусто/битое).
+func _decode_face(png: PackedByteArray) -> Texture2D:
+	if png.is_empty():
+		return null
+	var img := Image.new()
+	if img.load_png_from_buffer(png) != OK:
+		return null
+	return ImageTexture.create_from_image(img)
