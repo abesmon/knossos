@@ -30,3 +30,8 @@ placeholder_text = "Поиск или адрес сайта"
 [node name="go" type="Button" parent="MarginContainer/HBoxContainer"]
 layout_mode = 2
 text = "go!"
+
+[node name="settings" type="Button" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+text = "⚙"
+tooltip_text = "Настройки"

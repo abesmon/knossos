@@ -5,10 +5,13 @@ extends Node
 ## Связывает сервисы; сам логику трансляции не содержит.
 
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
+const SETTINGS_SCENE := preload("res://scenes/settings.tscn")
+const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 
 @onready var _world: Node3D = $world
 @onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/address bar"
 @onready var _go: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/go"
+@onready var _settings_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/settings"
 
 var _fetcher: PageFetcher
 var _player: Player
@@ -18,6 +21,12 @@ var _current_url: String = ""
 var _history: Array[String] = []
 var _label_positions: Dictionary = {}
 var _loading: bool = false
+
+var _settings_overlay: Control
+var _remote_view: Node3D
+var _chat_root: VBoxContainer
+var _chat_log: RichTextLabel
+var _chat_input: LineEdit
 
 
 func _ready() -> void:
@@ -37,6 +46,8 @@ func _ready() -> void:
 	_address.text_submitted.connect(func(_t): _on_go())
 	# При клике в адресную строку отпускаем мышь, чтобы можно было печатать.
 	_address.focus_entered.connect(func(): _player.capture_mouse(false))
+
+	_setup_net()
 
 	_set_status("Введите адрес и go! — WASD ходьба, двойной пробел — полёт, ЛКМ/E — портал, колесо/тачпад — скролл текста, Esc — мышь")
 
@@ -80,6 +91,10 @@ func _on_fetched(html: String, final_url: String) -> void:
 	var room_count: int = space.get("rooms", {}).size()
 	_set_status("%s — %d пространств, %d мс" % [final_url, room_count, dt])
 
+	# Комната мультиплеера = страница. В онлайне переключаемся на комнату нового URL
+	# (NetworkManager рвёт старые p2p-соединения и пересоздаёт mesh).
+	_join_current_room()
+
 
 func _on_failed(message: String, url: String) -> void:
 	_loading = false
@@ -98,6 +113,13 @@ func _rebuild_world(space: Dictionary, url: String) -> void:
 	var image_loader := ImageLoader.new()
 	image_loader.name = "ImageLoader"
 	_world.add_child(image_loader)
+
+	# Капсулы других игроков живут в мире: при навигации мир сносится — старые капсулы
+	# исчезают (ушёл со страницы = вышел из комнаты), view пересоздаётся для новой.
+	_remote_view = REMOTE_VIEW_SCRIPT.new()
+	_remote_view.name = "RemotePlayersView"
+	_world.add_child(_remote_view)
+	_remote_view.setup(_player)
 
 	var seed_value := int(hash(PageFetcher.seed_key(url)))
 	var gen := WorldGenerator.generate(space, _world, seed_value, _activate_transition, url, image_loader)
@@ -128,6 +150,129 @@ func _go_back() -> void:
 		return
 	var prev: String = _history.pop_back()
 	_navigate(prev, "", false)
+
+
+# --- Мультиплеер ---
+
+func _setup_net() -> void:
+	var ui: Control = $UI
+
+	# Overlay настроек поверх UI, изначально скрыт.
+	_settings_overlay = SETTINGS_SCENE.instantiate()
+	ui.add_child(_settings_overlay)
+	_settings_overlay.closed.connect(_on_settings_closed)
+
+	_settings_btn.pressed.connect(_open_settings)
+	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
+
+	_build_chat_ui(ui)
+
+	Settings.changed.connect(_on_settings_changed)
+	NetworkManager.connection_changed.connect(_on_connection_changed)
+	NetworkManager.chat_received.connect(_on_chat_received)
+
+	# Применяем сохранённый режим (online_enabled мог остаться с прошлой сессии).
+	_sync_online()
+
+
+func _open_settings() -> void:
+	_player.capture_mouse(false)
+	_settings_overlay.open()
+
+
+func _on_settings_closed() -> void:
+	_player.capture_mouse(true)
+
+
+func _on_settings_changed() -> void:
+	_sync_online()
+
+
+## Приводит сетевое состояние в соответствие настройкам: онлайн — подключаемся и входим
+## в комнату текущей страницы; офлайн — рвём соединение.
+func _sync_online() -> void:
+	if Settings.online_enabled:
+		if not NetworkManager.webrtc_available():
+			_set_status("WebRTC недоступен: добавьте аддон webrtc-native в addons/webrtc")
+		else:
+			_join_current_room()
+	else:
+		NetworkManager.disconnect_from_server()
+	_update_chat_visibility()
+
+
+## Подключиться (если ещё нет) и войти в комнату текущего URL. join_room сам поставит
+## вход в очередь, если соединение ещё устанавливается.
+func _join_current_room() -> void:
+	if not (Settings.online_enabled and NetworkManager.webrtc_available()):
+		return
+	if not NetworkManager.is_online():
+		NetworkManager.connect_to_server()
+	if _current_url != "":
+		NetworkManager.join_room(PageFetcher.seed_key(_current_url))
+
+
+func _on_connection_changed(online: bool) -> void:
+	_set_status("Онлайн: %s" % Settings.signaling_url if online else "Офлайн")
+
+
+# --- Чат ---
+
+func _build_chat_ui(ui: Control) -> void:
+	_chat_root = VBoxContainer.new()
+	_chat_root.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_chat_root.offset_left = 8
+	_chat_root.offset_right = 420
+	_chat_root.offset_top = -260
+	_chat_root.offset_bottom = -40   # над строкой статуса
+	_chat_root.add_theme_constant_override("separation", 4)
+
+	_chat_log = RichTextLabel.new()
+	_chat_log.bbcode_enabled = true
+	_chat_log.scroll_active = true
+	_chat_log.scroll_following = true
+	_chat_log.custom_minimum_size = Vector2(400, 170)
+	_chat_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_chat_root.add_child(_chat_log)
+
+	_chat_input = LineEdit.new()
+	_chat_input.placeholder_text = "Сообщение… (Enter)"
+	_chat_input.custom_minimum_size = Vector2(400, 0)
+	_chat_input.text_submitted.connect(_on_chat_submitted)
+	_chat_input.focus_entered.connect(func(): _player.capture_mouse(false))
+	_chat_root.add_child(_chat_input)
+
+	ui.add_child(_chat_root)
+	_chat_root.visible = false
+
+
+func _on_chat_submitted(text: String) -> void:
+	text = text.strip_edges()
+	_chat_input.clear()
+	if text == "":
+		return
+	NetworkManager.send_chat(text)
+	_append_chat(Settings.nick, text)   # локальное эхо
+	_player.capture_mouse(true)
+
+
+func _on_chat_received(id: int, text: String) -> void:
+	_append_chat(NetworkManager.nick_of(id), text)
+
+
+func _append_chat(nick: String, text: String) -> void:
+	if _chat_log != null:
+		_chat_log.append_text("[b]%s[/b]: %s\n" % [_esc_bb(nick), _esc_bb(text)])
+
+
+## Экранирует "[" в пользовательском тексте, чтобы он не воспринимался как BBCode-тег.
+func _esc_bb(s: String) -> String:
+	return s.replace("[", "[lb]")
+
+
+func _update_chat_visibility() -> void:
+	if _chat_root != null:
+		_chat_root.visible = Settings.online_enabled
 
 
 # --- Окружение и UI ---
