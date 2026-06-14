@@ -33,11 +33,27 @@ func _ready() -> void:
 	capture_mouse(true)
 
 
-## Телепортирует игрока и запоминает точку как новый респаун.
-func teleport_to(point: Vector3) -> void:
+## Телепортирует игрока и запоминает точку как новый респаун. Если задан look_at —
+## разворачивает игрока лицом к этой точке по горизонтали и выравнивает взгляд по уровню
+## (используется при спавне «у первого объекта страницы»).
+func teleport_to(point: Vector3, face_target: Variant = null) -> void:
 	_spawn = point
 	global_position = point
 	velocity = Vector3.ZERO
+	if face_target != null:
+		_face_point(face_target)
+
+
+## Разворот корпуса по горизонтали к точке (камера смотрит вдоль локального -Z) + сброс
+## наклона камеры в уровень.
+func _face_point(target: Vector3) -> void:
+	var dir: Vector3 = target - global_position
+	dir.y = 0.0
+	if dir.length() < 0.001:
+		return
+	rotation.y = atan2(-dir.x, -dir.z)
+	if _camera != null:
+		_camera.rotation.x = 0.0
 
 
 func capture_mouse(on: bool) -> void:

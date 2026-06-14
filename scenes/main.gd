@@ -102,7 +102,8 @@ func _rebuild_world(space: Dictionary, url: String) -> void:
 	var seed_value := int(hash(url))
 	var gen := WorldGenerator.generate(space, _world, seed_value, _activate_transition, url, image_loader)
 	_label_positions = gen.label_positions
-	_player.teleport_to(gen.spawn_point)
+	# Спавн «у первого объекта страницы, лицом к нему» (WorldGenerator._compute_spawn).
+	_player.teleport_to(gen.spawn_point, gen.spawn_look_at if gen.has_spawn_look else null)
 
 
 ## Единый обработчик переходов от порталов и inline-ссылок RichPanel.

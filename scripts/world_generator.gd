@@ -104,8 +104,17 @@ var _object_room: Dictionary = {} # objectId -> roomId
 var _positions: Dictionary = {}   # roomId -> Vector3 (центр пола, мир)
 var _shift := Vector3.ZERO        # сдвиг сетки в мир (корень к началу координат)
 
+# Спавн «у первого объекта страницы, лицом к нему» (считается в фазе 5).
+var _first_obj_id: int = -1        # id первого объекта в порядке чтения (см. _find_first_object_id)
+var _has_spawn_obj: bool = false   # нашли ли первый объект при расстановке
+var _spawn_obj_world := Vector3.ZERO  # мир-позиция первого объекта (на полу)
+var _spawn_inward := Vector3.ZERO     # направление от стены первого объекта внутрь комнаты
+var _spawn_max_d: float = 3.5         # потолок отступа спавна от объекта (чтобы не вылезти из комнаты)
+
 # Результат генерации, нужный main.
 var spawn_point := Vector3.ZERO
+var spawn_look_at := Vector3.ZERO      # точка, на которую игрок смотрит при спавне
+var has_spawn_look: bool = false       # валиден ли spawn_look_at
 var label_positions: Dictionary = {}   # anchorId -> Vector3
 
 
@@ -142,6 +151,7 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 	_fill_occupancy()
 	_route_corridors()                       # фаза 4
 
+	_first_obj_id = _find_first_object_id()
 	for id in _rooms.keys():
 		for obj in _rooms[id]["objects"]:
 			_object_room[obj["id"]] = id
@@ -150,14 +160,42 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 	_resolve_labels(space.get("labels", {}))
 	_build_atmosphere(parent, _root_id)
 
-	var root_size: Vector2 = _room_size.get(_root_id, Vector2(GRID * 2, GRID * 2))
-	spawn_point = _positions.get(_root_id, Vector3.ZERO) + Vector3(0, 1.0, root_size.y * 0.3)
+	_compute_spawn()
 
 
 func _build_parent_map() -> void:
 	for id in _rooms.keys():
 		for ch in _rooms[id]["children"]:
 			_parent_of[ch] = id
+
+
+## Первый объект страницы в порядке чтения: наполнение комнаты идёт раньше её подкомнат,
+## заголовок секции — первый объект комнаты (§D). Спускаемся по первым детям, пока не
+## встретим комнату со своими объектами. -1, если объектов на странице нет вовсе.
+func _find_first_object_id() -> int:
+	var id: int = _root_id
+	while _rooms.has(id):
+		var objs: Array = _rooms[id]["objects"]
+		if not objs.is_empty():
+			return objs[0]["id"]
+		var ch: Array = _rooms[id]["children"]
+		if ch.is_empty():
+			return -1
+		id = ch[0]
+	return -1
+
+
+## Спавн «у первого объекта, лицом к нему» (см. _record_spawn): встаём от объекта внутрь
+## комнаты и смотрим на него. Если объектов нет — запасной спавн в корне у его края.
+func _compute_spawn() -> void:
+	if _has_spawn_obj:
+		var d: float = clampf(3.5, 1.2, _spawn_max_d)
+		spawn_point = _spawn_obj_world + _spawn_inward * d + Vector3(0, 1.0, 0)
+		spawn_look_at = _spawn_obj_world + Vector3(0, 1.6, 0)
+		has_spawn_look = true
+		return
+	var root_size: Vector2 = _room_size.get(_root_id, Vector2(GRID * 2, GRID * 2))
+	spawn_point = _positions.get(_root_id, Vector3.ZERO) + Vector3(0, 1.0, root_size.y * 0.3)
 
 
 func _link_count(id: int) -> int:
@@ -1006,8 +1044,10 @@ func _add_wall_seg(holder: Node3D, w: Dictionary, lo: float, hi: float, off_half
 		_add_box(holder, Vector3(length, h, WALL_THICK), Vector3(center, h * 0.5, w["sign"] * off), color, true)
 
 
-## Расставляет объекты по стенам shelf-укладкой: сперва сплошные стены, затем стены с
-## проёмами (по свободным интервалам). Курсор двигается на ширину объекта + зазор.
+## Расставляет объекты по стенам в порядке чтения: стены обходятся по часовой стрелке
+## (см. _object_walls), внутри стены — слева направо (курсор u растёт от левого края, см.
+## _mk_span/_span_pos). Курсор двигается на ширину объекта + зазор; если объект не влезает
+## в остаток текущего пролёта — переходим к следующему (следующая стена/интервал).
 func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable) -> void:
 	var objs: Array = room["objects"]
 	if objs.is_empty():
@@ -1018,14 +1058,35 @@ func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable) -
 	var si := 0
 	for obj in objs:
 		var w: float = _object_size[obj["id"]].x
-		while si < spans.size() and spans[si]["cursor"] + w > spans[si]["hi"] + 0.001:
+		while si < spans.size() and spans[si]["cursor"] + w > spans[si]["length"] + 0.001:
 			si += 1
 		if si >= spans.size():
 			si = spans.size() - 1
 		var span: Dictionary = spans[si]
-		var t: float = span["cursor"] + w * 0.5
+		var u: float = span["cursor"] + w * 0.5
 		span["cursor"] = span["cursor"] + w + OBJECT_GAP
-		_build_object(obj, holder, _span_pos(span, t), span["w"]["yaw"], on_transition)
+		var local_pos := _span_pos(span, u)
+		if obj["id"] == _first_obj_id:
+			_record_spawn(room["id"], holder.position, local_pos, span["w"])
+		_build_object(obj, holder, local_pos, span["w"]["yaw"], on_transition)
+
+
+## Запоминает геометрию первого объекта для спавна: его мир-позицию, направление внутрь
+## комнаты от его стены и потолок отступа (чтобы спавн не вылез за противоположную стену).
+func _record_spawn(room_id: int, holder_pos: Vector3, local_pos: Vector3, w: Dictionary) -> void:
+	var size: Vector2 = _room_size[room_id]
+	var along: float = size.x if w["kind"] == "x" else size.y
+	_spawn_obj_world = holder_pos + local_pos
+	_spawn_inward = _wall_inward(w)
+	_spawn_max_d = along - OBJECT_INSET - 1.0
+	_has_spawn_obj = true
+
+
+## Направление от стены внутрь комнаты (противоположно наружной нормали стены).
+func _wall_inward(w: Dictionary) -> Vector3:
+	if w["kind"] == "x":
+		return Vector3(-w["sign"], 0.0, 0.0)
+	return Vector3(0.0, 0.0, -w["sign"])
 
 
 func _wall_spans(id: int) -> Array:
@@ -1033,9 +1094,8 @@ func _wall_spans(id: int) -> Array:
 	var half_x := size.x * 0.5
 	var half_z := size.y * 0.5
 	var ops: Array = _room_openings.get(id, [])
-	var solid: Array = []
-	var doored: Array = []
-	for w in _wall_defs():
+	var spans: Array = []
+	for w in _object_walls():
 		var along_half: float = half_z if w["kind"] == "x" else half_x
 		var off_half: float = half_x if w["kind"] == "x" else half_z
 		var inset := off_half - OBJECT_INSET
@@ -1047,12 +1107,28 @@ func _wall_spans(id: int) -> Array:
 				gaps.append([o["lo"], o["hi"]])
 		gaps.sort_custom(func(p, q): return p[0] < q[0])
 		var free := _subtract_gaps(along_lo, along_hi, gaps, DOOR_MARGIN)
-		var target: Array = solid if gaps.is_empty() else doored
+		# Интервалы свободны слева направо для зрителя в комнате: у flip-стен «лево» —
+		# это высокий конец координаты, поэтому порядок интервалов разворачиваем.
+		if w["flip"]:
+			free.reverse()
 		for iv in free:
 			if iv[1] - iv[0] >= 0.6:
-				target.append(_mk_span(w, iv[0], iv[1], inset))
-	solid.append_array(doored)
-	return solid
+				spans.append(_mk_span(w, iv[0], iv[1], inset))
+	return spans
+
+
+## Стены в порядке обхода ПО ЧАСОВОЙ СТРЕЛКЕ (вид сверху, север = -Z):
+## север(nz) → восток(px) → юг(pz) → запад(nx). `flip` помечает стены, где «слева направо»
+## для зрителя, стоящего в комнате лицом к стене, идёт в сторону УБЫВАНИЯ координаты вдоль стены
+## (юг и запад). yaw/sign/key совпадают с _wall_defs (геометрия стен), порядок здесь — только
+## для расстановки объектов.
+func _object_walls() -> Array:
+	return [
+		{"kind": "z", "sign": -1.0, "yaw": 0.0, "key": "nz", "flip": false},
+		{"kind": "x", "sign": 1.0, "yaw": -PI * 0.5, "key": "px", "flip": false},
+		{"kind": "z", "sign": 1.0, "yaw": PI, "key": "pz", "flip": true},
+		{"kind": "x", "sign": -1.0, "yaw": PI * 0.5, "key": "nx", "flip": true},
+	]
 
 
 ## Свободные интервалы [lo,hi] за вычетом gaps (расширенных margin с каждой стороны).
@@ -1072,13 +1148,19 @@ func _subtract_gaps(lo: float, hi: float, gaps: Array, margin: float) -> Array:
 	return free
 
 
+## Пролёт стены под укладку объектов. Курсор измеряется в u ∈ [0, length] от ЛЕВОГО для
+## зрителя края: координата вдоль стены t = base_t + sign_u·u. У flip-стен лево — высокий
+## конец (base_t = hi, sign_u = -1), у обычных — низкий (base_t = lo, sign_u = +1).
 func _mk_span(w: Dictionary, lo: float, hi: float, inset: float) -> Dictionary:
-	return {"w": w, "lo": lo, "hi": hi, "inset": inset, "cursor": lo}
+	var base_t: float = hi if w["flip"] else lo
+	var sign_u: float = -1.0 if w["flip"] else 1.0
+	return {"w": w, "base_t": base_t, "sign_u": sign_u, "length": hi - lo, "inset": inset, "cursor": 0.0}
 
 
-func _span_pos(span: Dictionary, t: float) -> Vector3:
+func _span_pos(span: Dictionary, u: float) -> Vector3:
 	var w: Dictionary = span["w"]
 	var inset: float = span["inset"]
+	var t: float = span["base_t"] + span["sign_u"] * u
 	if w["kind"] == "x":
 		return Vector3(w["sign"] * inset, 0.0, t)
 	return Vector3(t, 0.0, w["sign"] * inset)
