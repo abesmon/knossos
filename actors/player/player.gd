@@ -24,6 +24,12 @@ var _looking := false
 var _flying := false
 var _last_space_time := -1.0
 var _aim_active := false
+var _scroll_pending := 0.0   # накопленные тики колеса, гасятся в _physics_process
+
+const SCROLL_REACH := 12.0   # дальность луча прокрутки текста, м (длиннее, чем луч взаимодействия:
+								# читают абзац издали, а не вплотную, как жмут портал)
+const PANEL_MASK := 2        # слой кликабельных панелей (RichPanel/ImagePanel — collision_layer 2)
+const TRACKPAD_SCROLL_SCALE := 0.5  # перевод delta.y pan-жеста тачпада в «тики» прокрутки
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _ray: RayCast3D = $Camera3D/RayCast3D
@@ -71,6 +77,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_try_interact()
 		else:
 			capture_mouse(true)
+	elif event is InputEventMouseButton and event.pressed and _looking \
+			and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		# Гасим в _physics_process: запрос к direct_space_state безопасен только там.
+		_scroll_pending += -1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0
+	elif event is InputEventPanGesture and _looking:
+		# Тачпад на macOS шлёт прокрутку двумя пальцами не колесом, а pan-жестом (delta.y).
+		_scroll_pending += event.delta.y * TRACKPAD_SCROLL_SCALE
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_ESCAPE:
@@ -98,6 +111,10 @@ func _physics_process(delta: float) -> void:
 		_walk(delta)
 	move_and_slide()
 	_update_aim()
+
+	if _scroll_pending != 0.0:
+		_do_scroll(_scroll_pending)
+		_scroll_pending = 0.0
 
 	# Респаун при падении в пустоту — только в обычном режиме.
 	if not _flying and global_position.y < fall_limit:
@@ -177,3 +194,18 @@ func _try_interact() -> void:
 	# Единый интерфейс: и Portal, и RichPanel реализуют interact_at(точка_прицела).
 	if col != null and col.has_method("interact_at"):
 		col.interact_at(_ray.get_collision_point())
+
+
+## Колесо мыши прокручивает длинную панель, на которую смотрит игрок (RichPanel со скроллом).
+## Свой луч длиннее луча взаимодействия (_ray): абзац читают издали, не вплотную. dir: +1 вниз.
+func _do_scroll(dir: float) -> void:
+	if _camera == null:
+		return
+	var from: Vector3 = _camera.global_position
+	var to: Vector3 = from - _camera.global_transform.basis.z * SCROLL_REACH
+	var query := PhysicsRayQueryParameters3D.create(from, to, PANEL_MASK)
+	query.collide_with_areas = false
+	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	var col = hit.get("collider", null)
+	if col != null and col.has_method("scroll_by"):
+		col.scroll_by(dir)
