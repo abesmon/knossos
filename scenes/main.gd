@@ -23,6 +23,8 @@ var _label_positions: Dictionary = {}
 var _loading: bool = false
 
 var _settings_overlay: Control
+var _debug_panel: PanelContainer
+var _debug_label: Label
 var _remote_view: Node3D
 var _chat_root: VBoxContainer
 var _chat_log: RichTextLabel
@@ -40,6 +42,8 @@ func _ready() -> void:
 
 	_player = PLAYER_SCENE.instantiate()
 	_player.aim_target_changed.connect(_on_aim_target_changed)
+	_player.debug_toggled.connect(_on_debug_toggled)
+	_player.debug_probed.connect(_on_debug_probed)
 	_world.add_child(_player)
 
 	_go.pressed.connect(_on_go)
@@ -49,7 +53,7 @@ func _ready() -> void:
 
 	_setup_net()
 
-	_set_status("Введите адрес и go! — WASD ходьба, двойной пробел — полёт, ЛКМ/E — портал, колесо/тачпад — скролл текста, Esc — мышь")
+	_set_status("Введите адрес и go! — WASD ходьба, двойной пробел — полёт, ЛКМ/E — портал, колесо/тачпад — скролл текста, F3 — отладка, Esc — мышь")
 
 	# При запуске сразу ставим фокус в адресную строку, чтобы можно было печатать
 	# без лишнего клика (focus_entered отпускает мышь).
@@ -84,7 +88,9 @@ func _on_fetched(html: String, final_url: String) -> void:
 
 	var t0 := Time.get_ticks_msec()
 	var doc := HtmlParser.parse(html)
-	var space := TopologyBuilder.build(doc)
+	# debug=true: топология записывает провенанс (id -> исходный HTML), а WorldGenerator
+	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
+	var space := TopologyBuilder.build(doc, true)
 	_rebuild_world(space, final_url)
 	var dt := Time.get_ticks_msec() - t0
 
@@ -322,6 +328,50 @@ func _setup_ui_extras() -> void:
 	_status.offset_top = -32
 	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_status)
+
+	_build_debug_overlay(ui)
+
+
+## Оверлей инспектора провенанса (F3): панель в правом верхнем углу с типом топологии и
+## исходным HTML узла под прицелом. Текст приходит от Player.debug_probed.
+func _build_debug_overlay(ui: Control) -> void:
+	_debug_panel = PanelContainer.new()
+	_debug_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_debug_panel.offset_left = -468
+	_debug_panel.offset_right = -8
+	_debug_panel.offset_top = 8
+	_debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_debug_panel.visible = false
+
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 8)
+	_debug_panel.add_child(margin)
+
+	_debug_label = Label.new()
+	_debug_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_debug_label.custom_minimum_size = Vector2(444, 0)
+	_debug_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_debug_label.add_theme_font_size_override("font_size", 13)
+	margin.add_child(_debug_label)
+
+	ui.add_child(_debug_panel)
+
+
+func _on_debug_toggled(on: bool) -> void:
+	if _debug_panel != null:
+		_debug_panel.visible = on
+	if on:
+		_set_status("Отладка ON — наведи прицел на объект (F3 — выкл)")
+		if _debug_label != null:
+			_debug_label.text = "Наведи прицел на объект…"
+	else:
+		_set_status("Отладка OFF")
+
+
+func _on_debug_probed(text: String) -> void:
+	if _debug_label != null:
+		_debug_label.text = text if text != "" else "Наведи прицел на объект…"
 
 
 ## Подсветка прицела: над кликабельным/портальным объектом он становится кружком

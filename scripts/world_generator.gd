@@ -20,6 +20,11 @@ extends RefCounted
 const PORTAL_SCENE := preload("res://actors/portal/portal.tscn")
 const RICH_PANEL_SCENE := preload("res://actors/rich_panel/rich_panel.tscn")
 
+## Ключ метаданных с провенансом узла (тип топологии + исходный HTML) — его читает
+## отладочный пробник прицела (Player._debug_probe). Заполняется только если в артефакте
+## есть "sources" (т.е. топология собрана с debug=true). См. _attach_debug.
+const DEBUG_META := "vrweb_debug"
+
 # --- Сетка ---
 const GRID := 3.0               # размер клетки сетки = ширина коридора/проёма, м
 const STREET_CELLS := 1         # зазор-улица между комнатами (≥ ширины коридора), клеток
@@ -78,6 +83,8 @@ var _seed: int
 var _rng := RandomNumberGenerator.new()
 var _base_url: String = ""
 var _image_loader: ImageLoader = null
+var _sources: Dictionary = {}     # id -> исходный HTML (есть только при debug-сборке топологии)
+var _debug: bool = false          # привязывать ли провенанс к узлам (есть "sources" в артефакте)
 var _base_px := 16.0
 var _m_per_px := M_PER_BASE_LINE / 16.0
 var _rich_w_m := 2.375
@@ -137,6 +144,8 @@ static func generate(space: Dictionary, parent: Node3D, seed_value: int, on_tran
 func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: Callable) -> void:
 	_space = space
 	_rooms = space.get("rooms", {})
+	_sources = space.get("sources", {})
+	_debug = space.has("sources")   # топология собрана с debug=true -> есть провенанс
 	_seed = seed_value
 	_rng.seed = seed_value
 	_base_px = float(space.get("typography", {}).get("base_px", 16.0))
@@ -1001,6 +1010,8 @@ func _build_room(id: int, parent: Node3D, on_transition: Callable) -> void:
 	holder.name = "Room_%d" % id
 	holder.position = _positions[id]
 	parent.add_child(holder)
+	if _debug:
+		_attach_debug(holder, _room_debug_text(id))
 
 	var is_connector: bool = room["kind"] == "connector"
 	var size: Vector2 = _room_size[id]
@@ -1295,12 +1306,20 @@ func _build_corridor_floors(parent: Node3D) -> void:
 # --- Объекты комнаты ---
 
 func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> void:
+	var node := _spawn_object(obj, holder, local_pos, yaw, on_transition)
+	# Провенанс объекта вешаем на его корневой узел: отладочный пробник прицела поднимается
+	# от коллайдера к ближайшему предку с метаданными (см. Player._find_debug_meta).
+	if _debug and node != null:
+		_attach_debug(node, _object_debug_text(obj))
+
+
+## Создаёт 3D-представление объекта и возвращает его корневой узел (для привязки провенанса).
+func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> Node3D:
 	var fn = obj.get("function", null)
 	var is_link: bool = fn != null and typeof(fn) == TYPE_DICTIONARY
 
 	if obj.get("type", "") == "image":
-		_build_image_panel(obj, holder, local_pos, yaw, fn if is_link else null, on_transition)
-		return
+		return _build_image_panel(obj, holder, local_pos, yaw, fn if is_link else null, on_transition)
 
 	if is_link:
 		var portal: Portal = PORTAL_SCENE.instantiate()
@@ -1310,44 +1329,41 @@ func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 		portal.rotation.y = yaw
 		if on_transition.is_valid():
 			portal.activated.connect(on_transition)
-		return
+		return portal
 
 	var runs: Array = obj.get("content", {}).get("runs", [])
 	if obj.get("type", "") == "text" and not runs.is_empty():
 		if _runs_have_links(runs) or _obj_text(obj).length() > 200:
-			_build_rich_panel(runs, holder, local_pos, yaw, on_transition)
-			return
+			return _build_rich_panel(runs, holder, local_pos, yaw, on_transition)
 
 	match obj.get("type", "text"):
 		"heading":
 			var level: int = int(obj.get("content", {}).get("level", 2))
 			var px: float = _base_px * float(HEADING_EM.get(level, 1.0))
-			_build_panel(holder, local_pos, yaw, _obj_text(obj),
+			return _build_panel(holder, local_pos, yaw, _obj_text(obj),
 				Color(0.95, 0.85, 0.4), px)
 		"media":
-			_build_panel(holder, local_pos, yaw, "▷ " + _obj_text(obj),
+			return _build_panel(holder, local_pos, yaw, "▷ " + _obj_text(obj),
 				Color(0.25, 0.25, 0.3), _base_px)
 		"button", "input":
-			_build_panel(holder, local_pos, yaw, "▢ " + _obj_text(obj),
+			return _build_panel(holder, local_pos, yaw, "▢ " + _obj_text(obj),
 				Color(0.5, 0.7, 0.5), _base_px)
 		"list":
 			if _list_has_links(obj):
-				_build_rich_panel(_list_runs(obj), holder, local_pos, yaw, on_transition)
-			else:
-				_build_panel(holder, local_pos, yaw, _list_text(obj),
-					Color(0.6, 0.6, 0.65), _base_px)
+				return _build_rich_panel(_list_runs(obj), holder, local_pos, yaw, on_transition)
+			return _build_panel(holder, local_pos, yaw, _list_text(obj),
+				Color(0.6, 0.6, 0.65), _base_px)
 		"table":
 			if _table_has_links(obj):
-				_build_rich_panel(_table_runs(obj), holder, local_pos, yaw, on_transition)
-			else:
-				_build_panel(holder, local_pos, yaw, _table_text(obj),
-					Color(0.55, 0.6, 0.6), _base_px * 0.9)
+				return _build_rich_panel(_table_runs(obj), holder, local_pos, yaw, on_transition)
+			return _build_panel(holder, local_pos, yaw, _table_text(obj),
+				Color(0.55, 0.6, 0.6), _base_px * 0.9)
 		_:
-			_build_panel(holder, local_pos, yaw, _obj_text(obj),
+			return _build_panel(holder, local_pos, yaw, _obj_text(obj),
 				Color(0.85, 0.85, 0.85), _base_px)
 
 
-func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, color: Color, font_css_px: float) -> void:
+func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, color: Color, font_css_px: float) -> Node3D:
 	var node := Node3D.new()
 	holder.add_child(node)
 	node.position = local_pos
@@ -1370,6 +1386,7 @@ func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, 
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.position = Vector3(0, center_y, 0.1)
 	node.add_child(label)
+	return node
 
 
 func _panel_height(text: String, glyph_m: float) -> float:
@@ -1383,7 +1400,7 @@ func _panel_height(text: String, glyph_m: float) -> float:
 	return clampf(lines * glyph_m * 1.5 + 0.4, 1.0, 3.0)
 
 
-func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> void:
+func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> Node3D:
 	var panel: RichPanel = RICH_PANEL_SCENE.instantiate()
 	panel.setup(runs, _px_to_m(_base_px))
 	holder.add_child(panel)
@@ -1393,10 +1410,11 @@ func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: flo
 	panel.position = local_pos + Vector3(0, maxf(EYE_LEVEL, half + PANEL_FLOOR_GAP), 0)
 	if on_transition.is_valid():
 		panel.link_activated.connect(on_transition)
+	return panel
 
 
 func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float,
-		transition, on_transition: Callable) -> void:
+		transition, on_transition: Callable) -> Node3D:
 	var content: Dictionary = obj.get("content", {})
 	var alt: String = str(content.get("alt", content.get("text", "")))
 	var want_w := _px_to_m(float(content.get("width_px", 0.0)))
@@ -1414,6 +1432,7 @@ func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw
 	if src != "" and _image_loader != null:
 		var url := PageFetcher.resolve_url(src, _base_url)
 		panel.request_load(url, _image_loader)
+	return panel
 
 
 func _runs_have_links(runs: Array) -> bool:
@@ -1502,6 +1521,70 @@ func _resolve_labels(labels: Dictionary) -> void:
 			label_positions[anchor_id] = _positions[target_id] + Vector3(0, 1.0, 0)
 		elif _object_room.has(target_id) and _positions.has(_object_room[target_id]):
 			label_positions[anchor_id] = _positions[_object_room[target_id]] + Vector3(0, 1.0, 0)
+
+
+# --- Отладочный провенанс (тип топологии + исходный HTML) ---
+
+## Кладёт человекочитаемое описание происхождения узла в метаданные DEBUG_META.
+## Пробник прицела (Player) читает их и показывает в отладочном оверлее.
+func _attach_debug(node: Node, text: String) -> void:
+	node.set_meta(DEBUG_META, text)
+
+
+## Провенанс комнаты/коннектора: тип топологии, семантика, метрики и исходный HTML секции.
+func _room_debug_text(id: int) -> String:
+	var room: Dictionary = _rooms[id]
+	var hints: Dictionary = room.get("hints", {})
+	var lines: Array = []
+	var kind_ru := "коннектор" if room.get("kind", "") == "connector" else "комната"
+	lines.append("● ПРОСТРАНСТВО · %s  #%d" % [kind_ru, id])
+	if hints.has("semanticTag"):
+		lines.append("семантика: <%s>" % hints["semanticTag"])
+	var metrics: Array = ["вес %d" % int(hints.get("weight", 0))]
+	if hints.has("degree"):
+		metrics.append("степень %d" % int(hints["degree"]))
+	metrics.append("объектов %d" % (room.get("objects", []) as Array).size())
+	metrics.append("подпространств %d" % (room.get("children", []) as Array).size())
+	lines.append(", ".join(metrics))
+	if hints.has("css"):
+		lines.append("css: %s" % str(hints["css"]))
+	_append_source(lines, id)
+	return "\n".join(lines)
+
+
+## Провенанс объекта: тип, функция перехода, родная комната, текст и исходный HTML.
+func _object_debug_text(obj: Dictionary) -> String:
+	var lines: Array = []
+	var oid := int(obj.get("id", -1))
+	lines.append("◆ ОБЪЕКТ · %s  #%d" % [obj.get("type", "text"), oid])
+	var fn = obj.get("function", null)
+	if fn != null and typeof(fn) == TYPE_DICTIONARY:
+		var target: String = str(fn.get("href", fn.get("target", "")))
+		lines.append("переход: %s %s" % [fn.get("kind", ""), target])
+	if _object_room.has(oid):
+		lines.append("в пространстве #%d" % int(_object_room[oid]))
+	var txt := _obj_text(obj).strip_edges()
+	if txt != "":
+		lines.append("текст: «%s»" % _truncate(txt, 60))
+	_append_source(lines, oid)
+	return "\n".join(lines)
+
+
+## Добавляет схлопнутый исходный HTML узла (если он записан при debug-сборке топологии).
+func _append_source(lines: Array, id: int) -> void:
+	var src: String = str(_sources.get(id, ""))
+	if src.strip_edges() == "":
+		return
+	lines.append("исходный HTML:")
+	lines.append(_collapse_html(src))
+
+
+## Схлопывает пробелы/переводы строк исходного HTML в одну строку и обрезает для оверлея.
+func _collapse_html(html: String) -> String:
+	var s := html.strip_edges().replace("\n", " ").replace("\t", " ")
+	while s.contains("  "):
+		s = s.replace("  ", " ")
+	return _truncate(s, 220)
 
 
 # --- Масштаб (CSS-пиксели страницы -> метры мира) ---

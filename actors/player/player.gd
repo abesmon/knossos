@@ -10,6 +10,11 @@ extends CharacterBody3D
 ## main подписывается и подсвечивает курсор-прицел.
 signal aim_target_changed(active: bool)
 
+## Отладочный режим инспектора провенанса (F3) включён/выключен. main показывает/прячет оверлей.
+signal debug_toggled(on: bool)
+## Текст провенанса узла под прицелом в отладочном режиме (пустой — под прицелом ничего).
+signal debug_probed(text: String)
+
 @export var walk_speed := 5.0
 @export var run_speed := 9.0
 @export var fly_speed := 10.0
@@ -25,11 +30,16 @@ var _flying := false
 var _last_space_time := -1.0
 var _aim_active := false
 var _scroll_pending := 0.0   # накопленные тики колеса, гасятся в _physics_process
+var _debug_on := false       # инспектор провенанса под прицелом (F3)
+var _debug_last := ""        # последний показанный текст (эмитим только при смене)
 
 const SCROLL_REACH := 12.0   # дальность луча прокрутки текста, м (длиннее, чем луч взаимодействия:
 								# читают абзац издали, а не вплотную, как жмут портал)
 const PANEL_MASK := 2        # слой кликабельных панелей (RichPanel/ImagePanel — collision_layer 2)
 const TRACKPAD_SCROLL_SCALE := 0.5  # перевод delta.y pan-жеста тачпада в «тики» прокрутки
+const DEBUG_META := "vrweb_debug"   # ключ метаданных провенанса на узлах мира (см. WorldGenerator)
+const DEBUG_MASK := 3        # слои стен/полов (1) и панелей (2) — инспектор бьёт по всему
+const DEBUG_REACH := 50.0    # дальность луча инспектора, м (рассматриваем и далёкие объекты)
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _ray: RayCast3D = $Camera3D/RayCast3D
@@ -96,6 +106,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				capture_mouse(false)
 			KEY_E:
 				_try_interact()
+			KEY_F3:
+				_toggle_debug()
 			KEY_SPACE:
 				if _looking:
 					_handle_space_tap()
@@ -117,6 +129,8 @@ func _physics_process(delta: float) -> void:
 		_walk(delta)
 	move_and_slide()
 	_update_aim()
+	if _debug_on:
+		_debug_probe()
 
 	if _scroll_pending != 0.0:
 		_do_scroll(_scroll_pending)
@@ -143,6 +157,45 @@ func _aim_active_at_ray() -> bool:
 	if col == null or not col.has_method("is_active_at"):
 		return false
 	return col.is_active_at(_ray.get_collision_point())
+
+
+## --- Отладочный инспектор провенанса (F3) ---
+
+## Переключает режим инспектора: каждый кадр пробивает луч из камеры и сообщает наружу
+## происхождение узла под прицелом. При выключении гасит оверлей пустым текстом.
+func _toggle_debug() -> void:
+	_debug_on = not _debug_on
+	debug_toggled.emit(_debug_on)
+	if not _debug_on:
+		_debug_last = ""
+		debug_probed.emit("")
+
+
+## Бьёт луч из камеры по всем мировым слоям и эмитит провенанс узла под прицелом.
+## Текст ищется на ближайшем предке коллайдера с метаданными DEBUG_META (стены/полы держат
+## его на холдере комнаты, объекты — на своём корне). Эмитим только при смене текста.
+func _debug_probe() -> void:
+	if _camera == null:
+		return
+	var from: Vector3 = _camera.global_position
+	var to: Vector3 = from - _camera.global_transform.basis.z * DEBUG_REACH
+	var query := PhysicsRayQueryParameters3D.create(from, to, DEBUG_MASK)
+	query.collide_with_areas = true
+	var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	var text := _find_debug_meta(hit.get("collider", null))
+	if text != _debug_last:
+		_debug_last = text
+		debug_probed.emit(text)
+
+
+## Поднимается от коллайдера к предкам в поисках метаданных провенанса (DEBUG_META).
+func _find_debug_meta(node) -> String:
+	var n: Node = node
+	while n != null:
+		if n.has_meta(DEBUG_META):
+			return str(n.get_meta(DEBUG_META))
+		n = n.get_parent()
+	return ""
 
 
 func _walk(delta: float) -> void:
