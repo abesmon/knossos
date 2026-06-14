@@ -126,3 +126,35 @@ static func _normalize_path(url: String) -> String:
 			continue
 		out.append(p)
 	return origin + host + "/" + "/".join(out)
+
+
+## Канонический ключ страницы для сидирования генерации.
+## Один и тот же сайт должен давать один и тот же мир, поэтому НЕ влияют на сид:
+## схема (http/https), регистр хоста, хвостовой слеш пути и фрагмент (#...).
+## ВЛИЯЮТ: хост, путь и query (?...) — это разные страницы.
+static func seed_key(url: String) -> String:
+	url = url.strip_edges()
+	# Фрагмент (#anchor) — навигация внутри той же страницы, на сид не влияет.
+	var hash_pos := url.find("#")
+	if hash_pos != -1:
+		url = url.substr(0, hash_pos)
+	# Отделяем query, чтобы нормализация пути её не задела.
+	var query := ""
+	var q_pos := url.find("?")
+	if q_pos != -1:
+		query = url.substr(q_pos)
+		url = url.substr(0, q_pos)
+	# Убираем схему.
+	var scheme_end := url.find("://")
+	if scheme_end != -1:
+		url = url.substr(scheme_end + 3)
+	# Хост (до первого "/") — в нижний регистр; путь регистрозависим.
+	var slash := url.find("/")
+	if slash == -1:
+		url = url.to_lower()
+	else:
+		url = url.substr(0, slash).to_lower() + url.substr(slash)
+	# Убираем хвостовые слеши пути.
+	while url.ends_with("/"):
+		url = url.substr(0, url.length() - 1)
+	return url + query

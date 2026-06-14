@@ -99,7 +99,7 @@ func _rebuild_world(space: Dictionary, url: String) -> void:
 	image_loader.name = "ImageLoader"
 	_world.add_child(image_loader)
 
-	var seed_value := int(hash(url))
+	var seed_value := int(hash(PageFetcher.seed_key(url)))
 	var gen := WorldGenerator.generate(space, _world, seed_value, _activate_transition, url, image_loader)
 	_label_positions = gen.label_positions
 	# Спавн «у первого объекта страницы, лицом к нему» (WorldGenerator._compute_spawn).
