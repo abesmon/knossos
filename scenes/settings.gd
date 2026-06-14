@@ -7,10 +7,13 @@ extends Control
 signal closed
 
 @onready var _online: CheckButton = $Panel/Margin/VBox/Online
-@onready var _url: LineEdit = $Panel/Margin/VBox/Url
-@onready var _nick: LineEdit = $Panel/Margin/VBox/Nick
+@onready var _url: LineEdit = $Panel/Margin/VBox/UrlRow/Url
+@onready var _url_clear: Button = $Panel/Margin/VBox/UrlRow/Clear
+@onready var _nick: LineEdit = $Panel/Margin/VBox/NickRow/Nick
+@onready var _nick_clear: Button = $Panel/Margin/VBox/NickRow/Clear
 @onready var _face_preview: TextureRect = $Panel/Margin/VBox/FaceRow/Preview
 @onready var _face_pick: Button = $Panel/Margin/VBox/FaceRow/Pick
+@onready var _face_clear: Button = $Panel/Margin/VBox/FaceRow/Clear
 @onready var _face_dialog: FileDialog = $FaceDialog
 @onready var _save: Button = $Panel/Margin/VBox/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBox/Buttons/Cancel
@@ -22,6 +25,10 @@ func _ready() -> void:
 	_cancel.pressed.connect(_close)
 	_face_pick.pressed.connect(_face_dialog.popup_centered_ratio)
 	_face_dialog.file_selected.connect(_on_face_selected)
+	# Очистка полей: пустые на сохранении превратятся в дефолты (placeholder подсказывает).
+	_url_clear.pressed.connect(_url.clear)
+	_nick_clear.pressed.connect(_nick.clear)
+	_face_clear.pressed.connect(_on_face_clear)
 
 
 ## Показать экран, заполнив поля текущими значениями.
@@ -40,12 +47,19 @@ func _on_face_selected(path: String) -> void:
 		_face_preview.texture = Settings.face_texture()
 
 
+## Сброс лица к дефолту (resources/default_face.png).
+func _on_face_clear() -> void:
+	Settings.reset_face()
+	_face_preview.texture = Settings.face_texture()
+
+
 func _on_save() -> void:
 	Settings.online_enabled = _online.button_pressed
-	Settings.signaling_url = _url.text.strip_edges()
+	# Пустые поля → дефолты.
+	var url := _url.text.strip_edges()
+	Settings.signaling_url = url if url != "" else Settings.DEFAULT_SIGNALING_URL
 	var nick := _nick.text.strip_edges()
-	if nick != "":
-		Settings.nick = nick
+	Settings.nick = nick if nick != "" else Settings.random_nick()
 	Settings.save()
 	_close()
 

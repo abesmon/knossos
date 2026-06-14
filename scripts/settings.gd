@@ -8,6 +8,7 @@ extends Node
 signal changed
 
 const PATH := "user://settings.cfg"
+const DEFAULT_SIGNALING_URL := "https://signaling.vrweb.home.syrupmg.ru"
 ## Лицо аватара. Всегда храним в user:// как 256×256 PNG (с альфой) — это и отдаётся по
 ## сети другим игрокам. При первом запуске копируем сюда дефолт.
 const FACE_PATH := "user://face.png"
@@ -15,21 +16,31 @@ const DEFAULT_FACE := "res://resources/default_face.png"
 const FACE_SIZE := 256
 
 var online_enabled: bool = false
-var signaling_url: String = "ws://localhost:8080"
+var signaling_url: String = DEFAULT_SIGNALING_URL
 var nick: String = ""
 
 
 func _ready() -> void:
 	load_settings()
 	if nick.strip_edges() == "":
-		nick = "Guest-%04d" % (randi() % 10000)
+		nick = random_nick()
 	_ensure_face()
+
+
+## Случайный ник по умолчанию (когда поле ника очищено).
+func random_nick() -> String:
+	return "Guest-%04d" % (randi() % 10000)
 
 
 ## Гарантирует, что user://face.png существует — при первом запуске кладёт дефолт.
 func _ensure_face() -> void:
 	if FileAccess.file_exists(FACE_PATH):
 		return
+	reset_face()
+
+
+## Сбрасывает лицо к дефолту (resources/default_face.png), перезаписывая user://face.png.
+func reset_face() -> void:
 	var tex := load(DEFAULT_FACE) as Texture2D
 	if tex != null:
 		tex.get_image().save_png(FACE_PATH)

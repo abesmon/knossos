@@ -65,10 +65,21 @@ func connect_to_server() -> void:
 		return
 	disconnect_from_server()
 	_ws = WebSocketPeer.new()
-	var err := _ws.connect_to_url(Settings.signaling_url)
+	var url := _ws_url(Settings.signaling_url)
+	var err := _ws.connect_to_url(url)
 	if err != OK:
-		push_warning("Не удалось подключиться к %s (%d)" % [Settings.signaling_url, err])
+		push_warning("Не удалось подключиться к %s (%d)" % [url, err])
 		_ws = null
+
+
+## Нормализует адрес сигналинга под WebSocketPeer: https→wss, http→ws, ws/wss — как есть.
+static func _ws_url(url: String) -> String:
+	url = url.strip_edges()
+	if url.begins_with("https://"):
+		return "wss://" + url.substr(8)
+	if url.begins_with("http://"):
+		return "ws://" + url.substr(7)
+	return url
 
 
 func disconnect_from_server() -> void:

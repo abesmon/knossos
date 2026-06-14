@@ -54,18 +54,38 @@ text = "Онлайн-режим"
 layout_mode = 2
 text = "Адрес сигнального сервера"
 
-[node name="Url" type="LineEdit" parent="Panel/Margin/VBox"]
+[node name="UrlRow" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Url" type="LineEdit" parent="Panel/Margin/VBox/UrlRow"]
 custom_minimum_size = Vector2(320, 0)
 layout_mode = 2
-placeholder_text = "ws://localhost:8080"
+size_flags_horizontal = 3
+placeholder_text = "https://signaling.vrweb.home.syrupmg.ru (по умолчанию)"
+
+[node name="Clear" type="Button" parent="Panel/Margin/VBox/UrlRow"]
+layout_mode = 2
+text = "✕"
+tooltip_text = "Очистить (вернуть адрес по умолчанию)"
 
 [node name="NickLabel" type="Label" parent="Panel/Margin/VBox"]
 layout_mode = 2
 text = "Ник"
 
-[node name="Nick" type="LineEdit" parent="Panel/Margin/VBox"]
+[node name="NickRow" type="HBoxContainer" parent="Panel/Margin/VBox"]
 layout_mode = 2
-placeholder_text = "Имя в комнате"
+theme_override_constants/separation = 8
+
+[node name="Nick" type="LineEdit" parent="Panel/Margin/VBox/NickRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Guest-XXXX (по умолчанию)"
+
+[node name="Clear" type="Button" parent="Panel/Margin/VBox/NickRow"]
+layout_mode = 2
+text = "✕"
+tooltip_text = "Очистить (сгенерировать Guest-XXXX)"
 
 [node name="FaceLabel" type="Label" parent="Panel/Margin/VBox"]
 layout_mode = 2
@@ -85,6 +105,12 @@ stretch_mode = 5
 layout_mode = 2
 size_flags_vertical = 4
 text = "Выбрать…"
+
+[node name="Clear" type="Button" parent="Panel/Margin/VBox/FaceRow"]
+layout_mode = 2
+size_flags_vertical = 4
+text = "Сбросить"
+tooltip_text = "Вернуть лицо по умолчанию"
 
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBox"]
 layout_mode = 2
