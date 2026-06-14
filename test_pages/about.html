@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>О проекте — локально</title>
+  <style>
+    body { background-color: #18241c; }
+    section { background-color: #20331f; }
+  </style>
+</head>
+<body>
+  <header><h1>О проекте</h1></header>
+
+  <nav>
+    <a href="index.html">← На главную</a>
+    <a href="rooms/gallery.html">Галерея</a>
+  </nav>
+
+  <section>
+    <h2>Локальные ссылки</h2>
+    <p>Ссылка <code>index.html</code> резолвится в <code>vrwebresource://index.html</code>,
+       потому что эта страница тоже открыта по схеме <code>vrwebresource://</code>.</p>
+  </section>
+
+  <section>
+    <h2>Вложенные папки</h2>
+    <p>Ссылка <code>rooms/gallery.html</code> ведёт в подпапку — путь резолвится
+       относительно текущего файла.</p>
+  </section>
+
+  <footer><p>назад на <a href="index.html">главную</a></p></footer>
+</body>
+</html>

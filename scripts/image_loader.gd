@@ -40,6 +40,15 @@ func _pump() -> void:
 
 func _start(url: String) -> void:
 	_active += 1
+	# Локальные картинки (vrweblocal/vrwebresource) читаем синхронно через FileAccess —
+	# без сети и пула HTTPRequest (см. docs/local-resources.md).
+	if PageFetcher.is_local(url):
+		var body := PackedByteArray()
+		var path := PageFetcher.to_file_path(url)
+		if path != "" and FileAccess.file_exists(path):
+			body = FileAccess.get_file_as_bytes(path)
+		_finish(url, body, PackedStringArray())
+		return
 	var http := HTTPRequest.new()
 	http.use_threads = true
 	http.accept_gzip = true
@@ -55,10 +64,16 @@ func _start(url: String) -> void:
 func _on_done(url: String, http: HTTPRequest, result: int, code: int,
 		headers: PackedStringArray, body: PackedByteArray) -> void:
 	http.queue_free()
-	_active -= 1
+	var ok := result == HTTPRequest.RESULT_SUCCESS and code < 400 and not body.is_empty()
+	_finish(url, body if ok else PackedByteArray(), headers)
 
+
+## Общий хвост для сетевых и локальных загрузок: декодирует байты (пустые -> заглушка),
+## кэширует, будит ожидающих и подкручивает очередь. Освобождает один активный слот.
+func _finish(url: String, body: PackedByteArray, headers: PackedStringArray) -> void:
+	_active -= 1
 	var tex: Texture2D = null
-	if result == HTTPRequest.RESULT_SUCCESS and code < 400 and not body.is_empty():
+	if not body.is_empty():
 		tex = _decode(url, body, headers)
 	_cache[url] = tex
 

@@ -1,4 +1,10 @@
-[gd_scene format=3 uid="uid://bl40q3bqfvck6"]
+[gd_scene load_steps=4 format=3 uid="uid://bl40q3bqfvck6"]
+
+[ext_resource type="Texture2D" uid="uid://dcld7xcrm2acp" path="res://resources/icon-arrow-bck.png" id="1_8dd7p"]
+[ext_resource type="Texture2D" uid="uid://clfbp13kvj73e" path="res://resources/icon-arrow-fwd.png" id="2_h18o7"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_s7f0f"]
+bg_color = Color(1, 1, 1, 0.392157)
 
 [node name="PanelContainer" type="PanelContainer"]
 anchors_preset = 10
@@ -6,6 +12,7 @@ anchor_right = 1.0
 offset_bottom = 47.0
 grow_horizontal = 2
 size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_s7f0f")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 2
@@ -18,9 +25,17 @@ theme_override_constants/margin_bottom = 8
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="Label" type="Label" parent="MarginContainer/HBoxContainer"]
+[node name="back_btn" type="Button" parent="MarginContainer/HBoxContainer"]
 layout_mode = 2
-text = "write path"
+disabled = true
+icon = ExtResource("1_8dd7p")
+flat = true
+
+[node name="fwd_btn" type="Button" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+disabled = true
+icon = ExtResource("2_h18o7")
+flat = true
 
 [node name="address bar" type="LineEdit" parent="MarginContainer/HBoxContainer"]
 layout_mode = 2
@@ -33,5 +48,5 @@ text = "go!"
 
 [node name="settings" type="Button" parent="MarginContainer/HBoxContainer"]
 layout_mode = 2
-text = "⚙"
 tooltip_text = "Настройки"
+text = "⚙"
