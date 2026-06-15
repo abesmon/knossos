@@ -7,13 +7,26 @@ render_mode unshaded, cull_back;
 // Текстура отражения = кадр SubViewport, отрендеренный отражённой камерой в том же
 // разрешении, что и основной экран. Поэтому сэмплируем её по SCREEN_UV — экранной
 // позиции фрагмента зеркала: туда же отражённая камера спроецировала отражённую точку.
-uniform sampler2D reflection_tex : source_color, hint_default_black, filter_linear;
+//
+// БЕЗ hint source_color намеренно: текстуру SubViewport мы конвертируем вручную.
+//
+// Цветовой пайплайн Compatibility-рендерера обрабатывает цвет текстуры SubViewport не
+// «по-учебнику»: ПОЛНЫЙ декод sRGB→linear делает зеркало темнее мира, а БЕЗ декода — светлее.
+// Правда — посередине, поэтому декод задаётся непрерывным коэффициентом srgb_decode (0 — без
+// декода/светлее, 1 — полный декод/темнее) и подбирается под рендер на глаз. По умолчанию 0.5.
+uniform sampler2D reflection_tex : filter_linear;
 // Отражённая камера строится через look_at (правый базис), поэтому изображение выходит
 // горизонтально перевёрнутым относительно настоящего зеркала — компенсируем флипом X.
 uniform bool flip_x = true;
 uniform bool flip_y = false;
+// Сила декода sRGB→linear: 0 — выкл (ярче), 1 — полностью (темнее). Середина обычно совпадает.
+uniform float srgb_decode : hint_range(0.0, 1.0) = 0.5;
 // Лёгкий оттенок/затемнение стекла (1,1,1 — чистое зеркало).
 uniform vec3 tint : source_color = vec3(1.0, 1.0, 1.0);
+
+vec3 srgb_to_linear(vec3 c) {
+	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
 
 void fragment() {
 	vec2 uv = SCREEN_UV;
@@ -23,5 +36,8 @@ void fragment() {
 	if (flip_y) {
 		uv.y = 1.0 - uv.y;
 	}
-	ALBEDO = texture(reflection_tex, uv).rgb * tint;
+	vec3 col = texture(reflection_tex, uv).rgb;
+	// Частичный декод: интерполяция между «как есть» (ярче) и полным sRGB→linear (темнее).
+	col = mix(col, srgb_to_linear(col), srgb_decode);
+	ALBEDO = col * tint;
 }

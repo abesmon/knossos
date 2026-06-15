@@ -63,7 +63,7 @@ const SPAWN_MODE_FIRST := "first"
 const RESOURCE_RESERVED := {"id": true, "type": true, "path": true, "src": true}
 
 ## Атрибуты <VRWebMirror>, которые задают сам объект, а не свойства узла Node3D.
-const MIRROR_RESERVED := {"size": true, "resolution_scale": true}
+const MIRROR_RESERVED := {"size": true, "resolution_scale": true, "srgb_decode": true}
 
 var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
@@ -248,17 +248,22 @@ func _build_ext_scene(elem: HtmlNode) -> Node:
 func _build_mirror(elem: HtmlNode) -> Node:
 	var mirror := MIRROR_SCRIPT.new()
 	var size := _parse_size(elem.get_attr("size", "1:2"))
-	var res_scale := 1.0
-	if elem.has_attr("resolution_scale"):
-		var rv: Variant = _resolve_value(elem.get_attr("resolution_scale"))
-		if rv is float or rv is int:
-			res_scale = float(rv)
-	mirror.setup(size.x, size.y, res_scale)
+	var res_scale := _attr_float(elem, "resolution_scale", 1.0)
+	var srgb_decode := _attr_float(elem, "srgb_decode", 0.5)
+	mirror.setup(size.x, size.y, res_scale, srgb_decode)
 	for key in elem.attributes:
 		if MIRROR_RESERVED.has(key):
 			continue
 		mirror.set(key, _resolve_value(elem.attributes[key]))
 	return mirror
+
+
+## Числовой атрибут элемента (float) или fallback, если атрибута нет/значение не число.
+func _attr_float(elem: HtmlNode, key: String, fallback: float) -> float:
+	if not elem.has_attr(key):
+		return fallback
+	var v: Variant = _resolve_value(elem.get_attr(key))
+	return float(v) if (v is float or v is int) else fallback
 
 
 ## Разбирает size="ширина:высота" (метры) в Vector2. "1.5" без двоеточия — квадрат.

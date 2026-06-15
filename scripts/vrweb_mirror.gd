@@ -27,6 +27,9 @@ var width: float = 1.0
 var height: float = 2.0
 ## Множитель разрешения текстуры отражения (1.0 — как экран; меньше — быстрее, мутнее).
 var resolution_scale: float = 1.0
+## Сила декода sRGB→linear для кадра отражения (0 — светлее, 1 — темнее). Калибровка яркости
+## зеркала под Compatibility-рендерер; см. resources/mirror_reflection.gdshader.
+var srgb_decode: float = 0.5
 
 var _sub_viewport: SubViewport
 var _refl_cam: Camera3D
@@ -34,10 +37,12 @@ var _material: ShaderMaterial
 
 
 ## Параметры из тега. Зовётся билдером до добавления в дерево (до _ready).
-func setup(p_width: float, p_height: float, p_resolution_scale: float = 1.0) -> void:
+func setup(p_width: float, p_height: float, p_resolution_scale: float = 1.0,
+		p_srgb_decode: float = 0.5) -> void:
 	width = max(p_width, 0.01)
 	height = max(p_height, 0.01)
 	resolution_scale = clamp(p_resolution_scale, 0.1, 1.0)
+	srgb_decode = clamp(p_srgb_decode, 0.0, 1.0)
 
 
 func _ready() -> void:
@@ -50,6 +55,7 @@ func _ready() -> void:
 
 	_material = ShaderMaterial.new()
 	_material.shader = SHADER
+	_material.set_shader_parameter("srgb_decode", srgb_decode)
 	material_override = _material
 
 	# SubViewport использует мир родительского окна (own_world_3d = false по умолчанию),
