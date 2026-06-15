@@ -14,10 +14,12 @@ extends Node
 
 signal peer_joined(id: int, nick: String)
 signal peer_left(id: int)
-signal state_received(id: int, position: Vector3, look_yaw: float, look_pitch: float)
+## Состояние пира: позиция, поворот корпуса (yaw) и словарь параметров аватара (LookPitch,
+## Grounded, Velocity* и т.д. — см. AvatarParams). Параметры расширяемы без правки сигнатуры.
+signal state_received(id: int, position: Vector3, look_yaw: float, params: Dictionary)
 signal chat_received(id: int, text: String)
 ## Пир прислал свою «карточку»: ник + текстуру лица (приходит при установке p2p).
-signal identity_received(id: int, nick: String, face: Texture2D)
+signal identity_received(id: int, nick: String, face: Texture2D, avatar_uri: String)
 ## online — есть ли активное подключение к сигнальному серверу.
 signal connection_changed(online: bool)
 
@@ -112,24 +114,24 @@ func leave_room() -> void:
 	_teardown_mesh()
 
 
-## Широковещательно разослать свою позицию, поворот (yaw) и наклон взгляда (pitch).
-## Вызывается ~15 Гц.
-func send_state(position: Vector3, look_yaw: float, look_pitch: float) -> void:
+## Широковещательно разослать свою позицию, поворот (yaw) и словарь параметров аватара.
+## Вызывается ~15 Гц. params — снимок AvatarParameterSource (см. AvatarParams).
+func send_state(position: Vector3, look_yaw: float, params: Dictionary) -> void:
 	if not _can_rpc():
 		return
-	rpc("_recv_state", position, look_yaw, look_pitch)
+	rpc("_recv_state", position, look_yaw, params)
 
 
-## Разослать свою карточку (ник + лицо) всем — например, после смены лица в настройках.
+## Разослать свою карточку (ник + лицо + аватар) всем — например, после смены в настройках.
 func broadcast_identity() -> void:
 	if _can_rpc():
-		rpc("_recv_identity", Settings.nick, Settings.face_png())
+		rpc("_recv_identity", Settings.nick, Settings.face_png(), Settings.avatar_uri)
 
 
 func _on_mp_peer_connected(id: int) -> void:
-	# Отдаём новому пиру свою карточку. Лицо — PNG-байты, ник — строка.
+	# Отдаём новому пиру свою карточку: ник, лицо (PNG-байты) и идентификатор аватара.
 	if _can_rpc():
-		rpc_id(id, "_recv_identity", Settings.nick, Settings.face_png())
+		rpc_id(id, "_recv_identity", Settings.nick, Settings.face_png(), Settings.avatar_uri)
 
 
 ## Разослать сообщение чата остальным (локальное эхо — на стороне вызывающего).
@@ -288,8 +290,8 @@ func _on_remote_candidate(id: int, data) -> void:
 # --- RPC (поверх mesh) ---
 
 @rpc("any_peer", "unreliable_ordered", "call_remote")
-func _recv_state(position: Vector3, look_yaw: float, look_pitch: float) -> void:
-	state_received.emit(multiplayer.get_remote_sender_id(), position, look_yaw, look_pitch)
+func _recv_state(position: Vector3, look_yaw: float, params: Dictionary) -> void:
+	state_received.emit(multiplayer.get_remote_sender_id(), position, look_yaw, params)
 
 
 @rpc("any_peer", "reliable", "call_remote")
@@ -299,10 +301,10 @@ func _recv_chat(text: String) -> void:
 
 
 @rpc("any_peer", "reliable", "call_remote")
-func _recv_identity(nick: String, face_png: PackedByteArray) -> void:
+func _recv_identity(nick: String, face_png: PackedByteArray, avatar_uri: String) -> void:
 	var id := multiplayer.get_remote_sender_id()
 	_nicks[id] = nick if nick != "" else "Guest-%d" % id
-	identity_received.emit(id, _nicks[id], _decode_face(face_png))
+	identity_received.emit(id, _nicks[id], _decode_face(face_png), avatar_uri)
 
 
 ## PNG-байты -> текстура (или null, если пусто/битое).

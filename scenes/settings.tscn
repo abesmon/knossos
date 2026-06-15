@@ -112,6 +112,24 @@ size_flags_vertical = 4
 text = "Сбросить"
 tooltip_text = "Вернуть лицо по умолчанию"
 
+[node name="AvatarLabel" type="Label" parent="Panel/Margin/VBox"]
+layout_mode = 2
+text = "Адрес аватара (vrwebavatar://N или https://…tscn)"
+
+[node name="AvatarRow" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Avatar" type="LineEdit" parent="Panel/Margin/VBox/AvatarRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "vrwebavatar://1 (по умолчанию)"
+
+[node name="Clear" type="Button" parent="Panel/Margin/VBox/AvatarRow"]
+layout_mode = 2
+text = "✕"
+tooltip_text = "Очистить (вернуть аватар по умолчанию)"
+
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBox"]
 layout_mode = 2
 theme_override_constants/separation = 12

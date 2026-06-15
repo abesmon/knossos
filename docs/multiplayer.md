@@ -57,14 +57,18 @@
 исчезают сами, что и означает «вышел из комнаты». `RemotePlayersView` пересоздаётся в
 `main._rebuild_world` и заново читает текущих пиров.
 
-**RPC.** `multiplayer.multiplayer_peer` назначается mesh-пиром. Позиция —
-`@rpc("any_peer","unreliable_ordered") _recv_state(pos, yaw)`, чат —
+**RPC.** `multiplayer.multiplayer_peer` назначается mesh-пиром. Состояние —
+`@rpc("any_peer","unreliable_ordered") _recv_state(pos, yaw, params)`, чат —
 `@rpc("any_peer","reliable") _recv_chat(text)`, карточка —
-`@rpc("any_peer","reliable") _recv_identity(nick, face_png)`. Отправитель определяется
-через `multiplayer.get_remote_sender_id()`, поэтому отдельный `MultiplayerSpawner`/
-авторитет на капсулу не нужен.
+`@rpc("any_peer","reliable") _recv_identity(nick, face_png, avatar_uri)`. Отправитель
+определяется через `multiplayer.get_remote_sender_id()`, поэтому отдельный
+`MultiplayerSpawner`/авторитет на капсулу не нужен.
 
-## Аватар: ник и лицо
+`params` — словарь параметров аватара (наклон взгляда, Grounded, скорости и т.д.): любой
+новый сигнал расширяет систему **без правки сигнатуры RPC**. Контракт и полное описание —
+в [avatars.md](avatars.md).
+
+## Аватар: ник, лицо и выбор модели
 
 Лицо хранится в `user://face.png` всегда как **256×256 PNG с альфой** (при первом запуске
 туда копируется `res://resources/default_face.png`). В настройках можно выбрать свой файл:
@@ -72,18 +76,20 @@
 это и есть «всегда ресайз перед сохранением на устройство».
 
 **Передача.** Как только p2p-канал к пиру открывается (`multiplayer.peer_connected`),
-ему уходит «карточка» — ник + PNG-байты лица одним reliable-RPC `_recv_identity`
-(`NetworkManager._on_mp_peer_connected`). Приёмник декодирует PNG в `ImageTexture` и
-эмитит `identity_received(id, nick, face)`; `RemotePlayersView` вешает текстуру на квад
-лица капсулы уникальным материалом (`TRANSPARENCY_ALPHA`, `CULL_DISABLED`, unshaded). До
-прихода карточки капсула показывает дефолтное лицо из сцены. Смена ника/лица в настройках
-рассылается уже подключённым пирам через `NetworkManager.broadcast_identity()`.
+ему уходит «карточка» — ник, PNG-байты лица и идентификатор аватара (`Settings.avatar_uri`)
+одним reliable-RPC `_recv_identity` (`NetworkManager._on_mp_peer_connected`). Приёмник
+декодирует PNG в `ImageTexture` и эмитит `identity_received(id, nick, face, avatar_uri)`;
+`RemotePlayersView` накладывает лицо через маркер-текстуру и резолвит `avatar_uri` в модель
+(см. [avatars.md](avatars.md) → «Выбор аватара»). До прихода карточки капсула показывает
+дефолтный аватар и лицо. Смена ника/лица/аватара в настройках рассылается уже подключённым
+пирам через `NetworkManager.broadcast_identity()`.
 
-Квад лица сидит на передней грани капсулы (локальный −Z, т.е. направление взгляда).
-`_recv_state` синхронизирует позицию, yaw и питч взгляда. Yaw разворачивает всю капсулу;
-питч же применяется **только к кваду лица** и с редуцирующим множителем
-`RemotePlayer.FACE_PITCH_FACTOR` (0.35) — лицо слегка наклоняется к небу/земле вслед за
-взглядом игрока, но заметно слабее, чем его реальная камера.
+`_recv_state` синхронизирует позицию, yaw и словарь параметров аватара. Yaw разворачивает
+всю капсулу (тело `RemotePlayer`); остальные сигналы (наклон взгляда `LookPitch`, скорости,
+Grounded…) уходят в шину аватара, и **аватар сам решает**, как их отобразить. Дефолтный
+аватар (`DefaultAvatar`) наклоняет к небу/земле только квад лица с редуцирующим множителем
+`FACE_PITCH_FACTOR` (0.35) — прежнее поведение. Идентичность (ник/лицо) теперь идёт в аватар
+через `Avatar.apply_identity`. Подробности системы аватаров — в [avatars.md](avatars.md).
 
 ## Предусловие: нативный WebRTC-аддон
 

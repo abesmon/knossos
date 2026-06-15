@@ -1,6 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://b0vrwebplayer01"]
+[gd_scene load_steps=4 format=3 uid="uid://b0vrwebplayer01"]
 
 [ext_resource type="Script" path="res://actors/player/player.gd" id="1_player"]
+[ext_resource type="Script" path="res://actors/avatar/avatar_parameter_source.gd" id="2_avatarsrc"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape_player"]
 radius = 0.4
@@ -20,3 +21,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
 target_position = Vector3(0, 0, -3.5)
 collide_with_areas = true
 collision_mask = 3
+
+[node name="AvatarParameterSource" type="Node" parent="."]
+script = ExtResource("2_avatarsrc")

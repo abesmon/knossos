@@ -43,6 +43,9 @@ const DEBUG_REACH := 50.0    # дальность луча инспектора,
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _ray: RayCast3D = $Camera3D/RayCast3D
+# Продюсер параметров аватара: вычисляет сигналы игрока (скорость, grounded, наклон взгляда)
+# и кормит ими шину. Снимок шлётся по сети чужим аватарам (см. RemotePlayersView).
+@onready var _avatar_source: AvatarParameterSource = $AvatarParameterSource
 
 
 func _ready() -> void:
@@ -98,6 +101,11 @@ func _face_point(target: Vector3) -> void:
 ## чтобы лицо аватара слегка наклонялось туда же, куда смотрит игрок.
 func look_pitch() -> float:
 	return _camera.rotation.x if _camera != null else 0.0
+
+
+## Снимок параметров аватара локального игрока для отправки по сети (см. AvatarParams).
+func avatar_snapshot() -> Dictionary:
+	return _avatar_source.snapshot()
 
 
 func capture_mouse(on: bool) -> void:

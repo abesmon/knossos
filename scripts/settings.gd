@@ -14,10 +14,15 @@ const DEFAULT_SIGNALING_URL := "https://signaling.vrweb.home.syrupmg.ru"
 const FACE_PATH := "user://face.png"
 const DEFAULT_FACE := "res://resources/default_face.png"
 const FACE_SIZE := 256
+## Идентификатор аватара по умолчанию — первый из бандл-пака. Передаётся другим игрокам в
+## карточке идентичности; они резолвят его через AvatarResolver. Схемы: vrwebavatar://N
+## (пак приложения) или http(s)://…tscn (внешний). См. actors/avatar/avatar_resolver.gd.
+const DEFAULT_AVATAR_URI := "vrwebavatar://1"
 
 var online_enabled: bool = false
 var signaling_url: String = DEFAULT_SIGNALING_URL
 var nick: String = ""
+var avatar_uri: String = DEFAULT_AVATAR_URI
 
 
 func _ready() -> void:
@@ -79,6 +84,9 @@ func load_settings() -> void:
 	online_enabled = cfg.get_value("net", "online_enabled", online_enabled)
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
 	nick = cfg.get_value("net", "nick", nick)
+	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
+	if avatar_uri.strip_edges() == "":
+		avatar_uri = DEFAULT_AVATAR_URI
 
 
 ## Сохраняет текущие значения на диск и оповещает подписчиков.
@@ -87,5 +95,6 @@ func save() -> void:
 	cfg.set_value("net", "online_enabled", online_enabled)
 	cfg.set_value("net", "signaling_url", signaling_url)
 	cfg.set_value("net", "nick", nick)
+	cfg.set_value("avatar", "uri", avatar_uri)
 	cfg.save(PATH)
 	changed.emit()

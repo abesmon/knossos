@@ -14,6 +14,8 @@ signal closed
 @onready var _face_preview: TextureRect = $Panel/Margin/VBox/FaceRow/Preview
 @onready var _face_pick: Button = $Panel/Margin/VBox/FaceRow/Pick
 @onready var _face_clear: Button = $Panel/Margin/VBox/FaceRow/Clear
+@onready var _avatar: LineEdit = $Panel/Margin/VBox/AvatarRow/Avatar
+@onready var _avatar_clear: Button = $Panel/Margin/VBox/AvatarRow/Clear
 @onready var _face_dialog: FileDialog = $FaceDialog
 @onready var _save: Button = $Panel/Margin/VBox/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBox/Buttons/Cancel
@@ -29,6 +31,7 @@ func _ready() -> void:
 	_url_clear.pressed.connect(_url.clear)
 	_nick_clear.pressed.connect(_nick.clear)
 	_face_clear.pressed.connect(_on_face_clear)
+	_avatar_clear.pressed.connect(_avatar.clear)
 
 
 ## Показать экран, заполнив поля текущими значениями.
@@ -36,6 +39,7 @@ func open() -> void:
 	_online.button_pressed = Settings.online_enabled
 	_url.text = Settings.signaling_url
 	_nick.text = Settings.nick
+	_avatar.text = Settings.avatar_uri
 	_face_preview.texture = Settings.face_texture()
 	show()
 	_nick.grab_focus()
@@ -60,6 +64,9 @@ func _on_save() -> void:
 	Settings.signaling_url = url if url != "" else Settings.DEFAULT_SIGNALING_URL
 	var nick := _nick.text.strip_edges()
 	Settings.nick = nick if nick != "" else Settings.random_nick()
+	# Пустой адрес аватара → дефолт из пака (vrwebavatar://1).
+	var avatar := _avatar.text.strip_edges()
+	Settings.avatar_uri = avatar if avatar != "" else Settings.DEFAULT_AVATAR_URI
 	Settings.save()
 	_close()
 
