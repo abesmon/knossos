@@ -138,16 +138,22 @@ static func _scheme_of(url: String) -> String:
 ## Преобразует vrweb-адрес в путь для FileAccess. "" — если адрес не локальный.
 ## vrweblocal://  -> абсолютный путь ОС (с гарантированным ведущим "/").
 ## vrwebresource:// -> RESOURCE_ROOT + относительный путь (внутри бандла).
+## query (?...) и fragment (#...) к файлу не относятся — они уходят скриптам страницы.
 static func to_file_path(url: String) -> String:
 	if url.begins_with(LOCAL_SCHEME):
-		var p := url.substr(LOCAL_SCHEME.length()).get_slice("#", 0)
+		var p := _strip_query_fragment(url.substr(LOCAL_SCHEME.length()))
 		return p if p.begins_with("/") else "/" + p
 	if url.begins_with(RESOURCE_SCHEME):
-		var rel := url.substr(RESOURCE_SCHEME.length()).get_slice("#", 0)
+		var rel := _strip_query_fragment(url.substr(RESOURCE_SCHEME.length()))
 		if rel.begins_with("/"):
 			rel = rel.substr(1)
 		return RESOURCE_ROOT + rel
 	return ""
+
+
+## Отрезает query (?...) и fragment (#...), оставляя только путь к файлу.
+static func _strip_query_fragment(path: String) -> String:
+	return path.get_slice("?", 0).get_slice("#", 0)
 
 
 ## Канонизирует локальный адрес: схлопывает "." и ".." в пути, сохраняя префикс схемы
