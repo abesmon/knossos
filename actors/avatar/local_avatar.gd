@@ -1,0 +1,84 @@
+class_name LocalAvatar
+extends AvatarHost
+
+## Видимое тело локального игрока — чтобы он видел себя в зеркале (как в VRChat).
+## Это тот самый «будущий локальный mirror», про который написано в AvatarHost и
+## AvatarParameterSource: хост аватара, который делит шину параметров с продюсером игрока
+## (AvatarParameterSource), поэтому тело анимируется вживую без сетевого роундтрипа.
+##
+## Тело висит на отдельном слое видимости AVATAR_LAYER: камера первого лица его НЕ рендерит
+## (иначе своё тело загораживало бы обзор), а камеры зеркал — рендерят. Так игрок видит себя
+## только в отражении, как в VRChat.
+##
+## Личность (ник/лицо) и сам аватар берутся из Settings (как и то, что уходит другим игрокам),
+## так что в зеркале — твой ник, твоё лицо и твоя модель. Следит за Settings.changed.
+
+## Слой видимости тела игрока (1..20). Камера игрока его исключает (см. Player), камеры
+## зеркал — включают (VrwebMirror не трогает этот слой). Отдельный от слоя зеркал (20).
+const AVATAR_LAYER := 11  # бит (AVATAR_LAYER-1)
+
+var _source: AvatarParameterSource
+var _resolver: AvatarResolver
+
+
+## Задаёт продюсера параметров игрока. Зовётся ДО add_child (до _ready), чтобы _ready успел
+## поделить с ним шину параметров.
+func setup(source: AvatarParameterSource) -> void:
+	_source = source
+
+
+func _ready() -> void:
+	# Делим шину параметров с продюсером: аватар подписывается на ту же AvatarParameters,
+	# куда игрок пишет каждый физкадр, — анимация вживую без копирования снапшотов.
+	if _source != null:
+		params = _source.params
+	super._ready()
+
+	_resolver = AvatarResolver.new()
+	add_child(_resolver)
+
+	# Личность вешаем до резолва аватара: set_avatar потом сам переприменит её на новой модели.
+	_apply_local_identity()
+	_resolve_from_settings()
+	_relayer()
+
+	if not Settings.changed.is_connected(_on_settings_changed):
+		Settings.changed.connect(_on_settings_changed)
+
+
+## Смена аватара (наследуется от AvatarHost) + перенос нового тела на слой зеркал.
+func set_avatar(scene: PackedScene) -> void:
+	super.set_avatar(scene)
+	_relayer()
+
+
+func _on_settings_changed() -> void:
+	_apply_local_identity()
+	_resolve_from_settings()
+
+
+func _apply_local_identity() -> void:
+	apply_identity(Settings.nick, Settings.face_texture())
+
+
+## Резолвит аватар из Settings.avatar_uri (как у других игроков) и монтирует его. Для внешних
+## URL колбэк приходит асинхронно — тогда же переносим тело на слой зеркал (через set_avatar).
+func _resolve_from_settings() -> void:
+	_resolver.resolve(Settings.avatar_uri, func(scene: PackedScene) -> void:
+		if scene != null:
+			set_avatar(scene)
+	)
+
+
+## Переносит все визуалы смонтированного аватара на слой AVATAR_LAYER, чтобы их рисовали
+## только камеры зеркал, но не камера первого лица.
+func _relayer() -> void:
+	if _avatar != null:
+		_set_layers_recursive(_avatar, 1 << (AVATAR_LAYER - 1))
+
+
+func _set_layers_recursive(node: Node, layers_mask: int) -> void:
+	if node is VisualInstance3D:
+		(node as VisualInstance3D).layers = layers_mask
+	for child in node.get_children():
+		_set_layers_recursive(child, layers_mask)

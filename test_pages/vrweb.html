@@ -56,6 +56,12 @@
     <AudioStreamPlayer3D stream="ExtResource:::Ambient" autoplay="true"
                          transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.5, 2)"/>
 
+    <!-- Зеркало (как в VRChat): планарное отражение в реальном времени. size — метры
+         (ширина:высота). Плоскость в локальной XY, отражающая сторона по +Z — здесь
+         стоит у дальней стены и смотрит на зону спавна. -->
+    <VRWebMirror size="1:2"
+                 transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.05, -4.8)"/>
+
     <!-- Правила спавна: случайная точка из списка, игрок смотрит вдоль -Z трансформа -->
     <VRWebSpawner mode="random">
       <SpawnerPoint transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 1.6, 3)"/>

@@ -47,9 +47,25 @@ const DEBUG_REACH := 50.0    # дальность луча инспектора,
 # и кормит ими шину. Снимок шлётся по сети чужим аватарам (см. RemotePlayersView).
 @onready var _avatar_source: AvatarParameterSource = $AvatarParameterSource
 
+var _local_avatar: LocalAvatar
+
 
 func _ready() -> void:
 	capture_mouse(true)
+	_setup_local_avatar()
+
+
+## Видимое тело игрока — чтобы видеть себя в зеркалах (как в VRChat). Тело висит на слое
+## LocalAvatar.AVATAR_LAYER, который камера первого лица исключает (иначе своё тело
+## загораживало бы обзор), а камеры зеркал — рендерят. Аватар делит шину параметров с
+## продюсером, поэтому анимируется вживую.
+func _setup_local_avatar() -> void:
+	if _camera != null:
+		_camera.cull_mask &= ~(1 << (LocalAvatar.AVATAR_LAYER - 1))
+	_local_avatar = LocalAvatar.new()
+	_local_avatar.name = "LocalAvatar"
+	_local_avatar.setup(_avatar_source)
+	add_child(_local_avatar)
 
 
 ## Телепортирует игрока и запоминает точку как новый респаун. Если задан look_at —

@@ -18,8 +18,8 @@
 ```
 [AvatarParameterSource на Player] --вычисляет--> AvatarParameters (локальная шина)
         |                                               |
-   snapshot()                                  (будущий локальный/mirror-аватар)
-        |
+   snapshot()                          LocalAvatar делит ЭТУ ЖЕ шину -> Applier'ы
+        |                              (видимое тело себя; рендерят только зеркала)
   NetworkManager.send_state(pos, yaw, snapshot)  --RPC dict-->  state_received(id,pos,yaw,params)
                                                                        |
                               RemotePlayersView --> RemotePlayer.set_state(pos,yaw,params)
@@ -192,8 +192,14 @@ emission… — в любом месте дерева), задав ему `defau
   ([network_manager.gd](../scripts/network_manager.gd)). Новые сигналы идут в `params` без
   правки сигнатуры RPC.
 - **Локальный источник.** `AvatarParameterSource` — единственное место, где «рождаются»
-  сигналы игрока. Будущий локальный/зеркальный аватар может читать ту же шину
-  (`Player.avatar_snapshot()` / источник напрямую).
+  сигналы игрока. Локальный/зеркальный аватар читает ту же шину напрямую (см. ниже).
+- **Видимое тело себя (для зеркал).** [`LocalAvatar`](../actors/avatar/local_avatar.gd) —
+  `AvatarHost`, который вешается на `Player` и **делит шину параметров с
+  `AvatarParameterSource`** (без сетевого роундтрипа, тело анимируется вживую). Личность и
+  модель берутся из `Settings` (ник/лицо/`avatar_uri`) — те же, что уходят пирам. Тело висит
+  на слое видимости `LocalAvatar.AVATAR_LAYER`: камера первого лица его исключает (`cull_mask`
+  в `Player`), а камеры зеркал — рендерят. Так игрок видит себя только в отражении, как в
+  VRChat. См. зеркало в [vrweb-tags.md](vrweb-tags.md#vrwebmirror--зеркало-как-в-vrchat).
 - **UI выбора аватара.** Экран настроек ([scenes/settings.gd](../scenes/settings.gd)) имеет
   поле «Адрес аватара» с кнопкой «✕» (сброс к дефолту `vrwebavatar://1`): правит
   `Settings.avatar_uri`, сохранение рассылает новую карточку пирам. Дальше можно добавить

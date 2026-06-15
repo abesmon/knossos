@@ -38,10 +38,13 @@ const TAG := "vrweb"
 const RESOURCE_TAG := "Resource"
 const EXT_RESOURCE_TAG := "ExtResource"
 const EXT_SCENE_TAG := "ExtScene"
+const MIRROR_TAG := "VRWebMirror"
 const SUBRESOURCE_PREFIX := "SubResource:::"
 const EXTRESOURCE_PREFIX := "ExtResource:::"
 const MODE_COMBINE := "combine"
 const MODE_EXCLUSIVE := "exclusive"
+
+const MIRROR_SCRIPT := preload("res://scripts/vrweb_mirror.gd")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -58,6 +61,9 @@ const SPAWN_MODE_FIRST := "first"
 ## Атрибуты <Resource>/<ExtResource>, которые задают сам ресурс, а не его свойства.
 ## src — атрибут-ссылка у <ExtScene>.
 const RESOURCE_RESERVED := {"id": true, "type": true, "path": true, "src": true}
+
+## Атрибуты <VRWebMirror>, которые задают сам объект, а не свойства узла Node3D.
+const MIRROR_RESERVED := {"size": true, "resolution_scale": true}
 
 var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
@@ -171,6 +177,8 @@ func _collect_by_tag(node: HtmlNode, raw_tag: String, out: Array[HtmlNode]) -> v
 func _build_node(elem: HtmlNode) -> Node:
 	if elem.raw_tag == EXT_SCENE_TAG:
 		return _build_ext_scene(elem)
+	if elem.raw_tag == MIRROR_TAG:
+		return _build_mirror(elem)
 	var cls := elem.raw_tag
 	if not _can_instantiate(cls):
 		push_warning("[VRWeb] неизвестный класс узла «%s» — пропущен" % cls)
@@ -230,6 +238,41 @@ func _build_ext_scene(elem: HtmlNode) -> Node:
 	else:
 		push_warning("[VRWeb] <ExtScene> ссылается на неизвестный ExtResource «%s»" % id)
 	return node
+
+
+## <VRWebMirror size="ширина:высота" transform="..."/> — зеркало в духе VRChat (планарное
+## отражение, см. scripts/vrweb_mirror.gd). Это кастомный VRWeb-тег, а не класс Godot, поэтому
+## строится особо (как <ExtScene>). size — размеры плоскости в метрах ("1:2" → 1×2 м, одиночное
+## "1.5" → квадрат). resolution_scale (0.1..1) — качество текстуры отражения. Прочие атрибуты
+## (transform и т.п.) применяются как обычные свойства Node3D.
+func _build_mirror(elem: HtmlNode) -> Node:
+	var mirror := MIRROR_SCRIPT.new()
+	var size := _parse_size(elem.get_attr("size", "1:2"))
+	var res_scale := 1.0
+	if elem.has_attr("resolution_scale"):
+		var rv: Variant = _resolve_value(elem.get_attr("resolution_scale"))
+		if rv is float or rv is int:
+			res_scale = float(rv)
+	mirror.setup(size.x, size.y, res_scale)
+	for key in elem.attributes:
+		if MIRROR_RESERVED.has(key):
+			continue
+		mirror.set(key, _resolve_value(elem.attributes[key]))
+	return mirror
+
+
+## Разбирает size="ширина:высота" (метры) в Vector2. "1.5" без двоеточия — квадрат.
+## Нечисловые/пустые части → 1.0.
+func _parse_size(raw: String) -> Vector2:
+	var parts := raw.split(":")
+	var w := _to_float_or(parts[0] if parts.size() > 0 else "", 1.0)
+	var h := _to_float_or(parts[1] if parts.size() > 1 else parts[0], 1.0)
+	return Vector2(w, h)
+
+
+func _to_float_or(s: String, fallback: float) -> float:
+	s = s.strip_edges()
+	return s.to_float() if s.is_valid_float() else fallback
 
 
 ## Превращает строковое значение атрибута в Variant Godot.
