@@ -1,9 +1,10 @@
-[gd_scene load_steps=14 format=3 uid="uid://uqj5l8rau46j"]
+[gd_scene load_steps=15 format=3 uid="uid://uqj5l8rau46j"]
 
 [ext_resource type="Script" uid="uid://bstoi4luel30b" path="res://actors/avatar/avatar.gd" id="1_avatar"]
 [ext_resource type="Texture2D" uid="uid://de0vra644cxh5" path="res://resources/default_face.png" id="2_avggo"]
 [ext_resource type="Script" path="res://actors/avatar/appliers/look_pitch_applier.gd" id="2_lookpitch"]
-[ext_resource type="Script" path="res://actors/avatar/user_settings_avatar_texture.gd" id="3_uqrtr"]
+[ext_resource type="Script" uid="uid://bdje4mebkrh0n" path="res://actors/avatar/user_settings_avatar_texture.gd" id="3_uqrtr"]
+[ext_resource type="Script" path="res://actors/avatar/appliers/user_texture_applier.gd" id="5_27cqi"]
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
 radius = 0.4
@@ -34,6 +35,7 @@ script = ExtResource("3_uqrtr")
 default_texture = ExtResource("2_avggo")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pp5x8"]
+resource_local_to_scene = true
 transparency = 1
 cull_mode = 2
 shading_mode = 0
@@ -70,3 +72,6 @@ surface_material_override/0 = SubResource("StandardMaterial3D_pp5x8")
 [node name="LookPitchApplier" type="Node" parent="."]
 script = ExtResource("2_lookpitch")
 target_path = NodePath("../Head")
+
+[node name="UserTextureApplier" type="Node" parent="."]
+script = ExtResource("5_27cqi")

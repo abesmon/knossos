@@ -78,11 +78,12 @@ func _scene_from_bytes(uri: String, result: int, code: int, body: PackedByteArra
 	if result != HTTPRequest.RESULT_SUCCESS or code >= 400 or body.is_empty():
 		push_warning("[Avatar] не удалось скачать аватар: %s (result %d, code %d)" % [uri, result, code])
 		return null
-	DirAccess.make_dir_recursive_absolute(CACHE_DIR)
+	var cache_dir := Sandbox.resolve(CACHE_DIR)
+	DirAccess.make_dir_recursive_absolute(cache_dir)
 	var ext := uri.get_slice("?", 0).get_file().get_extension()
 	if ext == "":
 		ext = "tscn"
-	var path := CACHE_DIR + str(hash(uri)) + "." + ext
+	var path := cache_dir + str(hash(uri)) + "." + ext
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		return null

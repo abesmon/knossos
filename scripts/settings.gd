@@ -24,8 +24,15 @@ var signaling_url: String = DEFAULT_SIGNALING_URL
 var nick: String = ""
 var avatar_uri: String = DEFAULT_AVATAR_URI
 
+## Фактические пути с учётом dev-песочницы (Sandbox): без --sandbox равны константам, с ним —
+## уходят под user://<id>/. Резолвим один раз в _ready.
+var _path := PATH
+var _face_path := FACE_PATH
+
 
 func _ready() -> void:
+	_path = Sandbox.resolve(PATH)
+	_face_path = Sandbox.resolve(FACE_PATH)
 	load_settings()
 	if nick.strip_edges() == "":
 		nick = random_nick()
@@ -39,7 +46,7 @@ func random_nick() -> String:
 
 ## Гарантирует, что user://face.png существует — при первом запуске кладёт дефолт.
 func _ensure_face() -> void:
-	if FileAccess.file_exists(FACE_PATH):
+	if FileAccess.file_exists(_face_path):
 		return
 	reset_face()
 
@@ -48,20 +55,20 @@ func _ensure_face() -> void:
 func reset_face() -> void:
 	var tex := load(DEFAULT_FACE) as Texture2D
 	if tex != null:
-		tex.get_image().save_png(FACE_PATH)
+		tex.get_image().save_png(_face_path)
 
 
 ## PNG-байты текущего лица (256×256, с альфой) — то, что уходит другим игрокам по сети.
 func face_png() -> PackedByteArray:
-	if FileAccess.file_exists(FACE_PATH):
-		return FileAccess.get_file_as_bytes(FACE_PATH)
+	if FileAccess.file_exists(_face_path):
+		return FileAccess.get_file_as_bytes(_face_path)
 	return PackedByteArray()
 
 
 ## Текстура текущего лица для превью в настройках.
 func face_texture() -> Texture2D:
 	var img := Image.new()
-	if FileAccess.file_exists(FACE_PATH) and img.load(FACE_PATH) == OK:
+	if FileAccess.file_exists(_face_path) and img.load(_face_path) == OK:
 		return ImageTexture.create_from_image(img)
 	return load(DEFAULT_FACE) as Texture2D
 
@@ -74,12 +81,12 @@ func set_face_from_file(path: String) -> bool:
 		return false
 	img.convert(Image.FORMAT_RGBA8)   # гарантируем канал альфы (прозрачность)
 	img.resize(FACE_SIZE, FACE_SIZE, Image.INTERPOLATE_LANCZOS)
-	return img.save_png(FACE_PATH) == OK
+	return img.save_png(_face_path) == OK
 
 
 func load_settings() -> void:
 	var cfg := ConfigFile.new()
-	if cfg.load(PATH) != OK:
+	if cfg.load(_path) != OK:
 		return
 	online_enabled = cfg.get_value("net", "online_enabled", online_enabled)
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
@@ -96,5 +103,5 @@ func save() -> void:
 	cfg.set_value("net", "signaling_url", signaling_url)
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("avatar", "uri", avatar_uri)
-	cfg.save(PATH)
+	cfg.save(_path)
 	changed.emit()
