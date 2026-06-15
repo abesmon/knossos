@@ -105,6 +105,10 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 		if _jpeg_unsupported(body):
 			return null
 		err = img.load_jpg_from_buffer(body)
+	elif hint.contains("gif"):
+		# В Godot нет встроенного декодера GIF — декодируем сами и для многокадровых
+		# отдаём самопроигрывающийся AnimatedTexture. См. docs/gif-support.md.
+		return _decode_gif(body)
 	elif hint.contains("webp"):
 		err = img.load_webp_from_buffer(body)
 	elif hint.contains("svg") and img.has_method("load_svg_from_buffer"):
@@ -122,6 +126,45 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 		img.resize(int(w * scale), int(h * scale), Image.INTERPOLATE_BILINEAR)
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
+
+
+## Декодирует GIF в текстуру. Один кадр -> обычный ImageTexture (дёшево, как статичная
+## картинка). Несколько -> AnimatedTexture, который Godot проигрывает сам и который, будучи
+## Texture2D, без правок встаёт в albedo_texture у потребителей. См. docs/gif-support.md.
+## Кадры ужимаем сильнее обычного (анимация * N кадров — это память).
+func _decode_gif(body: PackedByteArray) -> Texture2D:
+	var frames := GifDecoder.decode(body)
+	if frames.is_empty():
+		return null
+
+	var first: Image = frames[0]["image"]
+	var w := first.get_width()
+	var h := first.get_height()
+	var max_side := 512
+	var scale := 1.0
+	if max(w, h) > max_side:
+		scale = float(max_side) / float(max(w, h))
+	var dst_w := maxi(1, int(w * scale))
+	var dst_h := maxi(1, int(h * scale))
+
+	if frames.size() == 1:
+		if scale < 1.0:
+			first.resize(dst_w, dst_h, Image.INTERPOLATE_BILINEAR)
+		first.generate_mipmaps()
+		return ImageTexture.create_from_image(first)
+
+	# AnimatedTexture держит максимум 256 кадров — длинные гифки подрезаем.
+	var count := mini(frames.size(), 256)
+	var anim := AnimatedTexture.new()
+	anim.frames = count
+	anim.one_shot = false
+	for i in range(count):
+		var fimg: Image = frames[i]["image"]
+		if scale < 1.0:
+			fimg.resize(dst_w, dst_h, Image.INTERPOLATE_BILINEAR)
+		anim.set_frame_texture(i, ImageTexture.create_from_image(fimg))
+		anim.set_frame_duration(i, frames[i]["delay"])
+	return anim
 
 
 func _content_type(headers: PackedStringArray) -> String:
