@@ -179,6 +179,7 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 	if spawn.has("point"):
 		_player.teleport_to(spawn["point"], spawn.get("look_at"))
 	elif gen != null:
+		@warning_ignore("incompatible_ternary")
 		_player.teleport_to(gen.spawn_point, gen.spawn_look_at if gen.has_spawn_look else null)
 	else:
 		_player.teleport_to(Vector3(0, 1.6, 5), Vector3(0, 1.6, 0))

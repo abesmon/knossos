@@ -651,12 +651,14 @@ func _build_cluster_layout(conn: int) -> Dictionary:
 
 	# Вертикальные стены (E/W): дети стопкой по строкам, выровнены по центру стены.
 	for key in ["E", "W"]:
+		@warning_ignore("integer_division")
 		var cur: int = (h - _sum_axis(sides[key], false)) / 2
 		for ch in sides[key]:
 			var ks: Vector2i = _room_cells[ch]
 			var cx: int = w if key == "E" else -ks.x
 			tops[ch] = Vector2i(cx, cur)
 			_add_rect(member, tops[ch], ks)
+			@warning_ignore("integer_division")
 			var rm: int = clampi(cur + ks.y / 2, 0, h - 1)
 			if key == "E":
 				openings.append({"a": conn, "acell": Vector2i(w - 1, rm), "adir": Vector2i(1, 0),
@@ -668,12 +670,14 @@ func _build_cluster_layout(conn: int) -> Dictionary:
 
 	# Горизонтальные стены (N/S): дети стопкой по столбцам, выровнены по центру стены.
 	for key in ["N", "S"]:
+		@warning_ignore("integer_division")
 		var cur: int = (w - _sum_axis(sides[key], true)) / 2
 		for ch in sides[key]:
 			var ks: Vector2i = _room_cells[ch]
 			var cy: int = h if key == "S" else -ks.y
 			tops[ch] = Vector2i(cur, cy)
 			_add_rect(member, tops[ch], ks)
+			@warning_ignore("integer_division")
 			var cm: int = clampi(cur + ks.x / 2, 0, w - 1)
 			if key == "S":
 				openings.append({"a": conn, "acell": Vector2i(cm, h - 1), "adir": Vector2i(0, 1),
@@ -878,7 +882,9 @@ func _fallback_route(a: int, b: int) -> void:
 	var cwa: Vector2i = _room_cells[a]
 	var cb: Vector2i = _room_cell[b]
 	var cwb: Vector2i = _room_cells[b]
+	@warning_ignore("integer_division")
 	var ac := Vector2i(ca.x + cwa.x / 2, ca.y + cwa.y / 2)
+	@warning_ignore("integer_division")
 	var bc := Vector2i(cb.x + cwb.x / 2, cb.y + cwb.y / 2)
 	var da := _toward(ac, bc)
 	var db := _toward(bc, ac)
@@ -981,11 +987,15 @@ func _border_toward(id: int, d: Vector2i) -> Vector2i:
 	var c: Vector2i = _room_cell[id]
 	var cw: Vector2i = _room_cells[id]
 	if d == Vector2i(1, 0):
+		@warning_ignore("integer_division")
 		return Vector2i(c.x + cw.x - 1, c.y + cw.y / 2)
 	if d == Vector2i(-1, 0):
+		@warning_ignore("integer_division")
 		return Vector2i(c.x, c.y + cw.y / 2)
 	if d == Vector2i(0, 1):
+		@warning_ignore("integer_division")
 		return Vector2i(c.x + cw.x / 2, c.y + cw.y - 1)
+	@warning_ignore("integer_division")
 	return Vector2i(c.x + cw.x / 2, c.y)
 
 
@@ -1127,6 +1137,7 @@ func _room_title_object(id: int):
 	if objs.is_empty():
 		return null
 	var first: Dictionary = objs[0]
+	@warning_ignore("incompatible_ternary")
 	return first if first.get("type", "") == "heading" else null
 
 
