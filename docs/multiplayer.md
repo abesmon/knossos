@@ -64,6 +64,14 @@
 определяется через `multiplayer.get_remote_sender_id()`, поэтому отдельный
 `MultiplayerSpawner`/авторитет на капсулу не нужен.
 
+**Видео.** Транспорт видео-плееров синхронизируется тем же приёмом:
+`@rpc("any_peer","reliable") _recv_video_event(player_id, action, position)` (play/pause/seek,
+last-writer-wins) и `@rpc("any_peer","unreliable_ordered") _recv_video_sync(player_id, position,
+playing)` (heartbeat: позиция + состояние). Heartbeat шлёт **таймкипер** —
+пир с наименьшим id (`NetworkManager.is_timekeeper()`), так что late-join и autoplay
+синхронизируются автоматически. Привязка по `player_id` (страница одна = id одни), применяет
+`VrwebVideoManager`. Подробно — в [video-player.md](video-player.md).
+
 `params` — словарь параметров аватара (наклон взгляда, Grounded, скорости и т.д.): любой
 новый сигнал расширяет систему **без правки сигнатуры RPC**. Контракт и полное описание —
 в [avatars.md](avatars.md).

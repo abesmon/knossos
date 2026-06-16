@@ -39,12 +39,16 @@ const RESOURCE_TAG := "Resource"
 const EXT_RESOURCE_TAG := "ExtResource"
 const EXT_SCENE_TAG := "ExtScene"
 const MIRROR_TAG := "VRWebMirror"
+const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
+const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
 const SUBRESOURCE_PREFIX := "SubResource:::"
 const EXTRESOURCE_PREFIX := "ExtResource:::"
 const MODE_COMBINE := "combine"
 const MODE_EXCLUSIVE := "exclusive"
 
 const MIRROR_SCRIPT := preload("res://scripts/vrweb_mirror.gd")
+const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
+const VIDEO_SCREEN_SCRIPT := preload("res://scripts/vrweb_video_screen.gd")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -64,6 +68,12 @@ const RESOURCE_RESERVED := {"id": true, "type": true, "path": true, "src": true}
 
 ## Атрибуты <VRWebMirror>, которые задают сам объект, а не свойства узла Node3D.
 const MIRROR_RESERVED := {"size": true, "resolution_scale": true, "srgb_decode": true}
+
+## Атрибуты <VRWebVideoScreen>, которые задают привязку/плеер, а не свойства узла Node3D.
+const VIDEO_SCREEN_RESERVED := {
+	"player": true, "src": true, "size": true,
+	"autoplay": true, "loop": true, "volume": true,
+}
 
 var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
@@ -179,6 +189,10 @@ func _build_node(elem: HtmlNode) -> Node:
 		return _build_ext_scene(elem)
 	if elem.raw_tag == MIRROR_TAG:
 		return _build_mirror(elem)
+	if elem.raw_tag == VIDEO_PLAYER_TAG:
+		return _build_video_player(elem)
+	if elem.raw_tag == VIDEO_SCREEN_TAG:
+		return _build_video_screen(elem)
 	var cls := elem.raw_tag
 	if not _can_instantiate(cls):
 		push_warning("[VRWeb] неизвестный класс узла «%s» — пропущен" % cls)
@@ -256,6 +270,50 @@ func _build_mirror(elem: HtmlNode) -> Node:
 			continue
 		mirror.set(key, _resolve_value(elem.attributes[key]))
 	return mirror
+
+
+## <VRWebVideoPlayer id="..." src="<url>" autoplay loop volume="0.5"/> — логический видео-плеер
+## (декод в текстуру, см. scripts/vrweb_video_player.gd). Кастомный тег, не класс Godot —
+## headless-узел без геометрии. src резолвится относительно адреса страницы, как ext-ресурсы.
+func _build_video_player(elem: HtmlNode) -> Node:
+	var node: Node = VIDEO_PLAYER_SCRIPT.new()
+	var src := ""
+	if elem.has_attr("src"):
+		src = PageFetcher.resolve_url(elem.get_attr("src"), _base_url)
+	node.setup(elem.get_attr("id"), src, _attr_bool(elem, "autoplay", false),
+			_attr_bool(elem, "loop", false), _attr_float(elem, "volume", 1.0))
+	return node
+
+
+## <VRWebVideoScreen player="<id>" size="ш:в" transform="..."/> — поверхность, показывающая
+## текстуру плеера (см. scripts/vrweb_video_screen.gd). Привязка: player="<id>" (общий плеер)
+## ИЛИ src="<url>" (свой неявный плеер). size — метры (как у зеркала); прочие атрибуты
+## (transform и т.п.) — обычные свойства Node3D.
+func _build_video_screen(elem: HtmlNode) -> Node:
+	var node = VIDEO_SCREEN_SCRIPT.new()
+	var src := ""
+	if elem.has_attr("src"):
+		src = PageFetcher.resolve_url(elem.get_attr("src"), _base_url)
+	var size := Vector2.ZERO
+	if elem.has_attr("size"):
+		size = _parse_size(elem.get_attr("size"))
+	node.setup(elem.get_attr("player"), src, size)
+	node.autoplay = _attr_bool(elem, "autoplay", false)
+	node.loop = _attr_bool(elem, "loop", false)
+	node.volume = _attr_float(elem, "volume", 1.0)
+	for key in elem.attributes:
+		if VIDEO_SCREEN_RESERVED.has(key):
+			continue
+		node.set(key, _resolve_value(elem.attributes[key]))
+	return node
+
+
+## Булев атрибут элемента или fallback (атрибута нет / значение не bool-литерал).
+func _attr_bool(elem: HtmlNode, key: String, fallback: bool) -> bool:
+	if not elem.has_attr(key):
+		return fallback
+	var v: Variant = _resolve_value(elem.get_attr(key))
+	return v if v is bool else fallback
 
 
 ## Числовой атрибут элемента (float) или fallback, если атрибута нет/значение не число.

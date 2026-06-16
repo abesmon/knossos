@@ -20,6 +20,10 @@ signal state_received(id: int, position: Vector3, look_yaw: float, params: Dicti
 signal chat_received(id: int, text: String)
 ## Пир прислал свою «карточку»: ник + текстуру лица (приходит при установке p2p).
 signal identity_received(id: int, nick: String, face: Texture2D, avatar_uri: String)
+## Состояние видео-плеера от пира (см. VrwebVideoManager): player_id — id из тега
+## <VRWebVideoPlayer>, action — "play"/"pause"/"seek"/"sync", position — позиция в секундах.
+## Транспорт и heartbeat-таймкод идут одним сигналом; различаются по action.
+signal video_state_received(id: int, player_id: String, action: String, position: float)
 ## online — есть ли активное подключение к сигнальному серверу.
 signal connection_changed(online: bool)
 
@@ -139,6 +143,35 @@ func send_chat(text: String) -> void:
 	if not _can_rpc():
 		return
 	rpc("_recv_chat", text.left(MAX_CHAT_CHARS))
+
+
+## Разослать транспортное событие видео (play/pause/seek) — надёжно (reliable), чтобы не
+## потерялось. player_id привязывает к плееру с тем же id у всех (страница одна = id одни).
+func send_video_event(player_id: String, action: String, position: float) -> void:
+	if _can_rpc():
+		rpc("_recv_video_event", player_id, action, position)
+
+
+## Разослать heartbeat видео (~1.5 Гц от таймкипера): позиция + состояние play/pause.
+## Ненадёжно, но упорядоченно — отставшие/зашедшие подтянутся следующим пакетом. Несёт
+## playing, чтобы поздно зашедший синхронизировал и позицию, И состояние воспроизведения
+## (а не только при следующем явном play/pause).
+func send_video_sync(player_id: String, position: float, playing: bool) -> void:
+	if _can_rpc():
+		rpc("_recv_video_sync", player_id, position, playing)
+
+
+## Таймкипер комнаты — пир с НАИМЕНЬШИМ id среди нас и подключённых. Детерминированно у всех:
+## ровно один шлёт heartbeat (источник таймкода), без переговоров. При уходе таймкипера роль
+## автоматически переходит к следующему наименьшему. Нужен, т.к. при autoplay явного
+## контроллера нет — иначе таймкода и late-join-синхронизации не было бы вовсе.
+func is_timekeeper() -> bool:
+	if _my_id == 0:
+		return false
+	for pid in _connections.keys():
+		if pid < _my_id:
+			return false
+	return true
 
 
 func nick_of(id: int) -> String:
@@ -305,6 +338,17 @@ func _recv_identity(nick: String, face_png: PackedByteArray, avatar_uri: String)
 	var id := multiplayer.get_remote_sender_id()
 	_nicks[id] = nick if nick != "" else "Guest-%d" % id
 	identity_received.emit(id, _nicks[id], _decode_face(face_png), avatar_uri)
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_video_event(player_id: String, action: String, position: float) -> void:
+	video_state_received.emit(multiplayer.get_remote_sender_id(), player_id, action, position)
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote")
+func _recv_video_sync(player_id: String, position: float, playing: bool) -> void:
+	var action := "sync_play" if playing else "sync_pause"
+	video_state_received.emit(multiplayer.get_remote_sender_id(), player_id, action, position)
 
 
 ## PNG-байты -> текстура (или null, если пусто/битое).

@@ -157,6 +157,12 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 	_world.add_child(_remote_view)
 	_remote_view.setup(_player)
 
+	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
+	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).
+	var video_manager := VrwebVideoManager.new()
+	video_manager.name = "VrwebVideoManager"
+	_world.add_child(video_manager)
+
 	# mode="exclusive" — HTML-сцену не строим вовсе, в мире только узлы vrweb.
 	var exclusive: bool = vrweb.get("found", false) and vrweb.get("mode", "") == VrwebBuilder.MODE_EXCLUSIVE
 	var gen: WorldGenerator = null
@@ -180,6 +186,8 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 	# Узлы vrweb добавляются поверх (combine) либо как единственное содержимое (exclusive).
 	if vrweb.get("found", false) and vrweb.get("root") != null:
 		_world.add_child(vrweb["root"])
+		# Регистрируем видео-плееры и привязываем экраны (после добавления в дерево).
+		video_manager.scan(vrweb["root"])
 
 	# Внешние ресурсы (<ExtResource path="<url>">) качаются и вставляются асинхронно —
 	# прогрессивная подгрузка, как у картинок <img>. Общая логика с дебаг-превью редактора
