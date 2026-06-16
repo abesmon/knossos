@@ -20,6 +20,12 @@ const FACE_SIZE := 256
 const DEFAULT_AVATAR_URI := "vrwebavatar://1"
 
 var online_enabled: bool = false
+## Голосовой чат (микрофон). Захват идёт только когда онлайн И это включено — см. VoiceManager.
+var voice_enabled: bool = false
+## Имя входного аудиоустройства (как в AudioServer.get_input_device_list()). "Default" —
+## следовать системному выбору. Явный выбор помогает обойти кривые маршруты (например,
+## Bluetooth-микрофон в HFP-режиме на macOS — см. docs/voice-chat.md).
+var input_device: String = "Default"
 var signaling_url: String = DEFAULT_SIGNALING_URL
 var nick: String = ""
 var avatar_uri: String = DEFAULT_AVATAR_URI
@@ -89,6 +95,8 @@ func load_settings() -> void:
 	if cfg.load(_path) != OK:
 		return
 	online_enabled = cfg.get_value("net", "online_enabled", online_enabled)
+	voice_enabled = cfg.get_value("net", "voice_enabled", voice_enabled)
+	input_device = cfg.get_value("voice", "input_device", input_device)
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
 	nick = cfg.get_value("net", "nick", nick)
 	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
@@ -100,6 +108,8 @@ func load_settings() -> void:
 func save() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("net", "online_enabled", online_enabled)
+	cfg.set_value("net", "voice_enabled", voice_enabled)
+	cfg.set_value("voice", "input_device", input_device)
 	cfg.set_value("net", "signaling_url", signaling_url)
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("avatar", "uri", avatar_uri)

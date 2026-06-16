@@ -20,8 +20,13 @@ var _target_yaw := 0.0
 var _has_target := false
 var _nick := "Guest"
 var _face_tex: Texture2D = null
+# Пространственное воспроизведение голоса пира. Создаётся лениво на первом кадре, чтобы
+# у молчащих капсул не висел лишний AudioStreamPlayer3D с открытым генератором.
+var _voice: VoicePlayback = null
 
 const LERP_RATE := 12.0
+## Цвет неймплейта, пока пир говорит (подсветка активности).
+const SPEAKING_COLOR := Color(0.5, 1.0, 0.6)
 ## Сколько висит речевой бабл, если не пришло новое сообщение.
 const BUBBLE_SECONDS := 30.0
 ## Максимальная ширина текста (px): короткий ужимается под себя, длинный переносится.
@@ -99,6 +104,22 @@ func set_face(tex: Texture2D) -> void:
 	_face_tex = tex
 	if _host != null and tex != null:
 		_host.apply_identity(_nick, tex)
+
+
+## Принять голосовой кадр от пира — лениво поднимаем воспроизведение и шлём в него.
+## Подсветку неймплейта вешаем на сигнал «говорит» из VoicePlayback.
+func push_voice(payload: PackedByteArray) -> void:
+	if _voice == null:
+		_voice = VoicePlayback.new()
+		_voice.position.y = 1.5   # «рот» примерно на высоте головы капсулы
+		_voice.speaking_changed.connect(_on_speaking_changed)
+		add_child(_voice)
+	_voice.push(payload)
+
+
+func _on_speaking_changed(speaking: bool) -> void:
+	if _label != null:
+		_label.modulate = SPEAKING_COLOR if speaking else Color.WHITE
 
 
 ## Состояние от пира: позиция, поворот корпуса (yaw) и словарь параметров аватара.

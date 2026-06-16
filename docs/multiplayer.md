@@ -14,9 +14,12 @@
   Над капсулой говорящего всплывает речевой бабл (30 c или до следующего сообщения).
 - **Онлайн/офлайн режим** — переключается на экране настроек, по умолчанию офлайн.
 
-Голос **отложен**: WebRTC API в Godot предоставляет только data-каналы (медиа-треков
-нет), поэтому аудио потребует ручной передачи PCM с микрофона через data-канал и
-воспроизведения через `AudioStreamGenerator` — это отдельная итерация.
+- **Голосовой чат** — микрофон → VAD → PCM поверх того же mesh, пространственное
+  воспроизведение из позиции капсулы говорящего. WebRTC API в Godot даёт только data-каналы
+  (медиа-треков нет), поэтому аудио идёт сырым PCM16 через отдельный RPC-канал. Включается
+  отдельным тумблером в настройках (работает только онлайн). Это намеренно простой
+  GDScript-этап; кодек вынесен за интерфейс под будущий Opus. Полностью — в
+  [voice-chat.md](voice-chat.md).
 
 ## Комната = страница
 
@@ -48,8 +51,9 @@
 | Экран настроек | [scenes/settings.gd](../scenes/settings.gd) / `.tscn` | overlay поверх UI, правит `Settings` |
 | `NetworkManager` (autoload) | [scripts/network_manager.gd](../scripts/network_manager.gd) | WS-сигналинг + WebRTC mesh + RPC; жизненный цикл комнаты |
 | `RemotePlayer` | [actors/remote_player/](../actors/remote_player/) | капсула другого игрока (интерполяция, нэйм-плейт) |
-| `RemotePlayersView` | [scripts/remote_players_view.gd](../scripts/remote_players_view.gd) | создаёт/удаляет капсулы по сигналам, шлёт позицию локального игрока ~15 Гц |
+| `RemotePlayersView` | [scripts/remote_players_view.gd](../scripts/remote_players_view.gd) | создаёт/удаляет капсулы по сигналам, шлёт позицию локального игрока ~15 Гц, маршрутит голос в капсулы |
 | Чат UI | в [scenes/main.gd](../scenes/main.gd) | поле ввода + история, видно только онлайн |
+| `VoiceManager` (autoload) | [scripts/voice/voice_manager.gd](../scripts/voice/voice_manager.gd) | захват микрофона, VAD, кодирование и отправка голоса; приём — на капсулах. См. [voice-chat.md](voice-chat.md) |
 
 **Почему `NetworkManager` — autoload, а капсулы — в `world`.** Менеджер должен
 переживать перестройку мира при навигации (нужен стабильный путь `/root/NetworkManager`
@@ -71,6 +75,12 @@ playing)` (heartbeat: позиция + состояние). Heartbeat шлёт *
 пир с наименьшим id (`NetworkManager.is_timekeeper()`), так что late-join и autoplay
 синхронизируются автоматически. Привязка по `player_id` (страница одна = id одни), применяет
 `VrwebVideoManager`. Подробно — в [video-player.md](video-player.md).
+
+**Голос.** Идёт отдельным RPC `@rpc("any_peer","unreliable_ordered","call_remote", 1)`
+`_recv_voice(payload)` по **каналу 1** — чтобы голос не делал head-of-line blocking с
+состоянием/чатом (канал 0), а ретрансмиты не ломали реалтайм. `NetworkManager` остаётся
+чистым транспортом (`send_voice`/`voice_received`); захват и кодек — в `VoiceManager`,
+воспроизведение — на капсуле. Подробно — в [voice-chat.md](voice-chat.md).
 
 `params` — словарь параметров аватара (наклон взгляда, Grounded, скорости и т.д.): любой
 новый сигнал расширяет систему **без правки сигнатуры RPC**. Контракт и полное описание —

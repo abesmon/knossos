@@ -34,6 +34,7 @@ func setup(player: Node3D) -> void:
 	NetworkManager.state_received.connect(_on_state_received)
 	NetworkManager.identity_received.connect(_on_identity_received)
 	NetworkManager.chat_received.connect(_on_chat_received)
+	NetworkManager.voice_received.connect(_on_voice_received)
 
 
 func _exit_tree() -> void:
@@ -44,6 +45,7 @@ func _exit_tree() -> void:
 		NetworkManager.state_received.disconnect(_on_state_received)
 		NetworkManager.identity_received.disconnect(_on_identity_received)
 		NetworkManager.chat_received.disconnect(_on_chat_received)
+		NetworkManager.voice_received.disconnect(_on_voice_received)
 
 
 func _physics_process(delta: float) -> void:
@@ -114,6 +116,14 @@ func _on_chat_received(id: int, text: String) -> void:
 	var cap: RemotePlayer = _capsules.get(id)
 	if cap != null:
 		cap.set_chat(text)
+
+
+## Голосовой кадр от пира — отдаём его капсуле (она поднимет воспроизведение). До первого
+## state капсулы ещё нет: кадр роняем — это доли секунды в начале, на слух незаметно.
+func _on_voice_received(id: int, payload: PackedByteArray) -> void:
+	var cap: RemotePlayer = _capsules.get(id)
+	if cap != null:
+		cap.push_voice(payload)
 
 
 func _on_peer_left(id: int) -> void:

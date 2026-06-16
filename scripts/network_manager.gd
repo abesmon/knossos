@@ -26,6 +26,9 @@ signal identity_received(id: int, nick: String, face: Texture2D, avatar_uri: Str
 signal video_state_received(id: int, player_id: String, action: String, position: float)
 ## online — есть ли активное подключение к сигнальному серверу.
 signal connection_changed(online: bool)
+## Пришёл голосовой кадр от пира: payload — закодированный VoiceCodec (см. VoiceManager).
+## Воспроизведение — на капсуле пира (RemotePlayer/VoicePlayback), маршрутит RemotePlayersView.
+signal voice_received(id: int, payload: PackedByteArray)
 
 ## Жёсткий лимит длины сообщения чата — режем и на отправке, и на приёме, чтобы нигде
 ## (лог, бабл) не отрисовывалось больше.
@@ -161,6 +164,14 @@ func send_video_sync(player_id: String, position: float, playing: bool) -> void:
 		rpc("_recv_video_sync", player_id, position, playing)
 
 
+## Разослать голосовой кадр (закодированный VoiceCodec). Ненадёжно и по отдельному каналу 1,
+## чтобы голос не блокировал и не блокировался состоянием/чатом (канал 0), а ретрансмиты не
+## ломали реалтайм. Вызывает VoiceManager ~25 раз/с во время речи.
+func send_voice(payload: PackedByteArray) -> void:
+	if _can_rpc():
+		rpc("_recv_voice", payload)
+
+
 ## Таймкипер комнаты — пир с НАИМЕНЬШИМ id среди нас и подключённых. Детерминированно у всех:
 ## ровно один шлёт heartbeat (источник таймкода), без переговоров. При уходе таймкипера роль
 ## автоматически переходит к следующему наименьшему. Нужен, т.к. при autoplay явного
@@ -176,6 +187,12 @@ func is_timekeeper() -> bool:
 
 func nick_of(id: int) -> String:
 	return _nicks.get(id, "Guest-%d" % id)
+
+
+## Сколько пиров в комнате (по установленным p2p-соединениям). VoiceManager не захватывает
+## микрофон, пока некому слать.
+func peer_count() -> int:
+	return _connections.size()
 
 
 # --- Внутреннее ---
@@ -349,6 +366,12 @@ func _recv_video_event(player_id: String, action: String, position: float) -> vo
 func _recv_video_sync(player_id: String, position: float, playing: bool) -> void:
 	var action := "sync_play" if playing else "sync_pause"
 	video_state_received.emit(multiplayer.get_remote_sender_id(), player_id, action, position)
+
+
+## Голосовой кадр от пира. Канал 1 — отдельный от состояния/чата (см. send_voice).
+@rpc("any_peer", "unreliable_ordered", "call_remote", 1)
+func _recv_voice(payload: PackedByteArray) -> void:
+	voice_received.emit(multiplayer.get_remote_sender_id(), payload)
 
 
 ## PNG-байты -> текстура (или null, если пусто/битое).

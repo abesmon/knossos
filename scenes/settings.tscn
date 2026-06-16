@@ -50,6 +50,50 @@ horizontal_alignment = 1
 layout_mode = 2
 text = "Онлайн-режим"
 
+[node name="Voice" type="CheckButton" parent="Panel/Margin/VBox"]
+layout_mode = 2
+text = "Голосовой чат (микрофон)"
+tooltip_text = "Передавать голос с микрофона другим в комнате (работает только онлайн)"
+
+[node name="MicLabel" type="Label" parent="Panel/Margin/VBox"]
+layout_mode = 2
+text = "Микрофон"
+
+[node name="MicRow" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Device" type="OptionButton" parent="Panel/Margin/VBox/MicRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Refresh" type="Button" parent="Panel/Margin/VBox/MicRow"]
+layout_mode = 2
+text = "⟳"
+tooltip_text = "Обновить список устройств"
+
+[node name="TestRow" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Test" type="Button" parent="Panel/Margin/VBox/TestRow"]
+layout_mode = 2
+toggle_mode = true
+text = "Проверить микрофон"
+
+[node name="Monitor" type="CheckButton" parent="Panel/Margin/VBox/TestRow"]
+layout_mode = 2
+text = "Слышать себя"
+tooltip_text = "Проигрывать микрофон обратно (в наушниках, чтобы не было эха)"
+
+[node name="Level" type="ProgressBar" parent="Panel/Margin/VBox"]
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+max_value = 1.0
+step = 0.001
+value = 0.0
+show_percentage = false
+
 [node name="UrlLabel" type="Label" parent="Panel/Margin/VBox"]
 layout_mode = 2
 text = "Адрес сигнального сервера"
