@@ -1,8 +1,8 @@
 [gd_scene load_steps=11 format=3 uid="uid://uqj5l8raq5c7"]
 
 [ext_resource type="Script" uid="uid://bstoi4luel30b" path="res://actors/avatar/avatar.gd" id="1_avatar"]
-[ext_resource type="Script" path="res://actors/avatar/appliers/look_pitch_applier.gd" id="2_lookpitch"]
-[ext_resource type="Script" path="res://actors/avatar/appliers/user_texture_applier.gd" id="3_usertex"]
+[ext_resource type="Script" uid="uid://beb1j341o7aon" path="res://actors/avatar/appliers/look_pitch_applier.gd" id="2_lookpitch"]
+[ext_resource type="Script" uid="uid://b0ghphnwpse8o" path="res://actors/avatar/appliers/user_texture_applier.gd" id="3_usertex"]
 [ext_resource type="Script" uid="uid://bdje4mebkrh0n" path="res://actors/avatar/user_settings_avatar_texture.gd" id="4_marker"]
 [ext_resource type="Texture2D" uid="uid://de0vra644cxh5" path="res://resources/default_face.png" id="5_face"]
 
