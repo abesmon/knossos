@@ -338,6 +338,27 @@ func position() -> float:
 	return _vsp.stream_position if _vsp != null else 0.0
 
 
+## Длительность видео, с (0 — пока неизвестна, например, до старта декода).
+func duration() -> float:
+	return _vsp.get_stream_length() if _vsp != null else 0.0
+
+
+## Доля файла, уже скачанная и доступная декодеру (0..1) — это и есть «буфер» для UI экрана.
+## Пока качаем, считаем от ожидаемого размера тела (Content-Length); после докачки — целиком.
+func buffered_fraction() -> float:
+	if _download_done:
+		return 1.0
+	var total := _http.get_body_size() if _http != null else 0
+	if total > 0:
+		return clampf(float(_file_size(_download_path)) / float(total), 0.0, 1.0)
+	return 0.0
+
+
+## Плеер упёрся в конец докачанного куска и ждёт новых байт (underrun) — UI показывает «…».
+func is_buffering() -> bool:
+	return _waiting_buffer
+
+
 ## Поток уже открыт (есть смысл слать по нему heartbeat) — таймкипер шлёт только такие.
 func has_started() -> bool:
 	return _vsp != null and _vsp.stream != null

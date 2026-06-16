@@ -190,10 +190,23 @@ func _physics_process(delta: float) -> void:
 ## Следит, наведён ли прицел на активный объект, и сообщает наружу только при смене
 ## состояния (чтобы main не дёргал UI каждый кадр).
 func _update_aim() -> void:
+	_dispatch_hover()
 	var active := _aim_active_at_ray()
 	if active != _aim_active:
 		_aim_active = active
 		aim_target_changed.emit(active)
+
+
+## Непрерывно кормит точкой прицела объект под лучом, если он этого хочет (метод hover_at) —
+## в отличие от interact_at (по клику). Так VrwebVideoScreen ловит «движение мыши» по экрану и
+## проявляет/прячет свой UI. Объект сам решает, когда UI гаснет (по таймауту), поэтому явного
+## hover-exit не шлём — достаточно перестать звать hover_at, когда луч ушёл.
+func _dispatch_hover() -> void:
+	if _ray == null or not _ray.is_colliding():
+		return
+	var col := _ray.get_collider()
+	if col != null and col.has_method("hover_at"):
+		col.hover_at(_ray.get_collision_point())
 
 
 func _aim_active_at_ray() -> bool:
