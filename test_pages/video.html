@@ -27,14 +27,21 @@
     <OmniLight3D transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,5,0)"
                  omni_range="30" light_energy="3"/>
 
-    <!-- ПРОСТОЙ СЛУЧАЙ: экран со своим (неявным) плеером — одного тега достаточно -->
+    <!-- ПРОСТОЙ СЛУЧАЙ: экран со своим (неявным) плеером — одного тега достаточно.
+         Мелкий файл (1 МБ) для контраста — стартует почти мгновенно. -->
     <VRWebVideoScreen src="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
                       size="3.2:1.8" autoplay="true" loop="true"
                       transform="Transform3D(1,0,0, 0,1,0, 0,0,1, -3.5,1.8,-5)"/>
 
-    <!-- СЛОЖНЫЙ СЛУЧАЙ: один логический плеер — две поверхности (общая текстура) -->
+    <!-- СЛОЖНЫЙ СЛУЧАЙ: один логический плеер — две поверхности (общая текстура).
+         Большой «Big Buck Bunny» 1080p (~30 МБ, faststart): раньше пришлось бы ждать полной
+         загрузки, теперь декод стартует, накопив ~2 МБ, а остаток докачивается на лету (см.
+         docs/video-player.md, «Прогрессивная загрузка»).
+         ВАЖНО: прямой https-URL без редиректа. Godot HTTPRequest спотыкается на кросс-хостовых
+         302 (так падал archive.org) — для своих видео давайте прямые ссылки. moov должен быть
+         спереди (faststart), иначе ранний старт деградирует до «дождаться целиком». -->
     <VRWebVideoPlayer id="main" autoplay="true" loop="true"
-        src="https://media.w3.org/2010/05/sintel/trailer.mp4"/>
+        src="https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_30MB.mp4"/>
 
     <!-- большой экран -->
     <VRWebVideoScreen player="main" size="3.2:1.8"
