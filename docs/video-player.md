@@ -85,7 +85,10 @@
 
 ffmpeg собирается из исходников через `ffmpeg-kit` (нативного релиза под macOS нет). В нашем
 форке Makefile **пропатчен на decode-only** (без энкодеров x264/x265/lame — плееру нужен только
-декод; это сильно ускоряет сборку и делает её LGPL-чистой) и на `arch=arm64` для scons.
+декод; это сильно ускоряет сборку и делает её LGPL-чистой) и на `arch=$(PREFIX_ARCH)` для scons.
+Патч закоммичен в форк, сабмодуль закреплён на ветке `knossos-decode-only` (см. `.gitmodules`),
+поэтому `git submodule update` приносит уже пропатченный Makefile — применять ничего вручную не
+надо.
 
 ```bash
 # 1. сабмодули (форк + его godot-cpp и ffmpeg-kit)
@@ -110,9 +113,10 @@ ditto gdextension_build/build/addons/ffmpeg/macos ../../addons/ffmpeg/macos
 
 > ⚠️ `TARGET_ARCH=arm64` даёт **только Apple Silicon**. Для universal (поддержка Intel) —
 > `TARGET_ARCH="arm64 x86_64"` (дольше: ffmpeg собирается под обе арки + `lipo`).
-> Бинарники аддона, как и webrtc, в основной репозиторий обычно **не коммитятся**.
-> Правки сборки живут в нашем форке (Makefile decode-only/arch) — их нужно закоммитить и
-> запушить в `abesmon/EIRTeam.FFmpeg`, иначе при свежем `submodule update` они потеряются.
+> Правки сборки закреплены в форке (ветка `knossos-decode-only`, коммит с патчем Makefile),
+> gitlink в основном репо указывает на него — изменения не потеряются. Build-артефакты внутри
+> сабмодуля (`thirdparty/`, `gdextension_build/build/`, `venv/`) не отслеживаются родителем
+> (`ignore = dirty` в `.gitmodules`).
 
 **Деградация без аддона:** `VrwebVideoPlayer.is_available()` (= `ClassDB.class_exists`,
 как `NetworkManager.webrtc_available()`) ложно — плеер не стартует, экраны показывают заглушку

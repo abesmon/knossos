@@ -1,3 +1,5 @@
 [submodule "third_party/EIRTeam.FFmpeg"]
 	path = third_party/EIRTeam.FFmpeg
 	url = https://github.com/abesmon/EIRTeam.FFmpeg
+	branch = knossos-decode-only
+	ignore = dirty
