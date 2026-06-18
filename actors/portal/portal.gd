@@ -57,13 +57,14 @@ func _short_label() -> String:
 	var prefix := ""
 	match get_kind():
 		"navigate": prefix = "→ "
+		"external": prefix = "⮺ "
 		"teleport": prefix = "↪ "
 		"back": prefix = "↩ "
 	var t := label_text.strip_edges()
 	if t.length() > 40:
 		t = t.substr(0, 40) + "…"
 	if t == "":
-		t = transition.get("href", transition.get("target", "ссылка"))
+		t = transition.get("href", transition.get("uri", transition.get("target", "ссылка")))
 	return prefix + t
 
 
@@ -79,6 +80,10 @@ func _apply_color() -> void:
 		"back":
 			mat.albedo_color = Color(0.8, 0.8, 0.3)
 			mat.emission = Color(0.4, 0.4, 0.1)
+		"external":
+			# Выход во внешнее приложение — фиолетовый, чтобы отличать от внутренней навигации.
+			mat.albedo_color = Color(0.7, 0.4, 1.0)
+			mat.emission = Color(0.35, 0.15, 0.6)
 		_:
 			mat.albedo_color = Color(1.0, 0.55, 0.2)
 			mat.emission = Color(0.6, 0.25, 0.05)

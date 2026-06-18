@@ -9,6 +9,8 @@ static func describe(t) -> String:
 	match t.get("kind", ""):
 		"navigate":
 			return "→ " + str(t.get("href", "")).strip_edges()
+		"external":
+			return "⮺ " + str(t.get("uri", "")).strip_edges()
 		"teleport":
 			return "↪ #" + str(t.get("target", "")).strip_edges()
 		"back":

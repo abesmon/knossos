@@ -148,7 +148,10 @@ func _build_bbcode() -> void:
 		if fn != null and typeof(fn) == TYPE_DICTIONARY:
 			var idx := _metas.size()
 			_metas.append(fn)
-			var col := "#5cc8ff" if fn.get("kind", "") == "navigate" else "#9be7ff"
+			var col := "#9be7ff"  # teleport (внутристраничный якорь) по умолчанию
+			match fn.get("kind", ""):
+				"navigate": col = "#5cc8ff"
+				"external": col = "#c69bff"  # выход во внешнее приложение
 			sb += "[color=%s][u][url=%d]%s[/url][/u][/color]" % [col, idx, text]
 		else:
 			sb += text

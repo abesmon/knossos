@@ -506,9 +506,36 @@ func _transition_for(anchor: HtmlNode):
 		return null
 	if href.begins_with("#"):
 		return {"kind": "teleport", "target": href.substr(1)}
-	if href.begins_with("javascript:"):
+	var scheme := _scheme_of(href)
+	if scheme == "javascript":
 		return null
-	return {"kind": "navigate", "href": href}
+	# http/https и относительные ссылки (без схемы) — внутренний браузинг VRWeb.
+	if scheme == "" or scheme == "http" or scheme == "https":
+		return {"kind": "navigate", "href": href}
+	# Любая другая схема (mailto:, tel:, sms:, magnet:, кастомные app-схемы) — это не
+	# веб-страница, а намерение для ОС: пробросим в системный обработчик (OS.shell_open).
+	return {"kind": "external", "uri": href}
+
+
+## Возвращает схему URL в нижнем регистре ("http", "mailto", …) или "" если её нет
+## (относительный путь). Схема по RFC 3986: ALPHA *(ALPHA/DIGIT/"+"/"-"/".") до ":".
+## Любой из /?# до двоеточия означает, что это относительный путь, а не схема.
+static func _scheme_of(url: String) -> String:
+	var colon := url.find(":")
+	if colon <= 0:
+		return ""
+	for sep in ["/", "?", "#"]:
+		var p := url.find(sep)
+		if p != -1 and p < colon:
+			return ""
+	var scheme := url.substr(0, colon)
+	for i in scheme.length():
+		var ch := scheme[i]
+		var alpha := (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")
+		var ok := alpha or (i > 0 and ((ch >= "0" and ch <= "9") or ch == "+" or ch == "-" or ch == "."))
+		if not ok:
+			return ""
+	return scheme.to_lower()
 
 
 # --- Хинты и якоря ---

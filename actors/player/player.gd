@@ -146,6 +146,15 @@ func capture_mouse(on: bool) -> void:
 	mouse_capture_changed.emit(on)
 
 
+## Окно/приложение потеряло фокус: Alt-Tab, переключение на другое приложение или открытие
+## внешнего приложения по external-ссылке (mailto:/tel:/…). Сам MOUSE_MODE_CAPTURED при этом
+## «залипает» — курсор ОС физически свободен, но движения мыши всё ещё крутят камеру. Снимаем
+## захват, чтобы потеря фокуса гасила и захват движения; вернуться в браузинг — клик по окну.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and _looking:
+		capture_mouse(false)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and _looking:
 		rotate_y(-event.relative.x * mouse_sensitivity)

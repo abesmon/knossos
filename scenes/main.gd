@@ -234,6 +234,16 @@ func _activate_transition(transition: Dictionary) -> void:
 	match transition.get("kind", ""):
 		"navigate":
 			_navigate(transition.get("href", ""), _current_url, true)
+		"external":
+			# Ссылка с нестандартной схемой (mailto:, tel:, magnet:, app-схема) — это не
+			# страница для VRWeb, а намерение для ОС. Отдаём системному обработчику; он сам
+			# решит, что запускать (почтовик, телефон, торрент-клиент, стороннее приложение).
+			var uri: String = transition.get("uri", "")
+			var err := OS.shell_open(uri)
+			if err == OK:
+				_set_status("Открыто во внешнем приложении: %s" % uri)
+			else:
+				_set_status("Не удалось открыть %s (ошибка %d)" % [uri, err])
 		"teleport":
 			var target: String = transition.get("target", "")
 			if _label_positions.has(target):
