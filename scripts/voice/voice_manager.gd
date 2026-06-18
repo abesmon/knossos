@@ -2,24 +2,23 @@ extends Node
 
 ## Голосовой чат — отправляющая сторона (autoload «VoiceManager»).
 ##
-## Тракт: микрофон → шина с AudioEffectCapture → даунмикс в моно → VAD (детектор речи) →
-## ресемпл к VoiceCodec.RATE → нарезка на кадры → кодирование → NetworkManager.send_voice.
-## Приём и пространственное воспроизведение — на капсулах (RemotePlayer/VoicePlayback),
-## поэтому здесь только захват и локальное состояние.
+## ЗАХВАТ ЧЕРЕЗ ШИНУ: AudioStreamMicrophone → шина с AudioEffectCapture. Ресемплингом
+## устройства к частоте микшера занимается сам движок, поэтому захваченные кадры всегда на
+## ИЗВЕСТНОЙ частоте get_mix_rate(). Развязанный get_input_frames-API (Godot 4.6) для голоса
+## НЕ используем: при подключённых Bluetooth-наушниках он отдаёт не-BT микрофон с неверной
+## заявленной частотой и рваным потоком (talkbox/робовойс). Подробности и известное ограничение
+## Bluetooth — в docs/voice-chat.md.
 ##
-## Помимо сетевого захвата есть режим МОНИТОРИНГА — проверка микрофона в настройках без сети:
-## считает уровень входного сигнала (input_level) и может проигрывать его обратно (loopback,
-## «слышать себя»). Захват микрофона включается, если нужен сети ИЛИ идёт мониторинг; иначе
-## устройство отпускается.
-##
-## Полностью на GDScript, без зависимостей; ограничения и расчёты — в docs/voice-chat.md.
+## Тракт: микрофон → шина (get_mix_rate) → даунмикс в моно → VAD → ресемпл к VoiceCodec.RATE
+## (с антиалиасингом при понижении) → кадры → кодирование → NetworkManager.send_voice. Приём и
+## пространственное воспроизведение — на капсулах (RemotePlayer/VoicePlayback). Есть режим
+## МОНИТОРИНГА (проверка микрофона в настройках): уровень входа + опциональный loopback.
 
 ## Локальная речь открылась/закрылась (по VAD) — для индикации в UI.
 signal local_speaking_changed(speaking: bool)
 
 const BUS_NAME := "VoiceCapture"
-## Длина буфера эффекта захвата (с). С запасом перекрывает интервал кадра, чтобы не терять
-## семплы между опросами в _process.
+## Длина буфера эффекта захвата (с). С запасом перекрывает интервал кадра.
 const CAPTURE_BUFFER := 0.1
 ## Множитель входного усиления перед VAD/кодированием.
 const INPUT_GAIN := 1.0
@@ -39,12 +38,12 @@ var muted := false:
 		if value and _speaking:
 			_set_speaking(false)
 
-# Захват держим без статической типизации классов, которые могут отсутствовать на платформе.
 var _bus_idx := -1
 var _capture: AudioEffectCapture = null
 var _mic_player: AudioStreamPlayer = null
 var _codec := VoiceCodec.new()
 var _resampler: LinearResampler = null
+var _rate := 0.0   # частота захвата (= get_mix_rate), под которую собран ресемплер/монитор
 var _send_accum := PackedFloat32Array()
 var _speaking := false
 var _silence_sec := 0.0
@@ -52,6 +51,7 @@ var _silence_sec := 0.0
 # Мониторинг (проверка в настройках).
 var _monitoring := false
 var _loopback := false
+var _monitor_player: AudioStreamPlayer = null
 var _monitor_pb: AudioStreamGeneratorPlayback = null
 var _level := 0.0   # сглаженный уровень входа [0..1] для индикатора
 
@@ -67,14 +67,16 @@ func is_speaking() -> bool:
 
 # --- Выбор входного устройства ---
 
-## Список доступных входных устройств (включая "Default" — следовать системному выбору).
 func input_device_list() -> PackedStringArray:
 	return AudioServer.get_input_device_list()
 
 
-## Текущее активное входное устройство.
 func current_input_device() -> String:
 	return AudioServer.input_device
+
+
+func input_mix_rate() -> float:
+	return _rate
 
 
 ## Переключить вход на устройство по имени. Пустое/неизвестное → "Default".
@@ -84,7 +86,6 @@ func apply_input_device(device_name: String) -> void:
 
 # --- Мониторинг (проверка микрофона) ---
 
-## Включить/выключить проверку микрофона. loopback — проигрывать вход обратно («слышать себя»).
 func set_monitoring(enabled: bool, loopback: bool = false) -> void:
 	_monitoring = enabled
 	_loopback = loopback
@@ -96,7 +97,6 @@ func is_monitoring() -> bool:
 	return _monitoring
 
 
-## Текущий уровень входного сигнала [0..1] — для индикатора в настройках. 0, если захвата нет.
 func input_level() -> float:
 	return _level
 
@@ -104,6 +104,7 @@ func input_level() -> float:
 # --- Захват ---
 
 func _setup_capture() -> void:
+	_rate = AudioServer.get_mix_rate()
 	# Отдельная шина с эффектом захвата; muted — чтобы не слышать собственный микрофон.
 	_bus_idx = AudioServer.bus_count
 	AudioServer.add_bus(_bus_idx)
@@ -118,18 +119,19 @@ func _setup_capture() -> void:
 	_mic_player.bus = BUS_NAME
 	add_child(_mic_player)
 
-	_resampler = LinearResampler.new(AudioServer.get_mix_rate(), float(VoiceCodec.RATE))
+	_resampler = LinearResampler.new(_rate, float(VoiceCodec.RATE))
 
-	# Локальный loopback-плеер (для «слышать себя»): генератор на частоте микшера, на Master.
-	# Играет всегда, но кадры в него кладём только при включённом мониторинге с loopback.
-	var monitor := AudioStreamPlayer.new()
+	# Локальный loopback-плеер (для «слышать себя»): генератор на частоте микшера.
+	# Буфер с запасом (0.4 с) — Bluetooth-вывод даёт высокую/рваную задержку, на коротком
+	# буфере генератор недобирает (underrun).
+	_monitor_player = AudioStreamPlayer.new()
 	var gen := AudioStreamGenerator.new()
-	gen.mix_rate = AudioServer.get_mix_rate()
-	gen.buffer_length = 0.1
-	monitor.stream = gen
-	add_child(monitor)
-	monitor.play()
-	_monitor_pb = monitor.get_stream_playback()
+	gen.mix_rate = _rate
+	gen.buffer_length = 0.4
+	_monitor_player.stream = gen
+	add_child(_monitor_player)
+	_monitor_player.play()
+	_monitor_pb = _monitor_player.get_stream_playback()
 
 
 ## Нужно ли захватывать ради сети: онлайн, голос включён, не заглушены и есть кому слать.
@@ -146,7 +148,6 @@ func _process(delta: float) -> void:
 	var net := _want_network_capture()
 	var want := net or _monitoring
 	if want != _mic_player.playing:
-		# Старт/стоп микрофона по необходимости. На остановке чистим хвосты сессии.
 		if want:
 			_mic_player.play()
 		else:
@@ -166,7 +167,7 @@ func _process(delta: float) -> void:
 	_update_level(mono, delta)
 	_update_vad(mono, delta)
 
-	# «Слышать себя»: кладём вход в loopback-плеер (на частоте микшера, без ресемпла).
+	# «Слышать себя»: вход в loopback-плеер (на частоте микшера, без ресемпла).
 	if _monitoring and _loopback and _monitor_pb != null:
 		var room := _monitor_pb.get_frames_available()
 		var m := mini(mono.size(), room)
@@ -174,7 +175,7 @@ func _process(delta: float) -> void:
 			_monitor_pb.push_frame(Vector2(mono[i], mono[i]))
 
 	# Сетевой путь: ресемплим всегда (непрерывная фаза), в эфир кладём только во время речи.
-	if net:
+	if net and _resampler != null:
 		_resampler.process(mono, _send_accum)
 		if _speaking:
 			while _send_accum.size() >= VoiceCodec.FRAME_SAMPLES:
@@ -187,7 +188,7 @@ func _process(delta: float) -> void:
 		_send_accum.clear()
 
 
-## Стерео-буфер захвата → моно с усилением. Микрофон обычно моно (L==R), но усредняем честно.
+## Стерео-буфер захвата → моно с усилением.
 func _downmix(stereo: PackedVector2Array) -> PackedFloat32Array:
 	var mono := PackedFloat32Array()
 	mono.resize(stereo.size())

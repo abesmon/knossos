@@ -258,7 +258,11 @@ func _ws_send(msg: Dictionary) -> void:
 func _setup_mesh() -> void:
 	_teardown_mesh()
 	_mesh = ClassDB.instantiate("WebRTCMultiplayerPeer")
-	_mesh.create_mesh(_my_id)
+	# create_mesh заводит 3 базовых канала (reliable / unreliable / unreliable_ordered, индексы
+	# 0–2). Голос идёт по отдельному @rpc-каналу 1 (см. _recv_voice) — он маппится на 4-й
+	# WebRTC-канал (индекс 3), поэтому добавляем дополнительный unreliable_ordered-канал, иначе
+	# put_packet падает с «max channels: 3». Все пиры создают меш одинаково — каналы совпадают.
+	_mesh.create_mesh(_my_id, [MultiplayerPeer.TRANSFER_MODE_UNRELIABLE_ORDERED])
 	multiplayer.multiplayer_peer = _mesh
 
 

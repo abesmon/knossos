@@ -78,8 +78,10 @@ playing)` (heartbeat: позиция + состояние). Heartbeat шлёт *
 
 **Голос.** Идёт отдельным RPC `@rpc("any_peer","unreliable_ordered","call_remote", 1)`
 `_recv_voice(payload)` по **каналу 1** — чтобы голос не делал head-of-line blocking с
-состоянием/чатом (канал 0), а ретрансмиты не ломали реалтайм. `NetworkManager` остаётся
-чистым транспортом (`send_voice`/`voice_received`); захват и кодек — в `VoiceManager`,
+состоянием/чатом (канал 0), а ретрансмиты не ломали реалтайм. Под этот канал меш создаётся с
+доп. data-каналом: `create_mesh(id, [TRANSFER_MODE_UNRELIABLE_ORDERED])` — иначе `put_packet`
+падает с «max channels: 3» (по умолчанию каналов только 3). `NetworkManager` остаётся чистым
+транспортом (`send_voice`/`voice_received`); захват и кодек — в `VoiceManager`,
 воспроизведение — на капсуле. Подробно — в [voice-chat.md](voice-chat.md).
 
 `params` — словарь параметров аватара (наклон взгляда, Grounded, скорости и т.д.): любой
