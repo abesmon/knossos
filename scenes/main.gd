@@ -55,6 +55,8 @@ func _ready() -> void:
 	# Браузинг мира и UI взаимоисключающи: пока мышь захвачена, элементы навбара/чата
 	# делаем нефокусируемыми, чтобы их нельзя было активировать с клавиатуры (Tab/Space/Enter).
 	_player.mouse_capture_changed.connect(_on_mouse_capture_changed)
+	# Enter в браузинге открывает строку чата (быстрый ввод сообщения без клика).
+	_player.chat_requested.connect(_on_chat_requested)
 	_world.add_child(_player)
 
 	_go.pressed.connect(_on_go)
@@ -92,6 +94,16 @@ func _on_go() -> void:
 ## достала; при выходе — снова разрешаем кликать и печатать в навбаре/чате.
 func _on_mouse_capture_changed(captured: bool) -> void:
 	_set_ui_focusable(not captured)
+
+
+## Enter в браузинге мира — открываем строку чата: освобождаем мышь (делает UI фокусируемым)
+## и ставим фокус в поле ввода. Отправка по Enter (или пустой Enter) вернёт в браузинг через
+## _on_chat_submitted. Работает только когда чат показан (онлайн).
+func _on_chat_requested() -> void:
+	if _chat_input == null or _chat_root == null or not _chat_root.visible:
+		return
+	_player.capture_mouse(false)
+	_chat_input.grab_focus()
 
 
 ## Разрешает/запрещает фокусировку интерактивных элементов навбара и чата. FOCUS_NONE убирает
@@ -385,10 +397,10 @@ func _build_chat_ui(ui: Control) -> void:
 func _on_chat_submitted(text: String) -> void:
 	text = text.strip_edges().left(NetworkManager.MAX_CHAT_CHARS)
 	_chat_input.clear()
-	if text == "":
-		return
-	NetworkManager.send_chat(text)
-	_append_chat(Settings.nick, text)   # локальное эхо
+	if text != "":
+		NetworkManager.send_chat(text)
+		_append_chat(Settings.nick, text)   # локальное эхо
+	# Enter всегда возвращает в браузинг — даже на пустом сообщении (round-trip с chat_requested).
 	_player.capture_mouse(true)
 
 

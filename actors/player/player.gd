@@ -14,6 +14,10 @@ signal aim_target_changed(active: bool)
 ## фокусировку UI-элементов: пока ходим по миру, клавиатура их не достаёт.
 signal mouse_capture_changed(captured: bool)
 
+## Enter в браузинге мира — просьба открыть строку чата. main освобождает мышь и
+## ставит фокус в поле ввода (отправка по Enter вернёт нас в браузинг).
+signal chat_requested
+
 ## Отладочный режим инспектора провенанса (F3) включён/выключен. main показывает/прячет оверлей.
 signal debug_toggled(on: bool)
 ## Текст провенанса узла под прицелом в отладочном режиме (пустой — под прицелом ничего).
@@ -168,6 +172,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_SPACE:
 				if _looking:
 					_handle_space_tap()
+			KEY_ENTER, KEY_KP_ENTER:
+				if _looking:
+					chat_requested.emit()
 
 
 ## Двойное нажатие пробела включает/выключает полёт.
