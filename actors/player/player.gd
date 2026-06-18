@@ -7,8 +7,9 @@ extends CharacterBody3D
 ## объект (Portal/RichPanel) сам сообщает переход наружу.
 
 ## Прицел навёлся на активный (кликабельный/портальный) объект или ушёл с него.
-## main подписывается и подсвечивает курсор-прицел.
-signal aim_target_changed(active: bool)
+## main подписывается и подсвечивает курсор-прицел. hint — «куда ведёт» объект под прицелом
+## (для строки статуса, как превью ссылки в углу браузера); пустой — вести некуда / прицел ушёл.
+signal aim_target_changed(active: bool, hint: String)
 
 ## Захват мыши (браузинг мира) включён/выключен. main по нему разрешает/запрещает
 ## фокусировку UI-элементов: пока ходим по миру, клавиатура их не достаёт.
@@ -37,6 +38,7 @@ var _looking := false
 var _flying := false
 var _last_space_time := -1.0
 var _aim_active := false
+var _aim_hint := ""          # последний показанный «куда ведёт» (эмитим только при смене)
 var _scroll_pending := 0.0   # накопленные тики колеса, гасятся в _physics_process
 var _debug_on := false       # инспектор провенанса под прицелом (F3)
 var _debug_last := ""        # последний показанный текст (эмитим только при смене)
@@ -209,10 +211,17 @@ func _physics_process(delta: float) -> void:
 ## состояния (чтобы main не дёргал UI каждый кадр).
 func _update_aim() -> void:
 	_dispatch_hover()
-	var active := _aim_active_at_ray()
-	if active != _aim_active:
+	var col := _aim_collider()
+	# is_active_at — есть ли подсветка курсора; aim_hint_at — «куда ведёт» (для строки статуса).
+	var active: bool = col != null and col.has_method("is_active_at") \
+			and col.is_active_at(_ray.get_collision_point())
+	var hint: String = ""
+	if active and col.has_method("aim_hint_at"):
+		hint = col.aim_hint_at(_ray.get_collision_point())
+	if active != _aim_active or hint != _aim_hint:
 		_aim_active = active
-		aim_target_changed.emit(active)
+		_aim_hint = hint
+		aim_target_changed.emit(active, hint)
 
 
 ## Непрерывно кормит точкой прицела объект под лучом, если он этого хочет (метод hover_at) —
@@ -227,13 +236,11 @@ func _dispatch_hover() -> void:
 		col.hover_at(_ray.get_collision_point())
 
 
-func _aim_active_at_ray() -> bool:
+## Объект под лучом прицела (или null, если луч ни во что не упёрся).
+func _aim_collider() -> Object:
 	if _ray == null or not _ray.is_colliding():
-		return false
-	var col := _ray.get_collider()
-	if col == null or not col.has_method("is_active_at"):
-		return false
-	return col.is_active_at(_ray.get_collision_point())
+		return null
+	return _ray.get_collider()
 
 
 ## --- Отладочный инспектор провенанса (F3) ---

@@ -457,7 +457,7 @@ func _setup_ui_extras() -> void:
 	_cross.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_cross)
-	_on_aim_target_changed(false)
+	_on_aim_target_changed(false, "")
 
 	# Строка статуса внизу.
 	_status = Label.new()
@@ -514,8 +514,12 @@ func _on_debug_probed(text: String) -> void:
 
 
 ## Подсветка прицела: над кликабельным/портальным объектом он становится кружком
-## (акцентный цвет и крупнее), иначе — нейтральный плюс.
-func _on_aim_target_changed(active: bool) -> void:
+## (акцентный цвет и крупнее), иначе — нейтральный плюс. hint — «куда ведёт» объект под
+## прицелом: пишем его в строку статуса (превью ссылки, как в углу браузера), а как только
+## прицел уходит «в никуда» — очищаем поле.
+func _on_aim_target_changed(active: bool, hint: String) -> void:
+	if _status != null:
+		_status.text = hint
 	if _cross == null:
 		return
 	if active:

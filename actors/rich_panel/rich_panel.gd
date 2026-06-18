@@ -24,6 +24,7 @@ var _h_px := 120
 var _font_size := FONT_SIZE      # кегль вьюпорта; мир задаёт его из базы текста страницы
 var _probing := false            # is_active_at «кликает» вхолостую, чтобы узнать, есть ли ссылка
 var _probe_hit := false          # результат такого пробного клика
+var _probe_transition = null     # Transition под точкой пробного клика (для строки статуса)
 var _scrollable := false         # контент выше потолка ⇒ панель прокручивается колесом
 var _thumb: ColorRect = null     # собственный индикатор скролла (штатный бар RichTextLabel прячем)
 
@@ -91,9 +92,16 @@ func is_active_at(point: Vector3) -> bool:
 		return false
 	_probing = true
 	_probe_hit = false
+	_probe_transition = null
 	_push_click(px)
 	_probing = false
 	return _probe_hit
+
+
+## Куда ведёт ссылка под прицелом — для строки статуса. Переиспользует Transition,
+## пойманный последним пробным is_active_at (Player зовёт его в том же кадре перед этим).
+func aim_hint_at(_point: Vector3) -> String:
+	return TransitionText.describe(_probe_transition)
 
 
 ## Точка попадания луча -> пиксель вьюпорта. Vector2(-1, -1) — квад ещё не построен.
@@ -118,11 +126,13 @@ func _push_click(px: Vector2) -> void:
 
 
 func _on_meta_clicked(meta: Variant) -> void:
-	# Пробный клик из is_active_at: только фиксируем попадание по ссылке, без перехода.
+	var idx := int(str(meta))
+	# Пробный клик из is_active_at: фиксируем попадание и Transition под точкой, без перехода.
 	if _probing:
 		_probe_hit = true
+		if idx >= 0 and idx < _metas.size():
+			_probe_transition = _metas[idx]
 		return
-	var idx := int(str(meta))
 	if idx >= 0 and idx < _metas.size():
 		link_activated.emit(_metas[idx])
 

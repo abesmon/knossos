@@ -44,6 +44,11 @@ func is_active_at(_point: Vector3) -> bool:
 	return true
 
 
+## Куда ведёт портал — для строки статуса (превью ссылки в углу, см. main._on_aim_target_changed).
+func aim_hint_at(_point: Vector3) -> String:
+	return TransitionText.describe(transition)
+
+
 func get_kind() -> String:
 	return transition.get("kind", "")
 

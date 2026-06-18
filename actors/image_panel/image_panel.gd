@@ -148,8 +148,23 @@ func _has_alpha(tex: Texture2D) -> bool:
 
 ## Общий интерфейс взаимодействия по лучу игрока — кликабельна только картинка-ссылка.
 func interact_at(_point: Vector3) -> void:
-	if _transition != null and typeof(_transition) == TYPE_DICTIONARY:
+	if _is_link():
 		link_activated.emit(_transition)
+
+
+## Под прицелом ли кликабельная картинка-ссылка? Player'у — для подсветки курсора.
+## У картинки ссылкой служит вся панель, так что точка попадания не важна.
+func is_active_at(_point: Vector3) -> bool:
+	return _is_link()
+
+
+## Куда ведёт картинка-ссылка — для строки статуса (превью ссылки в углу браузера).
+func aim_hint_at(_point: Vector3) -> String:
+	return TransitionText.describe(_transition) if _is_link() else ""
+
+
+func _is_link() -> bool:
+	return _transition != null and typeof(_transition) == TYPE_DICTIONARY
 
 
 ## Размер квада-заглушки до загрузки: что известно из HTML, иначе запасная ширина
