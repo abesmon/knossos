@@ -124,8 +124,26 @@ func _on_texture(tex: Texture2D) -> void:
 	_mat.albedo_color = Color.WHITE
 	_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	# Без этого StandardMaterial3D игнорирует альфу PNG/GIF и прозрачные пиксели
+	# рендерятся своим RGB (обычно чёрным) — отсюда «чёрный фон». Альфу включаем
+	# только если она реально есть, чтобы не платить за сортировку прозрачных
+	# у непрозрачных JPEG.
+	if _has_alpha(tex):
+		_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_label.visible = false
 	_update_layout()
+
+
+## true, если у текстуры есть альфа-канал (значит, может быть прозрачность).
+## GIF приходит как AnimatedTexture (get_image нет) — у него альфу считаем возможной:
+## прозрачность в гифках обычна, а лишний альфа-режим у непрозрачной гифки дёшев.
+func _has_alpha(tex: Texture2D) -> bool:
+	if tex is AnimatedTexture:
+		return true
+	var img := tex.get_image()
+	if img == null:
+		return false
+	return img.detect_alpha() != Image.ALPHA_NONE
 
 
 ## Общий интерфейс взаимодействия по лучу игрока — кликабельна только картинка-ссылка.
