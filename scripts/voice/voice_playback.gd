@@ -28,6 +28,9 @@ func _ready() -> void:
 	gen.mix_rate = float(VoiceCodec.RATE)
 	gen.buffer_length = BUFFER_SEC
 	stream = gen
+	# Голос пиров идёт на отдельную шину «Voice» — её громкость регулируется отдельным
+	# ползунком в настройках (см. default_bus_layout.tres, docs/audio.md).
+	bus = &"Voice"
 	# Чуть «дальнобойнее» дефолта, чтобы голос был слышен через комнату, но оставался
 	# направленным (затухание с расстоянием сохраняет ощущение, кто где).
 	unit_size = 6.0

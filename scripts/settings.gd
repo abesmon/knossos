@@ -19,6 +19,10 @@ const FACE_SIZE := 256
 ## (пак приложения) или http(s)://…tscn (внешний). См. actors/avatar/avatar_resolver.gd.
 const DEFAULT_AVATAR_URI := "vrwebavatar://1"
 
+## Звуковые шины с отдельными ползунками громкости (см. default_bus_layout.tres, docs/audio.md).
+## Master — общий, World — звуки мира/страниц (видео, <audio>), Voice — голос пиров.
+const AUDIO_BUSES := ["Master", "World", "Voice"]
+
 var online_enabled: bool = false
 ## Голосовой чат (микрофон). Захват идёт только когда онлайн И это включено — см. VoiceManager.
 var voice_enabled: bool = false
@@ -26,6 +30,18 @@ var voice_enabled: bool = false
 ## следовать системному выбору. Явный выбор помогает обойти кривые маршруты (например,
 ## Bluetooth-микрофон в HFP-режиме на macOS — см. docs/voice-chat.md).
 var input_device: String = "Default"
+## Усиление микрофона (линейный множитель). 1.0 — без изменений, <1 тише, >1 громче. Применяется
+## до VAD и кодирования — см. VoiceManager._downmix.
+var mic_gain: float = 1.0
+## Порог активации голоса (RMS открытия VAD). Выше — нужно говорить громче, чтобы началась
+## передача. Порог закрытия VoiceManager держит вдвое ниже (гистерезис). См. VoiceManager.
+var vad_threshold: float = 0.04
+## Имя выходного аудиоустройства (как в AudioServer.get_output_device_list()). "Default" —
+## следовать системному выбору. ВНИМАНИЕ: на macOS смена выхода в рантайме не переключает
+## конфигурацию входа для голоса — см. ограничение Bluetooth в docs/voice-chat.md.
+var output_device: String = "Default"
+## Громкости шин, линейные [0..1]. Имя шины → множитель. Применяются к AudioServer в apply_audio().
+var bus_volumes := {"Master": 1.0, "World": 1.0, "Voice": 1.0}
 var signaling_url: String = DEFAULT_SIGNALING_URL
 var nick: String = ""
 var avatar_uri: String = DEFAULT_AVATAR_URI
@@ -43,6 +59,22 @@ func _ready() -> void:
 	if nick.strip_edges() == "":
 		nick = random_nick()
 	_ensure_face()
+	apply_audio()
+
+
+## Применяет аудионастройки к AudioServer: выходное устройство и громкости шин. Зовётся на
+## старте и при сохранении настроек; экран настроек ещё дёргает её при движении ползунков
+## (живой отклик). Громкость 0 → шина в mute (linear_to_db(0) дал бы -inf).
+func apply_audio() -> void:
+	AudioServer.output_device = output_device if output_device != "" else "Default"
+	for bus_name in AUDIO_BUSES:
+		var idx := AudioServer.get_bus_index(bus_name)
+		if idx < 0:
+			continue
+		var v := float(bus_volumes.get(bus_name, 1.0))
+		AudioServer.set_bus_mute(idx, v <= 0.0)
+		if v > 0.0:
+			AudioServer.set_bus_volume_db(idx, linear_to_db(v))
 
 
 ## Случайный ник по умолчанию (когда поле ника очищено).
@@ -97,6 +129,11 @@ func load_settings() -> void:
 	online_enabled = cfg.get_value("net", "online_enabled", online_enabled)
 	voice_enabled = cfg.get_value("net", "voice_enabled", voice_enabled)
 	input_device = cfg.get_value("voice", "input_device", input_device)
+	mic_gain = maxf(0.0, cfg.get_value("voice", "mic_gain", mic_gain))
+	vad_threshold = maxf(0.0, cfg.get_value("voice", "vad_threshold", vad_threshold))
+	output_device = cfg.get_value("audio", "output_device", output_device)
+	for bus_name in AUDIO_BUSES:
+		bus_volumes[bus_name] = clampf(cfg.get_value("audio", "vol_" + bus_name, bus_volumes[bus_name]), 0.0, 1.0)
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
 	nick = cfg.get_value("net", "nick", nick)
 	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
@@ -110,8 +147,14 @@ func save() -> void:
 	cfg.set_value("net", "online_enabled", online_enabled)
 	cfg.set_value("net", "voice_enabled", voice_enabled)
 	cfg.set_value("voice", "input_device", input_device)
+	cfg.set_value("voice", "mic_gain", mic_gain)
+	cfg.set_value("voice", "vad_threshold", vad_threshold)
+	cfg.set_value("audio", "output_device", output_device)
+	for bus_name in AUDIO_BUSES:
+		cfg.set_value("audio", "vol_" + bus_name, bus_volumes[bus_name])
 	cfg.set_value("net", "signaling_url", signaling_url)
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("avatar", "uri", avatar_uri)
 	cfg.save(_path)
+	apply_audio()
 	changed.emit()

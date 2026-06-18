@@ -97,6 +97,9 @@ func _ready() -> void:
 	_vsp.expand = false
 	_vsp.size = Vector2.ZERO
 	_vsp.volume = _volume
+	# Звук видео — на шину «World» (звуки мира/страницы), регулируется ползунком «Мир»
+	# в настройках (см. default_bus_layout.tres, docs/audio.md).
+	_vsp.bus = &"World"
 	# Штатный loop включаем ТОЛЬКО когда файл скачан целиком (_maybe_enable_loop): иначе
 	# ложный EOF на конце докачки зациклил бы видео на начало вместо ожидания докачки.
 	# visible=false: VideoStreamPlayer (это Control) не рисуется на экране, но продолжает

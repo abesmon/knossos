@@ -206,6 +206,7 @@ func _build_node(elem: HtmlNode) -> Node:
 
 	var node := obj as Node
 	_apply_attributes(node, elem)
+	_route_audio_to_world(node)
 	for child in elem.children:
 		if child.is_text() or _is_meta_tag(child):
 			continue
@@ -213,6 +214,15 @@ func _build_node(elem: HtmlNode) -> Node:
 		if sub != null:
 			node.add_child(sub)
 	return node
+
+
+## Аудио-узлы страницы по умолчанию направляем на шину «World» (звуки мира) — чтобы их
+## громкость регулировал общий ползунок «Мир» в настройках. Если страница явно задала bus
+## своим атрибутом (значение уже не «Master»), уважаем её выбор.
+func _route_audio_to_world(node: Node) -> void:
+	if node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D:
+		if String(node.bus) == "Master":
+			node.bus = &"World"
 
 
 ## Проставляет свойства объекта из атрибутов элемента.

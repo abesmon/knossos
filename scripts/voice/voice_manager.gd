@@ -20,14 +20,15 @@ signal local_speaking_changed(speaking: bool)
 const BUS_NAME := "VoiceCapture"
 ## Длина буфера эффекта захвата (с). С запасом перекрывает интервал кадра.
 const CAPTURE_BUFFER := 0.1
-## Множитель входного усиления перед VAD/кодированием.
-const INPUT_GAIN := 1.0
+## Множитель входного усиления по умолчанию (рантайм-значение — _input_gain, из Settings.mic_gain).
+const DEFAULT_INPUT_GAIN := 1.0
 
-## VAD с гистерезисом: речь «открывается» выше OPEN_RMS и держится, пока громкость не упадёт
-## ниже CLOSE_RMS дольше HOLD_SEC. Два порога и удержание не дают «дребезга» на паузах между
-## словами и не режут тихие хвосты фраз. Пороги по RMS амплитуды [-1;1].
-const OPEN_RMS := 0.04
-const CLOSE_RMS := 0.02
+## VAD с гистерезисом: речь «открывается» выше порога OPEN и держится, пока громкость не упадёт
+## ниже порога CLOSE дольше HOLD_SEC. Два порога и удержание не дают «дребезга» на паузах между
+## словами и не режут тихие хвосты фраз. Пороги по RMS амплитуды [-1;1]. Дефолты; рантайм-порог
+## открытия — из Settings.vad_threshold, порог закрытия держим вдвое ниже (тот же гистерезис).
+const DEFAULT_OPEN_RMS := 0.04
+const CLOSE_TO_OPEN_RATIO := 0.5
 const HOLD_SEC := 0.35
 ## Скорость спада индикатора уровня (ед./с): атака мгновенная (пик), спад плавный.
 const LEVEL_DECAY := 6.0
@@ -37,6 +38,11 @@ var muted := false:
 		muted = value
 		if value and _speaking:
 			_set_speaking(false)
+
+## Тюнинг входа (из Settings, регулируется в настройках живьём — см. set_input_gain/set_vad_threshold).
+var _input_gain := DEFAULT_INPUT_GAIN
+var _vad_open := DEFAULT_OPEN_RMS
+var _vad_close := DEFAULT_OPEN_RMS * CLOSE_TO_OPEN_RATIO
 
 var _bus_idx := -1
 var _capture: AudioEffectCapture = null
@@ -59,6 +65,26 @@ var _level := 0.0   # сглаженный уровень входа [0..1] дл
 func _ready() -> void:
 	_setup_capture()
 	apply_input_device(Settings.input_device)
+	apply_tuning()
+
+
+# --- Тюнинг входа (усиление и порог активации) ---
+
+## Подтягивает усиление и порог из Settings (на старте; настройки зовут сеттеры живьём).
+func apply_tuning() -> void:
+	set_input_gain(Settings.mic_gain)
+	set_vad_threshold(Settings.vad_threshold)
+
+
+## Множитель входного усиления (перед VAD и кодированием). <1 — тише, >1 — громче.
+func set_input_gain(gain: float) -> void:
+	_input_gain = maxf(0.0, gain)
+
+
+## Порог активации речи (RMS открытия VAD). Порог закрытия держим вдвое ниже (гистерезис).
+func set_vad_threshold(open_rms: float) -> void:
+	_vad_open = maxf(0.0, open_rms)
+	_vad_close = _vad_open * CLOSE_TO_OPEN_RATIO
 
 
 func is_speaking() -> bool:
@@ -194,19 +220,29 @@ func _downmix(stereo: PackedVector2Array) -> PackedFloat32Array:
 	mono.resize(stereo.size())
 	for i in stereo.size():
 		var f := stereo[i]
-		mono[i] = (f.x + f.y) * 0.5 * INPUT_GAIN
+		mono[i] = (f.x + f.y) * 0.5 * _input_gain
 	return mono
 
 
-## Уровень входа для индикатора: атака по пику мгновенная, спад плавный (LEVEL_DECAY).
+## Уровень входа для индикатора. Берём RMS (та же величина, с которой VAD сравнивает порог) —
+## чтобы индикатор и метка порога были в одной шкале, а усиление сказывалось линейно (а не
+## упиралось в потолок, как пик). Атака мгновенная, спад плавный (LEVEL_DECAY).
 func _update_level(mono: PackedFloat32Array, delta: float) -> void:
-	var peak := 0.0
-	for s in mono:
-		peak = maxf(peak, absf(s))
-	if peak >= _level:
-		_level = peak
+	var rms := _rms(mono)
+	if rms >= _level:
+		_level = rms
 	else:
-		_level = maxf(peak, _level - LEVEL_DECAY * delta)
+		_level = maxf(rms, _level - LEVEL_DECAY * delta)
+
+
+## RMS амплитуды буфера [0..]. Усиление уже учтено (mono приходит из _downmix).
+func _rms(mono: PackedFloat32Array) -> float:
+	if mono.is_empty():
+		return 0.0
+	var sum_sq := 0.0
+	for s in mono:
+		sum_sq += s * s
+	return sqrt(sum_sq / float(mono.size()))
 
 
 func _decay_level(delta: float) -> void:
@@ -217,18 +253,15 @@ func _decay_level(delta: float) -> void:
 func _update_vad(mono: PackedFloat32Array, delta: float) -> void:
 	if mono.is_empty():
 		return
-	var sum_sq := 0.0
-	for s in mono:
-		sum_sq += s * s
-	var rms := sqrt(sum_sq / float(mono.size()))
+	var rms := _rms(mono)
 	if _speaking:
-		if rms < CLOSE_RMS:
+		if rms < _vad_close:
 			_silence_sec += delta
 			if _silence_sec >= HOLD_SEC:
 				_set_speaking(false)
 		else:
 			_silence_sec = 0.0
-	elif rms >= OPEN_RMS:
+	elif rms >= _vad_open:
 		_set_speaking(true)
 		_silence_sec = 0.0
 
