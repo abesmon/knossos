@@ -523,12 +523,18 @@ func _on_aim_target_changed(active: bool, hint: String) -> void:
 	if _cross == null:
 		return
 	if active:
+		# Яркий magenta + крупнее + тёмная обводка — чтобы прицел над активным объектом
+		# был заметен на любом фоне (тёмном тексте, светлой картинке).
 		_cross.text = "○"
-		_cross.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2))
-		_cross.add_theme_font_size_override("font_size", 28)
+		_cross.add_theme_color_override("font_color", Color(1.0, 0.15, 0.9))
+		_cross.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+		_cross.add_theme_constant_override("outline_size", 6)
+		_cross.add_theme_font_size_override("font_size", 40)
 	else:
 		_cross.text = "+"
 		_cross.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
+		_cross.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+		_cross.add_theme_constant_override("outline_size", 3)
 		_cross.add_theme_font_size_override("font_size", 18)
 
 
