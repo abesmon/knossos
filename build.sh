@@ -108,7 +108,9 @@ build_mac() {
   [[ -x "$app/Contents/MacOS/$NAME" ]] || die "В .app нет исполняемого файла"
 
   step "Ad-hoc подпись .app"
-  codesign --force --deep --sign - "$app" >/dev/null 2>&1 || warn "codesign не отработал (apple security tools?)"
+  # --entitlements: микрофон для голосового чата (com.apple.security.device.audio-input).
+  # Без него + без NSMicrophoneUsageDescription в Info.plist macOS молча отдаёт тишину.
+  codesign --force --deep --sign - --entitlements "$ROOT/macos.entitlements" "$app" >/dev/null 2>&1 || warn "codesign не отработал (apple security tools?)"
   xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
   codesign --verify --deep "$app" 2>/dev/null && ok "Подпись валидна" || warn "Подпись не прошла verify"
 
