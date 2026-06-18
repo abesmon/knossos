@@ -188,10 +188,14 @@ func _resolve_base_url(doc: HtmlNode, page_url: String) -> String:
 
 
 func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
-	# Сносим старое пространство, игрока сохраняем.
+	# Сносим старое пространство, игрока сохраняем. remove_child СРАЗУ (а не только queue_free):
+	# queue_free удаляет из дерева лишь в конце кадра, а video_manager.scan(_world) ниже бежит
+	# в этом же кадре — иначе он обошёл бы старое (умирающее) поддерево vrweb и привязал бы уже
+	# привязанные экраны/мёртвые плееры (двойной connect texture_ready и freed instance в _process).
 	for child in _world.get_children():
 		if child == _player:
 			continue
+		_world.remove_child(child)
 		child.queue_free()
 
 	# Лоадер картинок живёт внутри мира: при следующей навигации мир сносится вместе с ним,
