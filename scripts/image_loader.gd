@@ -40,14 +40,10 @@ func _pump() -> void:
 
 func _start(url: String) -> void:
 	_active += 1
-	# Локальные картинки (vrweblocal/vrwebresource) читаем синхронно через FileAccess —
-	# без сети и пула HTTPRequest (см. docs/local-resources.md).
+	# Локальные картинки (vrweblocal/vrwebresource) читаем синхронно, без сети и пула
+	# HTTPRequest (см. docs/local-resources.md).
 	if PageFetcher.is_local(url):
-		var body := PackedByteArray()
-		var path := PageFetcher.to_file_path(url)
-		if path != "" and FileAccess.file_exists(path):
-			body = FileAccess.get_file_as_bytes(path)
-		_finish(url, body, PackedStringArray())
+		_deliver(url, _load_local(url))
 		return
 	var http := HTTPRequest.new()
 	http.use_threads = true
@@ -68,15 +64,34 @@ func _on_done(url: String, http: HTTPRequest, result: int, code: int,
 	_finish(url, body if ok else PackedByteArray(), headers)
 
 
-## Общий хвост для сетевых и локальных загрузок: декодирует байты (пустые -> заглушка),
-## кэширует, будит ожидающих и подкручивает очередь. Освобождает один активный слот.
+## Локальная картинка -> текстура. Бандл-ресурс (vrwebresource://) в билде лежит
+## импортированным (.ctex), сырых байтов по res://-пути нет — берём готовую текстуру через
+## ResourceLoader (он следует import-ремапу). Файл ОС (vrweblocal://) или неимпортированный
+## файл читаем сырыми байтами через FileAccess и декодируем сами.
+func _load_local(url: String) -> Texture2D:
+	var path := PageFetcher.to_file_path(url)
+	if path == "":
+		return null
+	if PageFetcher.is_bundle_resource(url) and ResourceLoader.exists(path):
+		return ResourceLoader.load(path) as Texture2D
+	if FileAccess.file_exists(path):
+		return _decode(url, FileAccess.get_file_as_bytes(path), PackedStringArray())
+	return null
+
+
+## Хвост сетевой загрузки: декодирует байты (пустые -> заглушка) и отдаёт текстуру дальше.
 func _finish(url: String, body: PackedByteArray, headers: PackedStringArray) -> void:
-	_active -= 1
 	var tex: Texture2D = null
 	if not body.is_empty():
 		tex = _decode(url, body, headers)
-	_cache[url] = tex
+	_deliver(url, tex)
 
+
+## Кэширует готовую текстуру, будит ожидающих и подкручивает очередь. Освобождает один
+## активный слот. Общая точка выхода для сетевых и локальных загрузок.
+func _deliver(url: String, tex: Texture2D) -> void:
+	_active -= 1
+	_cache[url] = tex
 	for cb in _waiters.get(url, []):
 		if cb.is_valid():
 			cb.call(tex)

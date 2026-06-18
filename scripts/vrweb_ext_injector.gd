@@ -8,7 +8,8 @@ extends RefCounted
 ## `ext` = { defs: { id -> {type, url} }, targets: [ ... ] }, где target — либо свойство
 ## узла/ресурса ({obj, prop, id}), либо вставка GLTF-сцены ребёнком ({obj, id, child:true}).
 ## Текстуры качает image_loader (свой декод картинок), остальное — VrwebResourceLoader
-## (сырые байты + статические декодеры). res_loader создаётся лениво ребёнком `host`.
+## (сеть/файл ОС — сырые байты + декодеры; бандл-ресурс res:// — через ResourceLoader).
+## res_loader создаётся лениво ребёнком `host`.
 
 ## Запускает докачку всех targets. host — узел в дереве, под которым живёт VrwebResourceLoader
 ## (нужно дерево, т.к. он гоняет HTTPRequest). image_loader должен быть уже в дереве.
@@ -32,8 +33,7 @@ static func inject(ext: Dictionary, image_loader: ImageLoader, host: Node) -> vo
 		# <ExtScene>: вставляем скачанную GLTF/GLB-сцену ребёнком плейсхолдера.
 		if target.get("child", false):
 			res_loader = _ensure_res_loader(res_loader, host)
-			res_loader.request_bytes(url, func(bytes):
-				var scene := VrwebResourceLoader.build_gltf_scene(bytes)
+			res_loader.request_scene(url, func(scene):
 				if scene == null:
 					return
 				if is_instance_valid(obj):
@@ -49,8 +49,7 @@ static func inject(ext: Dictionary, image_loader: ImageLoader, host: Node) -> vo
 					obj.set(prop, tex))
 		elif VrwebBuilder.AUDIO_TYPES.has(type):
 			res_loader = _ensure_res_loader(res_loader, host)
-			res_loader.request_bytes(url, func(bytes):
-				var stream := VrwebResourceLoader.decode_audio(bytes, type)
+			res_loader.request_audio(url, type, func(stream):
 				if stream != null and is_instance_valid(obj):
 					obj.set(prop, stream)
 					# autoplay декларативно: поток пришёл асинхронно после _ready, поэтому
@@ -59,8 +58,7 @@ static func inject(ext: Dictionary, image_loader: ImageLoader, host: Node) -> vo
 						obj.play())
 		elif VrwebBuilder.MESH_TYPES.has(type):
 			res_loader = _ensure_res_loader(res_loader, host)
-			res_loader.request_bytes(url, func(bytes):
-				var mesh := VrwebResourceLoader.extract_first_mesh(bytes)
+			res_loader.request_mesh(url, func(mesh):
 				if mesh != null and is_instance_valid(obj):
 					obj.set(prop, mesh))
 		else:

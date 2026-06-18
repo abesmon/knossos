@@ -36,6 +36,52 @@ func request_bytes(url: String, on_ready: Callable) -> void:
 	_pump()
 
 
+## Просит GLTF/GLB-сцену для url. on_ready(Node) — корень сцены (или null, если не удалось).
+func request_scene(url: String, on_ready: Callable) -> void:
+	var res := _bundle_resource(url)
+	if res is PackedScene:
+		on_ready.call((res as PackedScene).instantiate())
+		return
+	request_bytes(url, func(bytes): on_ready.call(build_gltf_scene(bytes)))
+
+
+## Просит первый Mesh из GLTF/GLB для url. on_ready(Mesh) — меш (или null, если не удалось).
+func request_mesh(url: String, on_ready: Callable) -> void:
+	var res := _bundle_resource(url)
+	if res is Mesh:
+		on_ready.call(res as Mesh)
+		return
+	if res is PackedScene:
+		var scene := (res as PackedScene).instantiate()
+		var mesh := _find_mesh(scene)
+		scene.free()
+		on_ready.call(mesh)
+		return
+	request_bytes(url, func(bytes): on_ready.call(extract_first_mesh(bytes)))
+
+
+## Просит аудиопоток для url. type — ожидаемый класс (AudioStreamMP3/OggVorbis/WAV) для
+## байтового декода; для бандл-ресурса тип берётся из импортированного потока. on_ready(AudioStream).
+func request_audio(url: String, type: String, on_ready: Callable) -> void:
+	var res := _bundle_resource(url)
+	if res is AudioStream:
+		on_ready.call(res as AudioStream)
+		return
+	request_bytes(url, func(bytes): on_ready.call(decode_audio(bytes, type)))
+
+
+## Готовый импортированный ресурс бандла (vrwebresource://) или null, если это не бандл-ресурс
+## либо Godot не знает такого ресурса (тогда грузим побайтово как обычно — сеть или файл ОС).
+## ResourceLoader следует import-ремапу, поэтому работает и в билде (где лежит .ctex/.scn).
+func _bundle_resource(url: String) -> Resource:
+	if not PageFetcher.is_bundle_resource(url):
+		return null
+	var path := PageFetcher.to_file_path(url)
+	if path == "" or not ResourceLoader.exists(path):
+		return null
+	return ResourceLoader.load(path)
+
+
 func _pump() -> void:
 	while _active < MAX_CONCURRENT and not _queue.is_empty():
 		_start(_queue.pop_front())

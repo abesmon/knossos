@@ -131,6 +131,13 @@ static func is_local(url: String) -> bool:
 	return url.begins_with(LOCAL_SCHEME) or url.begins_with(RESOURCE_SCHEME)
 
 
+## true, если адрес указывает на ресурс внутри бандла приложения (vrwebresource:// -> res://).
+## Такие в билде проходят через импорт Godot и физически лежат как .ctex/.remap — сырых байтов
+## по res://-пути нет, поэтому их грузят через ResourceLoader, а не FileAccess/побайтово.
+static func is_bundle_resource(url: String) -> bool:
+	return url.begins_with(RESOURCE_SCHEME)
+
+
 static func _scheme_of(url: String) -> String:
 	return LOCAL_SCHEME if url.begins_with(LOCAL_SCHEME) else RESOURCE_SCHEME
 

@@ -59,10 +59,12 @@ vrweblocal:///Users/me/sites/demo/page.html
 |---|---|
 | `PageFetcher.LOCAL_SCHEME` / `RESOURCE_SCHEME` / `RESOURCE_ROOT` | константы схем и корень ресурсов |
 | `PageFetcher.is_local(url)` | признак локальной схемы |
+| `PageFetcher.is_bundle_resource(url)` | признак бандл-ресурса (`vrwebresource://` → `res://`) — грузить через `ResourceLoader` |
 | `PageFetcher.resolve_url()` | распознаёт схемы; `_normalize_local` / `_join_local` / `_collapse_dots` резолвят пути внутри схемы |
-| `PageFetcher.to_file_path(url)` | vrweb-адрес → путь для `FileAccess` |
-| `PageFetcher._fetch_local()` | читает HTML синхронно через `FileAccess` (вместо `HTTPRequest`) |
-| `ImageLoader._start()` | для локальных URL читает байты картинки через `FileAccess`, минуя сеть |
+| `PageFetcher.to_file_path(url)` | vrweb-адрес → путь для `FileAccess`/`ResourceLoader` |
+| `PageFetcher._fetch_local()` | читает HTML синхронно через `FileAccess` (HTML не импортируется — байты есть всегда) |
+| `ImageLoader._load_local()` | бандл-ресурс → `ResourceLoader.load`; файл ОС → байты через `FileAccess` |
+| `VrwebResourceLoader.request_scene/mesh/audio()` | бандл-ресурс → `ResourceLoader.load`; иначе сырые байты + статический декодер |
 
 Ключевая идея: единственная точка ветвления — `is_local()`. Резолвинг общий
 (`resolve_url`), поэтому остальной пайплайн (топология, геометрия, навигация, картинки)
@@ -89,7 +91,32 @@ test_pages/
 ## Экспорт (важно)
 
 В **редакторе** `res://` читается прямо из папки проекта, поэтому `.html`/`.svg` из
-`test_pages/` доступны через `FileAccess` без настройки. В **собранном** билде
-произвольные `.html` не попадают в `.pck` автоматически — при необходимости добавьте
-`test_pages/*` в фильтр ресурсов экспорта (Project → Export → Resources → non-resource
-files to export). Для тестового/локального запуска из редактора это не требуется.
+`test_pages/` доступны без настройки. В **собранном** билде есть два разных подвоха —
+по типу файла:
+
+**1. Неимпортируемые файлы (`.html`) не попадают в `.pck` автоматически.** `.html` —
+не ресурс Godot, импортёр его не трогает, и при `export_filter="all_resources"` он в
+бандл не пакуется → `FileAccess` его не находит. Решение: `include_filter="test_pages/*"`
+в `export_presets.cfg` (Project → Export → Resources → «Filters to export non-resource
+files/folders»). Уже прописано в обоих пресетах.
+
+**2. Импортируемые ресурсы (`.svg`/`.png`/аудио/glTF) ремапятся.** Их Godot конвертирует
+при импорте: по `res://test_pages/logo.svg` в билде лежит не svg, а
+`res://.godot/imported/logo.svg-<md5>.ctex` (отсюда «лишние символы» в имени), а `.import`
+содержит `[remap]` на этот файл. `FileAccess` ремапы **не следует** — сырых байтов по
+исходному пути нет. Поэтому бандл-ресурсы грузятся через **`ResourceLoader.load()`**
+(он ремап учитывает и возвращает уже готовый `Texture2D`/`AudioStream`/`PackedScene`),
+а не побайтово.
+
+**Единая ось ветвления** (не «локальный vs сетевой»):
+
+| Источник | Как грузим |
+|---|---|
+| `vrwebresource://` → `res://…` (бандл-ресурс) | `ResourceLoader.load()` — следует import-ремапу |
+| `vrweblocal://` → файл ОС | сырые байты через `FileAccess` (ОС-файлы не импортируются) |
+| `http(s)://` | сырые байты через `HTTPRequest` |
+
+Развилка инкапсулирована в загрузчиках: `PageFetcher.is_bundle_resource(url)` отличает
+бандл-ресурс, и для него `ImageLoader`/`VrwebResourceLoader` идут в `ResourceLoader`; для
+файла ОС и сети — прежний байтовый путь. `.html` на `vrwebresource://` сам уходит в
+байтовую ветку: `ResourceLoader.exists()` для неимпортируемого `.html` вернёт false.
