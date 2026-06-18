@@ -6,25 +6,25 @@ extends Control
 
 signal closed
 
-@onready var _online: CheckButton = $Panel/Margin/VBox/Online
-@onready var _voice: CheckButton = $Panel/Margin/VBox/Voice
-@onready var _device: OptionButton = $Panel/Margin/VBox/MicRow/Device
-@onready var _device_refresh: Button = $Panel/Margin/VBox/MicRow/Refresh
-@onready var _test: Button = $Panel/Margin/VBox/TestRow/Test
-@onready var _monitor: CheckButton = $Panel/Margin/VBox/TestRow/Monitor
-@onready var _level: ProgressBar = $Panel/Margin/VBox/Level
-@onready var _url: LineEdit = $Panel/Margin/VBox/UrlRow/Url
-@onready var _url_clear: Button = $Panel/Margin/VBox/UrlRow/Clear
-@onready var _nick: LineEdit = $Panel/Margin/VBox/NickRow/Nick
-@onready var _nick_clear: Button = $Panel/Margin/VBox/NickRow/Clear
-@onready var _face_preview: TextureRect = $Panel/Margin/VBox/FaceRow/Preview
-@onready var _face_pick: Button = $Panel/Margin/VBox/FaceRow/Pick
-@onready var _face_clear: Button = $Panel/Margin/VBox/FaceRow/Clear
-@onready var _avatar: LineEdit = $Panel/Margin/VBox/AvatarRow/Avatar
-@onready var _avatar_clear: Button = $Panel/Margin/VBox/AvatarRow/Clear
+@onready var _online: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Online
+@onready var _voice: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Voice
+@onready var _device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Device
+@onready var _device_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Refresh
+@onready var _test: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/TestRow/Test
+@onready var _monitor: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/TestRow/Monitor
+@onready var _level: ProgressBar = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Level
+@onready var _url: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Url
+@onready var _url_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Clear
+@onready var _nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow/Nick
+@onready var _nick_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow/Clear
+@onready var _face_preview: TextureRect = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow/Preview
+@onready var _face_pick: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow/Pick
+@onready var _face_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow/Clear
+@onready var _avatar: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Avatar
+@onready var _avatar_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Clear
 @onready var _face_dialog: FileDialog = $FaceDialog
-@onready var _save: Button = $Panel/Margin/VBox/Buttons/Save
-@onready var _cancel: Button = $Panel/Margin/VBox/Buttons/Cancel
+@onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
+@onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
 
 
 func _ready() -> void:
