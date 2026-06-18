@@ -52,6 +52,9 @@ func _ready() -> void:
 	_player.aim_target_changed.connect(_on_aim_target_changed)
 	_player.debug_toggled.connect(_on_debug_toggled)
 	_player.debug_probed.connect(_on_debug_probed)
+	# Браузинг мира и UI взаимоисключающи: пока мышь захвачена, элементы навбара/чата
+	# делаем нефокусируемыми, чтобы их нельзя было активировать с клавиатуры (Tab/Space/Enter).
+	_player.mouse_capture_changed.connect(_on_mouse_capture_changed)
 	_world.add_child(_player)
 
 	_go.pressed.connect(_on_go)
@@ -67,7 +70,9 @@ func _ready() -> void:
 	_set_status("Введите адрес и go! — WASD ходьба, двойной пробел — полёт, ЛКМ/E — портал, колесо/тачпад — скролл текста, F3 — отладка, Esc — мышь")
 
 	# При запуске сразу ставим фокус в адресную строку, чтобы можно было печатать
-	# без лишнего клика (focus_entered отпускает мышь).
+	# без лишнего клика. Сначала отпускаем мышь — это снова делает UI фокусируемым
+	# (Player._ready захватил мышь и заблокировал фокус), иначе grab_focus не сработает.
+	_player.capture_mouse(false)
 	_address.grab_focus()
 
 
@@ -81,6 +86,22 @@ func _on_go() -> void:
 	# только для внутристраничных ссылок (см. _activate_transition).
 	_navigate(url, "", true)
 	_player.capture_mouse(true)
+
+
+## При входе в браузинг мира (мышь захвачена) запрещаем фокус UI, чтобы клавиатура их не
+## достала; при выходе — снова разрешаем кликать и печатать в навбаре/чате.
+func _on_mouse_capture_changed(captured: bool) -> void:
+	_set_ui_focusable(not captured)
+
+
+## Разрешает/запрещает фокусировку интерактивных элементов навбара и чата. FOCUS_NONE убирает
+## их из обхода по Tab и не даёт активировать с клавиатуры; мышиный клик кнопкам не нужен —
+## он всё равно сработает (а при захваченной мыши кликнуть по ним и так нельзя).
+func _set_ui_focusable(focusable: bool) -> void:
+	var mode := Control.FOCUS_ALL if focusable else Control.FOCUS_NONE
+	for c: Control in [_address, _go, _back_btn, _fwd_btn, _settings_btn, _chat_input]:
+		if c != null:
+			c.focus_mode = mode
 
 
 func _navigate(url: String, base: String, push_history: bool) -> void:
@@ -212,16 +233,14 @@ func _activate_transition(transition: Dictionary) -> void:
 			_go_back()
 
 
-## Кнопка «назад» в navbar: уводим мышь обратно в игру (клик по UI её отпустил) и идём
-## по истории.
+## Кнопка «назад» в navbar: идём по истории и уводим мышь обратно в игру (клик по UI её
+## отпустил). capture_mouse сам снимет фокус с кнопки.
 func _on_back_pressed() -> void:
-	_back_btn.release_focus()
 	_go_back()
 	_player.capture_mouse(true)
 
 
 func _on_fwd_pressed() -> void:
-	_fwd_btn.release_focus()
 	_go_forward()
 	_player.capture_mouse(true)
 

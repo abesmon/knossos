@@ -10,6 +10,10 @@ extends CharacterBody3D
 ## main подписывается и подсвечивает курсор-прицел.
 signal aim_target_changed(active: bool)
 
+## Захват мыши (браузинг мира) включён/выключен. main по нему разрешает/запрещает
+## фокусировку UI-элементов: пока ходим по миру, клавиатура их не достаёт.
+signal mouse_capture_changed(captured: bool)
+
 ## Отладочный режим инспектора провенанса (F3) включён/выключен. main показывает/прячет оверлей.
 signal debug_toggled(on: bool)
 ## Текст провенанса узла под прицелом в отладочном режиме (пустой — под прицелом ничего).
@@ -127,6 +131,13 @@ func avatar_snapshot() -> Dictionary:
 func capture_mouse(on: bool) -> void:
 	_looking = on
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
+	if on:
+		# Уходим в браузинг мира: снимаем фокус с любого активного UI-элемента, чтобы
+		# Space/Enter не «дожали» кнопку или поле ввода, на котором остался фокус.
+		var vp := get_viewport()
+		if vp != null:
+			vp.gui_release_focus()
+	mouse_capture_changed.emit(on)
 
 
 func _unhandled_input(event: InputEvent) -> void:
