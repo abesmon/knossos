@@ -677,13 +677,71 @@ func _extract_css_value(style: String, prop: String) -> String:
 	return style.substr(start, end - start).strip_edges()
 
 
+## Элемент невидим «для глаза» — выкидываем на фазе линеаризации.
+## Внешний CSS не резолвится (нет движка/рендера, см. docs §11/A), поэтому ловим
+## только надёжные инлайновые признаки и атрибуты, не требующие layout-пасса.
 func _is_hidden(node: HtmlNode) -> bool:
-	var style := node.get_attr("style").to_lower().replace(" ", "")
-	if style.contains("display:none") or style.contains("visibility:hidden"):
-		return true
+	# Атрибуты, явно убирающие элемент из видимого/доступного дерева.
 	if node.has_attr("hidden"):
 		return true
+	if node.get_attr("aria-hidden").to_lower() == "true":
+		return true
+	if node.tag == "input" and node.get_attr("type").to_lower() == "hidden":
+		return true
+
+	# Дальше — только инлайновый style (нижний регистр, без пробелов).
+	var style := node.get_attr("style").to_lower().replace(" ", "")
+	if style == "":
+		return false
+	if style.contains("display:none") or style.contains("visibility:hidden"):
+		return true
+	# Нулевая (или почти нулевая) альфа.
+	var opacity := _inline_css(style, "opacity")
+	if opacity.is_valid_float() and opacity.to_float() <= 0.01:
+		return true
+	# Схлопнутый в ноль бокс.
+	if _length_px(_inline_css(style, "width")) == 0.0 \
+			or _length_px(_inline_css(style, "height")) == 0.0:
+		return true
+	# Унесён за экран (классические visually-hidden техники).
+	if _is_offscreen(style):
+		return true
+	# Обрезан в ноль клипом (старый clip / современный clip-path).
+	if style.contains("clip-path:inset(100%)") \
+			or style.contains("clip:rect(0,0,0,0)") \
+			or style.contains("clip:rect(0px,0px,0px,0px)"):
+		return true
 	return false
+
+
+## Спозиционирован далеко за пределами экрана (off-screen hiding).
+## style — нижний регистр, без пробелов. Относительные единицы (%, em) дают -1.0
+## из _length_px и не срабатывают — это намеренно, в метры их не перевести.
+func _is_offscreen(style: String) -> bool:
+	# text-indent в большой минус — приём скрытия текста (image replacement).
+	if _length_px(_inline_css(style, "text-indent")) <= -999.0:
+		return true
+	var pos := _inline_css(style, "position")
+	if pos != "absolute" and pos != "fixed":
+		return false
+	return _length_px(_inline_css(style, "left")) <= -999.0 \
+			or _length_px(_inline_css(style, "top")) <= -999.0
+
+
+## Значение инлайн-свойства с учётом границы свойства: ищет ";prop:" в
+## дополненной строке, поэтому "width" не ловится внутри "min-width"/"max-width".
+## style должен быть в нижнем регистре без пробелов.
+func _inline_css(style: String, prop: String) -> String:
+	var hay := ";" + style
+	var key := ";" + prop + ":"
+	var idx := hay.find(key)
+	if idx == -1:
+		return ""
+	var start := idx + key.length()
+	var end := hay.find(";", start)
+	if end == -1:
+		end = hay.length()
+	return hay.substr(start, end - start)
 
 
 func _alloc() -> int:
