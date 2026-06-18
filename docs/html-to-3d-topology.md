@@ -75,6 +75,15 @@ Transition =
   | { kind: "back" }                       // из стека истории навигации
 ```
 
+**`<video>` → видео-плеер.** Стандартный HTML-тег `<video>` классифицируется как объект
+`media` с пометкой `media_tag: "video"` и `src` (из `<video src>` или первого вложенного
+`<source src>`, по стандарту HTML; плюс `autoplay`/`loop`/размеры). Геометрия строит из него
+**тот же `VrwebVideoScreen`**, что и кастомный тег `<VRWebVideoScreen>` — то есть HTML-видео
+проигрывается реальным плеером приложения (FFmpeg-декод в текстуру, прогрессивная докачка,
+синхронизация по сети). Без аддона FFmpeg или без `src` — деградирует до статичной заглушки
+`▷`. Прочие медиа (`audio`/`iframe`/`canvas`/`embed`) пока остаются заглушками. Подробно —
+[video-player.md](video-player.md).
+
 **Классификация `href` по схеме** (`_transition_for` → `_scheme_of`, RFC 3986):
 `#…` → `teleport`; `javascript:` → игнор (`null`); `http`/`https`/относительные (без
 схемы, включая protocol-relative `//host`) → `navigate`; **любая другая схема**

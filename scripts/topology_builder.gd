@@ -126,7 +126,23 @@ func _linearize(node: HtmlNode, stream: Array) -> void:
 			img_content.merge(_image_dims(node))
 			stream.append({"kind": "object", "obj": _leaf_object(node, "image", img_content)})
 			return
-		"video", "audio", "iframe", "canvas", "embed":
+		"video":
+			# <video> становится логическим видео-плеером VRWeb (см. docs/video-player.md):
+			# media_tag="video" + резолвимый src — WorldGenerator строит из него VrwebVideoScreen.
+			# src — из атрибута video[src] или первого <source src> (стандарт HTML).
+			var v_src := node.get_attr("src")
+			if v_src == "":
+				var source := node.find_descendant("source")
+				if source != null:
+					v_src = source.get_attr("src")
+			var v_content := {
+				"src": v_src, "text": node.collect_text(), "media_tag": "video",
+				"autoplay": node.has_attr("autoplay"), "loop": node.has_attr("loop"),
+			}
+			v_content.merge(_image_dims(node))
+			stream.append({"kind": "object", "obj": _leaf_object(node, "media", v_content)})
+			return
+		"audio", "iframe", "canvas", "embed":
 			stream.append({"kind": "object", "obj": _leaf_object(node, "media", {
 				"src": node.get_attr("src"), "text": node.collect_text(),
 			})})

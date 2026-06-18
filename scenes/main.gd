@@ -20,6 +20,8 @@ var _player: Player
 var _status: Label
 var _cross: Label
 var _current_url: String = ""
+# База для относительных URL (учитывает <base href>); по умолчанию = _current_url.
+var _base_url: String = ""
 # Браузерная история: список записей {url, pose} и индекс текущей. Переход назад/вперёд
 # двигает _history_index; новая навигация обрезает «вперёд» и добавляет запись.
 var _history: Array[Dictionary] = []
@@ -142,14 +144,18 @@ func _on_fetched(html: String, final_url: String) -> void:
 
 	var t0 := Time.get_ticks_msec()
 	var doc := HtmlParser.parse(html)
+	# <base href> (стандарт HTML) переопределяет базу для относительных ссылок/ресурсов;
+	# без него база = адрес страницы. seed/история/комната по-прежнему по final_url.
+	var base_url := _resolve_base_url(doc, final_url)
+	_base_url = base_url
 	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
-	# final_url — база для резолва путей внешних ресурсов (<ExtResource>).
-	var vrweb := VrwebBuilder.build(doc, final_url)
+	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
+	var vrweb := VrwebBuilder.build(doc, base_url)
 	# debug=true: топология записывает провенанс (id -> исходный HTML), а WorldGenerator
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
-	_rebuild_world(space, final_url, vrweb)
+	_rebuild_world(space, final_url, vrweb, base_url)
 	# Переход назад/вперёд: возвращаем игрока туда, где он стоял на этой странице, поверх
 	# дефолтного спавна из _rebuild_world. Мир детерминирован по URL, поза остаётся валидной.
 	if _pending_restore_pose != null:
@@ -170,7 +176,18 @@ func _on_failed(message: String, url: String) -> void:
 	_set_status("Ошибка: %s (%s)" % [message, url])
 
 
-func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
+## <base href> переопределяет базовый адрес для относительных URL (стандарт HTML). Сам href
+## может быть относительным/protocol-relative — резолвим его относительно адреса страницы.
+func _resolve_base_url(doc: HtmlNode, page_url: String) -> String:
+	var base := doc.find_descendant("base")
+	if base != null:
+		var href := base.get_attr("href").strip_edges()
+		if href != "":
+			return PageFetcher.resolve_url(href, page_url)
+	return page_url
+
+
+func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
 	# Сносим старое пространство, игрока сохраняем.
 	for child in _world.get_children():
 		if child == _player:
@@ -203,7 +220,7 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 		_label_positions = {}
 	else:
 		var seed_value := int(hash(PageFetcher.seed_key(url)))
-		gen = WorldGenerator.generate(space, _world, seed_value, _activate_transition, url, image_loader)
+		gen = WorldGenerator.generate(space, _world, seed_value, _activate_transition, base_url, image_loader)
 		_label_positions = gen.label_positions
 
 	# Спавн: приоритет у <VRWebSpawner>, затем спавн HTML-топологии «у первого объекта»,
@@ -220,8 +237,11 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 	# Узлы vrweb добавляются поверх (combine) либо как единственное содержимое (exclusive).
 	if vrweb.get("found", false) and vrweb.get("root") != null:
 		_world.add_child(vrweb["root"])
-		# Регистрируем видео-плееры и привязываем экраны (после добавления в дерево).
-		video_manager.scan(vrweb["root"])
+
+	# Регистрируем видео-плееры и привязываем экраны (после добавления всего в дерево).
+	# Сканируем весь мир: экраны бывают и из <vrweb>-тегов, и из обычного HTML-тега <video>
+	# (WorldGenerator строит из него такой же VrwebVideoScreen).
+	video_manager.scan(_world)
 
 	# Внешние ресурсы (<ExtResource path="<url>">) качаются и вставляются асинхронно —
 	# прогрессивная подгрузка, как у картинок <img>. Общая логика с дебаг-превью редактора
@@ -233,7 +253,8 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary) -> void:
 func _activate_transition(transition: Dictionary) -> void:
 	match transition.get("kind", ""):
 		"navigate":
-			_navigate(transition.get("href", ""), _current_url, true)
+			# Относительные ссылки резолвятся относительно базы страницы (учитывает <base href>).
+			_navigate(transition.get("href", ""), _base_url, true)
 		"external":
 			# Ссылка с нестандартной схемой (mailto:, tel:, magnet:, app-схема) — это не
 			# страница для VRWeb, а намерение для ОС. Отдаём системному обработчику; он сам

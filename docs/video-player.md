@@ -65,6 +65,33 @@
 Это кастомные теги VRWeb (не классы Godot) — обрабатываются особо в
 [vrweb_builder.gd](../scripts/vrweb_builder.gd), как `<VRWebMirror>`/`<ExtScene>`.
 
+### Стандартный HTML-тег `<video>`
+
+Обычный `<video>` из веб-страницы тоже становится плеером — не нужен `<vrweb>`-блок. Топология
+(`TopologyBuilder`) классифицирует `<video>` как объект `media` с `media_tag="video"`, а
+`WorldGenerator` строит из него **тот же `VrwebVideoScreen`** (неявный плеер по `src`), что и
+кастомный тег. Так HTML-видео проигрывается реальным плеером приложения.
+
+```html
+<video controls preload="metadata">
+  <source src="/play/clip.mp4">
+  Ваш браузер не поддерживает HTML5 video.
+</video>
+```
+
+- **`src`** берётся из `<video src>` либо из первого вложенного `<source src>` (стандарт HTML)
+  и резолвится относительно базы страницы (учитывает `<base href>`, см.
+  [local-resources.md](local-resources.md)).
+- **`autoplay`/`loop`** — булевы атрибуты (наличие = `true`) пробрасываются в неявный плеер.
+- **Размер** экрана берётся из `width`/`height` (если заданы абсолютно), иначе — запасная
+  ширина с пропорциями 16:9; высота подгоняется под реальные пропорции кадра при его приходе
+  (как `<img>` под текстуру). Экран ставится у стены комнаты, центр на уровне глаз.
+- Без аддона FFmpeg или без `src` — деградирует до статичной заглушки `▷` (как прочие `media`).
+
+Привязку HTML-экранов делает тот же `VrwebVideoManager`: `main._rebuild_world` сканирует **весь
+мир** (`scan(_world)`), а не только корень `<vrweb>`, поэтому экраны из обоих источников
+регистрируются и синхронизируются одинаково.
+
 ---
 
 ## Декодер: нативный аддон FFmpeg
@@ -289,6 +316,8 @@ URL**, синхронизируется только **состояние тра
 | [scripts/vrweb_video_screen.gd](../scripts/vrweb_video_screen.gd) | поверхность-квад: albedo = текстура плеера, заглушка до кадра, клик `interact_at` → toggle, наэкранный UI (прогресс/буфер) по `hover_at` |
 | [scripts/vrweb_video_manager.gd](../scripts/vrweb_video_manager.gd) | реестр плееров по `id`, привязка экранов, мост к `NetworkManager` (sync + heartbeat) |
 | [scripts/vrweb_builder.gd](../scripts/vrweb_builder.gd) | теги `<VRWebVideoPlayer>`/`<VRWebVideoScreen>` (как `<VRWebMirror>`) |
+| [scripts/topology_builder.gd](../scripts/topology_builder.gd) | HTML-тег `<video>` → объект `media` с `media_tag="video"` (src из `<video>`/`<source>`, autoplay/loop, размеры) |
+| [scripts/world_generator.gd](../scripts/world_generator.gd) | `_build_video_screen` строит `VrwebVideoScreen` из объекта `media`-video; `_measure_video` — его габариты |
 | [scripts/network_manager.gd](../scripts/network_manager.gd) | `send_video_event`/`send_video_sync` + RPC `_recv_video_*` + сигнал `video_state_received` |
 | [scenes/main.gd](../scenes/main.gd) | создаёт `VrwebVideoManager` в мире и зовёт `scan(vrweb_root)` |
 
