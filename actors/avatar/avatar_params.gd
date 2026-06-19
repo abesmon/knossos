@@ -39,7 +39,9 @@ const MOVING := &"Moving"
 
 ## Поза 0..1 (0 — лёжа, 1 — стоя). Приседаний/полёта-ничком пока нет → дефолт 1.0.
 const UPRIGHT := &"Upright"
-## Громкость микрофона 0..1. Голос отложен (см. docs/multiplayer.md) → дефолт 0.
+## Громкость голоса 0..1. Сорсится особняком (не из снимка по сети, а локально из аудио):
+## чужие капсулы — RemotePlayer из VoicePlayback; своё тело в зеркале — AvatarParameterSource из
+## VoiceManager (см. docs/avatars.md, voice-chat.md). Дефолт 0. Завязка: VoiceScaleApplier.
 const VOICE := &"Voice"
 ## 1 — VR, 0 — десктоп. Сейчас только десктоп → дефолт 0.
 const VR_MODE := &"VRMode"
@@ -74,6 +76,12 @@ const EYE_HEIGHT_PERCENT := &"EyeHeightAsPercent"
 
 ## Скорость (м/с), ниже которой считаем игрока стоящим (для MOVING).
 const MOVING_EPSILON := 0.1
+
+## Множитель RMS амплитуды → VOICE [0..1]. Речь по RMS обычно ~0.05..0.2; домножаем, чтобы
+## нормальная громкость уезжала к 1.0 (результат всё равно клампим). Один на оба источника
+## VOICE — приём (VoicePlayback, чужие капсулы) и локальный mirror (AvatarParameterSource), —
+## чтобы «рот» вёл себя одинаково у себя в зеркале и у других.
+const VOICE_RMS_GAIN := 6.0
 
 
 ## Безопасные начальные значения для всех параметров, которые читаются в проекте (группы

@@ -1,10 +1,11 @@
-[gd_scene load_steps=15 format=3 uid="uid://uqj5l8rau46j"]
+[gd_scene format=3 uid="uid://uqj5l8rau46j"]
 
 [ext_resource type="Script" uid="uid://bstoi4luel30b" path="res://actors/avatar/avatar.gd" id="1_avatar"]
 [ext_resource type="Texture2D" uid="uid://de0vra644cxh5" path="res://resources/default_face.png" id="2_avggo"]
 [ext_resource type="Script" uid="uid://beb1j341o7aon" path="res://actors/avatar/appliers/look_pitch_applier.gd" id="2_lookpitch"]
 [ext_resource type="Script" uid="uid://bdje4mebkrh0n" path="res://actors/avatar/user_settings_avatar_texture.gd" id="3_uqrtr"]
 [ext_resource type="Script" uid="uid://b0ghphnwpse8o" path="res://actors/avatar/appliers/user_texture_applier.gd" id="5_27cqi"]
+[ext_resource type="Script" uid="uid://faflku3bp2ki" path="res://actors/avatar/appliers/voice_scale_applier.gd" id="6_voicescale"]
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
 radius = 0.4
@@ -41,37 +42,58 @@ cull_mode = 2
 shading_mode = 0
 albedo_texture = SubResource("Marker_face")
 
-[node name="HeadAvatar" type="Node3D"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wcqh8"]
+albedo_color = Color(1, 0.18431373, 0, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_27cqi"]
+material = SubResource("StandardMaterial3D_wcqh8")
+radius = 0.07
+height = 0.1
+radial_segments = 5
+rings = 4
+
+[node name="HeadAvatar" type="Node3D" unique_id=769879986]
 script = ExtResource("1_avatar")
 nameplate_height = 2.0
 
-[node name="Body" type="Node3D" parent="."]
+[node name="Body" type="Node3D" parent="." unique_id=31152063]
 
-[node name="Mesh" type="MeshInstance3D" parent="Body"]
+[node name="Mesh" type="MeshInstance3D" parent="Body" unique_id=1606413489]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
 mesh = SubResource("CapsuleMesh_body")
 surface_material_override/0 = SubResource("Mat_body")
 
-[node name="Head" type="Node3D" parent="."]
+[node name="Head" type="Node3D" parent="." unique_id=891498989]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.55, 0)
 
-[node name="Mesh" type="MeshInstance3D" parent="Head"]
+[node name="Mesh" type="MeshInstance3D" parent="Head" unique_id=309458325]
 mesh = SubResource("BoxMesh_head")
 surface_material_override/0 = SubResource("Mat_head")
 
-[node name="Nose" type="MeshInstance3D" parent="Head"]
+[node name="Nose" type="MeshInstance3D" parent="Head" unique_id=200464062]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.3)
 mesh = SubResource("BoxMesh_nose")
 surface_material_override/0 = SubResource("Mat_nose")
 
-[node name="Face" type="MeshInstance3D" parent="Head"]
+[node name="Face" type="MeshInstance3D" parent="Head" unique_id=1778994225]
 transform = Transform3D(-0.86, 0, 1.29856e-07, 0, 0.86, 0, -1.29856e-07, 0, -0.86, 0, 0, -0.254299)
 mesh = SubResource("QuadMesh_ehwpv")
 surface_material_override/0 = SubResource("StandardMaterial3D_pp5x8")
 
-[node name="LookPitchApplier" type="Node" parent="."]
+[node name="MouthObject" type="Node3D" parent="Head" unique_id=2083309289]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.11437106, -0.25397265)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Head/MouthObject" unique_id=23387413]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 0.1, 0, 0, 0)
+mesh = SubResource("SphereMesh_27cqi")
+
+[node name="LookPitchApplier" type="Node" parent="." unique_id=1861306700]
 script = ExtResource("2_lookpitch")
 target_path = NodePath("../Head")
 
-[node name="UserTextureApplier" type="Node" parent="."]
+[node name="UserTextureApplier" type="Node" parent="." unique_id=2083999210]
 script = ExtResource("5_27cqi")
+
+[node name="VoiceScaleApplier" type="Node" parent="."]
+script = ExtResource("6_voicescale")
+target_path = NodePath("../Head/MouthObject")

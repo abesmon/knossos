@@ -59,13 +59,14 @@
 | `AvatarAnimationTreeApplier` | [actors/avatar/appliers/avatar_animation_tree_applier.gd](../actors/avatar/appliers/avatar_animation_tree_applier.gd) | **Универсальный** аппликатор: копирует параметры в `AnimationTree` по `bindings` (без кода) |
 | `AvatarParamBinding` | [actors/avatar/appliers/avatar_param_binding.gd](../actors/avatar/appliers/avatar_param_binding.gd) | Resource: одна строка `параметр → путь свойства в AnimationTree` |
 | `LookPitchApplier` | [actors/avatar/appliers/look_pitch_applier.gd](../actors/avatar/appliers/look_pitch_applier.gd) | Общий кастомный аппликатор: вращает узел по LookPitch × `pitch_factor` |
+| `VoiceScaleApplier` | [actors/avatar/appliers/voice_scale_applier.gd](../actors/avatar/appliers/voice_scale_applier.gd) | Кастомный аппликатор «рта»: масштабирует узел по `Voice` (по умолчанию ось Y), прячет в тишине |
 | `UserSettingsAvatarTexture` | [actors/avatar/user_settings_avatar_texture.gd](../actors/avatar/user_settings_avatar_texture.gd) | Resource-маркер: положи в любой текстурный слот — туда уедет текстура игрока |
 | `UserTextureApplier` | [actors/avatar/appliers/user_texture_applier.gd](../actors/avatar/appliers/user_texture_applier.gd) | Generic: при identity подменяет все маркеры во всех мешах на текстуру игрока |
 | `AvatarParameterSource` | [actors/avatar/avatar_parameter_source.gd](../actors/avatar/avatar_parameter_source.gd) | Продюсер: считает сигналы игрока из `CharacterBody3D` |
 | `AvatarHost` | [actors/avatar/avatar_host.gd](../actors/avatar/avatar_host.gd) | Крепление: владеет шиной, монтирует/меняет аватар, кормит параметрами |
 | `AvatarResolver` | [actors/avatar/avatar_resolver.gd](../actors/avatar/avatar_resolver.gd) | Резолвит `avatar_uri` (`vrwebavatar://N` / внешний URL) в `PackedScene` |
-| Бандл-пак `avatar_1` | [avatars/avatar_1.tscn](../avatars/avatar_1.tscn) | Дефолт: капсула + квад лица; `LookPitchApplier` (factor 0.35) + `UserTextureApplier` |
-| Бандл-пак `avatar_2` | [avatars/avatar_2.tscn](../avatars/avatar_2.tscn) | Тот же `LookPitchApplier`, но factor −1.0: полный поворот головы-узла |
+| Бандл-пак `avatar_1` | [avatars/avatar_1.tscn](../avatars/avatar_1.tscn) | Дефолт: капсула + квад лица; `LookPitchApplier` (factor 0.35) + `UserTextureApplier` + `VoiceScaleApplier` (рот `Face/MouthObject`) |
+| Бандл-пак `avatar_2` | [avatars/avatar_2.tscn](../avatars/avatar_2.tscn) | Тот же `LookPitchApplier`, но factor −1.0: полный поворот головы-узла; + `VoiceScaleApplier` (рот `Head/MouthObject`) |
 
 `RemotePlayer` — носитель аватара: тело делегировано `AvatarHost`, а неймплейт и речевой бабл
 (UI поверх любого аватара) остались на корне.
@@ -91,15 +92,28 @@
 | `VelocityMagnitude` | Float | derived | Модуль скорости |
 | `AngularY` | Float (рад/с) | дельта `yaw` | Угловая скорость поворота корпуса |
 | `Moving` | Bool | derived | `VelocityMagnitude > MOVING_EPSILON`. Наша добавка сверх VRChat |
+| `Voice` | Float (0..1) | голос локально | Громкость голоса. Не из снимка по сети — считается локально с двух сторон (см. ниже) |
+
+> **`Voice` сорсится особняком — и у себя, и у других.** В отличие от движенческих параметров,
+> громкость **не** гоняется в снимке по сети, а выводится локально из аудио по `VOICE_RMS_GAIN`:
+> - **Чужие капсулы:** звук и так приходит, поэтому `RemotePlayer` берёт сглаженный уровень из
+>   своего `VoicePlayback` (`current_level()`, RMS пришедшего кадра) и каждый физкадр пишет его
+>   в `Voice` шины аватара. Молчащая/без звука капсула → `Voice = 0`.
+> - **Своё тело в зеркале** (`LocalAvatar` делит шину `AvatarParameterSource`): продюсер каждый
+>   физкадр берёт живой уровень входа из `VoiceManager` (`input_level()`), но только пока VAD
+>   открыт (`is_speaking()`) — чтобы «рот» двигался ровно тогда же, когда его видят другие.
+>
+> Так же, как подсветка неймплейта, это локальное вычисление по факту звука. Завязка на параметр —
+> `VoiceScaleApplier` («рот» бандл-аватаров). См. [voice-chat.md](voice-chat.md).
 
 ### B. Заложены в контракт с дефолтами (пока статичны)
 
-`Upright` (1.0), `Voice` (0.0 — [голос отложен](multiplayer.md)), `VRMode` (0 — десктоп),
-`MuteSelf`, `AFK`, `Seated`, `InStation`, `AvatarVersion` (= `AvatarParams.VERSION` — версия
-нашего контракта; аватар может проверить и не ломаться на чужой версии).
+`Upright` (1.0), `VRMode` (0 — десктоп), `MuteSelf`, `AFK`, `Seated`, `InStation`,
+`AvatarVersion` (= `AvatarParams.VERSION` — версия нашего контракта; аватар может проверить и
+не ломаться на чужой версии).
 
-Оживают, когда появится их источник (приседания → `Upright`, микрофон → `Voice`, VR →
-`VRMode`/`TrackingType`). Аватар уже сейчас может на них завязываться — будет читать дефолт.
+Оживают, когда появится их источник (приседания → `Upright`, VR → `VRMode`/`TrackingType`).
+Аватар уже сейчас может на них завязываться — будет читать дефолт.
 
 ### C. Резерв имён (forward-compat, не производятся)
 
@@ -140,7 +154,10 @@
    реагировать на нужные параметры. Сглаживать самому (lerp в `_process`); состояние приходит
    ~15 Гц. Пример общего и настраиваемого:
    [LookPitchApplier](../actors/avatar/appliers/look_pitch_applier.gd) — вращает заданный узел
-   по `LookPitch × pitch_factor` (Default и Head — это он же с factor 0.35 и −1.0).
+   по `LookPitch × pitch_factor` (Default и Head — это он же с factor 0.35 и −1.0). Ещё пример —
+   [VoiceScaleApplier](../actors/avatar/appliers/voice_scale_applier.gd): по `Voice` масштабирует
+   узел (`target_path`, по умолчанию ось Y между `min_scale`/`max_scale`) и прячет в тишине —
+   так бандл-аватары «открывают рот» (`MouthObject`).
    Чисто-идентичностный аппликатор не обязан слушать шину — достаточно метода
    `apply_identity(nick, face)` на узле (`extends Node`), его корень тоже раздаёт.
 

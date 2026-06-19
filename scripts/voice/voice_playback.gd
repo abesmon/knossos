@@ -16,11 +16,15 @@ signal speaking_changed(speaking: bool)
 const BUFFER_SEC := 0.2
 ## Считаем пира говорящим, пока кадры приходили не позже этого порога назад.
 const SPEAKING_TIMEOUT_MSEC := 250
+## Скорость спада уровня голоса (ед./с): атака мгновенная (по пришедшему кадру), спад
+## плавный, чтобы между пакетами «рот» не схлопывался в ноль.
+const VOICE_DECAY := 8.0
 
 var _decoder := VoiceCodec.new()
 var _playback: AudioStreamGeneratorPlayback = null
 var _last_push_msec := -1000000
 var _speaking := false
+var _voice_level := 0.0   # сглаженная громкость [0..1] для параметра аватара VOICE
 
 
 func _ready() -> void:
@@ -51,12 +55,31 @@ func push(payload: PackedByteArray) -> void:
 		var s := mono[i]
 		_playback.push_frame(Vector2(s, s))
 	_last_push_msec = Time.get_ticks_msec()
+	# Громкость кадра (RMS×gain, клампим в [0..1]) — атака мгновенная, спад в _process.
+	_voice_level = maxf(_voice_level, clampf(_rms(mono) * AvatarParams.VOICE_RMS_GAIN, 0.0, 1.0))
 	_set_speaking(true)
 
 
-func _process(_delta: float) -> void:
+## Текущая сглаженная громкость голоса [0..1] — RemotePlayer кладёт её в параметр VOICE,
+## чтобы аватар анимировал «рот». 0, пока пир молчит.
+func current_level() -> float:
+	return _voice_level
+
+
+func _process(delta: float) -> void:
 	if _speaking and Time.get_ticks_msec() - _last_push_msec > SPEAKING_TIMEOUT_MSEC:
 		_set_speaking(false)
+	_voice_level = maxf(0.0, _voice_level - VOICE_DECAY * delta)
+
+
+## RMS амплитуды кадра [0..] — мера громкости (как VoiceManager меряет вход).
+func _rms(mono: PackedFloat32Array) -> float:
+	if mono.is_empty():
+		return 0.0
+	var sum_sq := 0.0
+	for s in mono:
+		sum_sq += s * s
+	return sqrt(sum_sq / float(mono.size()))
 
 
 func _set_speaking(value: bool) -> void:

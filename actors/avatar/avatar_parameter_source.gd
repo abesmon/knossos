@@ -29,6 +29,14 @@ func set_body(body: CharacterBody3D) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Громкость собственного голоса — для зеркала (LocalAvatar делит эту шину). Берём живой
+	# уровень входа из VoiceManager, но только пока VAD открыт (передаём в эфир) — чтобы «рот»
+	# в зеркале двигался ровно тогда же, когда его видят другие, и не дёргался на фоновом шуме.
+	var voice := 0.0
+	if VoiceManager.is_speaking():
+		voice = clampf(VoiceManager.input_level() * AvatarParams.VOICE_RMS_GAIN, 0.0, 1.0)
+	params.set_value(AvatarParams.VOICE, voice)
+
 	if _body == null:
 		return
 

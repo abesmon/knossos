@@ -160,19 +160,26 @@ func _setup_capture() -> void:
 	_monitor_pb = _monitor_player.get_stream_playback()
 
 
-## Нужно ли захватывать ради сети: онлайн, голос включён, не заглушены и есть кому слать.
-func _want_network_capture() -> bool:
+## Нужно ли вообще захватывать микрофон: онлайн, голос включён, не заглушены. БЕЗ требования
+## пира — захват нужен и в одиночку, чтобы VAD и уровень входа кормили «рот» аватара в зеркале
+## (LocalAvatar). В эфир при этом не шлём (см. _want_send).
+func _want_capture() -> bool:
 	return Settings.voice_enabled \
 		and not muted \
-		and NetworkManager.is_online() \
-		and NetworkManager.peer_count() > 0
+		and NetworkManager.is_online()
+
+
+## Нужно ли слать кадры в сеть: захват плюс есть кому слать. В одиночку захватываем (для
+## зеркала), но не кодируем/не отправляем.
+func _want_send() -> bool:
+	return _want_capture() and NetworkManager.peer_count() > 0
 
 
 func _process(delta: float) -> void:
 	if _mic_player == null:
 		return
-	var net := _want_network_capture()
-	var want := net or _monitoring
+	var send := _want_send()
+	var want := _want_capture() or _monitoring
 	if want != _mic_player.playing:
 		if want:
 			_mic_player.play()
@@ -200,8 +207,9 @@ func _process(delta: float) -> void:
 		for i in m:
 			_monitor_pb.push_frame(Vector2(mono[i], mono[i]))
 
-	# Сетевой путь: ресемплим всегда (непрерывная фаза), в эфир кладём только во время речи.
-	if net and _resampler != null:
+	# Сетевой путь: ресемплим, пока есть кому слать (непрерывная фаза), в эфир кладём только
+	# во время речи. В одиночку (send=false) звук не кодируем — захват идёт лишь ради зеркала.
+	if send and _resampler != null:
 		_resampler.process(mono, _send_accum)
 		if _speaking:
 			while _send_accum.size() >= VoiceCodec.FRAME_SAMPLES:

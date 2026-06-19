@@ -138,6 +138,10 @@ func set_state(pos: Vector3, yaw: float, params: Dictionary) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Громкость голоса — параметр аватара: считаем её из реально пришедшего звука (как и
+	# подсветку неймплейта), а не гоняем по сети. Молчащая капсула без _voice держит VOICE=0.
+	if _voice != null:
+		_host.set_param(AvatarParams.VOICE, _voice.current_level())
 	if not _has_target:
 		return
 	var t := clampf(delta * LERP_RATE, 0.0, 1.0)
