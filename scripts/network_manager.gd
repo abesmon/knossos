@@ -29,10 +29,23 @@ signal connection_changed(online: bool)
 ## Пришёл голосовой кадр от пира: payload — закодированный VoiceCodec (см. VoiceManager).
 ## Воспроизведение — на капсуле пира (RemotePlayer/VoicePlayback), маршрутит RemotePlayersView.
 signal voice_received(id: int, payload: PackedByteArray)
+## Сменился авторитет комнаты (см. authority_id). new_authority — id нового авторитета
+## (0, если мы вне комнаты), is_me — стали ли авторитетом мы. Эмитится при входе/выходе
+## пиров, когда меняется результат min(id). Консьюмеры привилегированных действий слушают
+## это, чтобы начать/прекратить их выполнять. Подробно — в docs/authority.md.
+signal authority_changed(new_authority: int, is_me: bool)
+## Изменилась таблица рангов (user_id -> rank): авторитет её правит и рассылает, остальные
+## принимают только от авторитета. Консьюмеры (проверки действий, UI) перечитывают ранги.
+## Подробно — в docs/ranks.md.
+signal ranks_changed()
 
 ## Жёсткий лимит длины сообщения чата — режем и на отправке, и на приёме, чтобы нигде
 ## (лог, бабл) не отрисовывалось больше.
 const MAX_CHAT_CHARS := 280
+
+## Ранг по умолчанию для тех, кого нет в таблице. Чем МЕНЬШЕ ранг — тем больше прав (0 ≈ админ),
+## поэтому дефолт берём заведомо «далеко от нуля» — практически без прав. См. docs/ranks.md.
+const DEFAULT_RANK := 1 << 30
 
 const ICE_SERVERS := {
 	"iceServers": [
@@ -77,6 +90,9 @@ var _pending_join := false # ждём welcome, чтобы отправить joi
 var _mesh = null           # WebRTCMultiplayerPeer
 var _connections := {}     # peer_id -> WebRTCPeerConnection
 var _nicks := {}           # peer_id -> String
+var _authority := 0        # последний вычисленный авторитет (для детекта смены) — см. authority_id
+var _ranks := {}           # user_id (String) -> rank (int); владелец — авторитет, см. docs/ranks.md
+var _user_ids := {}        # peer_id (int) -> user_id (String); из карточки идентичности
 
 
 func _ready() -> void:
@@ -157,16 +173,19 @@ func send_state(position: Vector3, look_yaw: float, params: Dictionary) -> void:
 	rpc("_recv_state", position, look_yaw, params)
 
 
-## Разослать свою карточку (ник + лицо + аватар) всем — например, после смены в настройках.
+## Разослать свою карточку (user_id + ник + лицо + аватар) всем — например, после смены в настройках.
 func broadcast_identity() -> void:
 	if _can_rpc():
-		rpc("_recv_identity", Settings.nick, Settings.face_png(), Settings.avatar_uri)
+		rpc("_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
 
 
 func _on_mp_peer_connected(id: int) -> void:
-	# Отдаём новому пиру свою карточку: ник, лицо (PNG-байты) и идентификатор аватара.
+	# Отдаём новому пиру свою карточку: user_id, ник, лицо (PNG-байты) и идентификатор аватара.
 	if _can_rpc():
-		rpc_id(id, "_recv_identity", Settings.nick, Settings.face_png(), Settings.avatar_uri)
+		rpc_id(id, "_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
+	# Если мы авторитет — новичку сразу полную таблицу рангов (чтобы он знал ранги всех, см. docs/ranks.md).
+	if has_authority() and _can_rpc():
+		rpc_id(id, "_recv_ranks", _ranks)
 
 
 ## Разослать сообщение чата остальным (локальное эхо — на стороне вызывающего).
@@ -200,17 +219,142 @@ func send_voice(payload: PackedByteArray) -> void:
 		rpc("_recv_voice", payload)
 
 
-## Таймкипер комнаты — пир с НАИМЕНЬШИМ id среди нас и подключённых. Детерминированно у всех:
-## ровно один шлёт heartbeat (источник таймкода), без переговоров. При уходе таймкипера роль
-## автоматически переходит к следующему наименьшему. Нужен, т.к. при autoplay явного
-## контроллера нет — иначе таймкода и late-join-синхронизации не было бы вовсе.
-func is_timekeeper() -> bool:
-	if _my_id == 0:
-		return false
+## Авторитет комнаты — пир с НАИМЕНЬШИМ id среди нас и подключённых p2p-пиров. Так как
+## сигнальный сервер выдаёт id монотонным счётчиком, наименьший id = тот, кто раньше всех
+## подключился: «авторитет первому». Это ЧИСТАЯ ФУНКЦИЯ от состава комнаты — каждый пир
+## считает её локально и приходит к тому же ответу без переговоров и голосований. Новичок
+## всегда получает больший id, поэтому НЕ может перехватить авторитет: роль «липнет» к
+## старожилу и сдвигается только при его уходе (peer_leave убирает id → все пересчитывают
+## min → авторитетом становится следующий по старшинству). Возвращает 0, если мы вне комнаты.
+## Полностью — в docs/authority.md.
+func authority_id() -> int:
+	if _my_id == 0 or _mesh == null:
+		return 0
+	var best := _my_id
 	for pid in _connections.keys():
-		if pid < _my_id:
-			return false
-	return true
+		if pid != 0 and pid < best:
+			best = pid
+	return best
+
+
+## Авторитет ли мы. has_authority() == true ровно у одного пира в связной компоненте меша.
+func has_authority() -> bool:
+	return _my_id != 0 and authority_id() == _my_id
+
+
+## Проверка на стороне ПОЛУЧАТЕЛЯ привилегированного RPC: пришло ли действие от авторитета.
+## Доверие не «на слово» — получатель сам вычисляет, кто авторитет, и сверяет с отправителем
+## (его id привязан мешом/сервером, подделать прикладным слоем нельзя). Запоздавшие пакеты от
+## БЫВШЕГО авторитета во время передачи роли отбрасываются: к их приходу authority_id() уже
+## указывает на нового. Вызывать только внутри тела @rpc-метода.
+func sender_is_authority() -> bool:
+	var s := multiplayer.get_remote_sender_id()
+	return s != 0 and s == authority_id()
+
+
+## user_id текущего авторитета (стабильный id, а не peer_id) — для UI-отметки. "", если мы
+## вне комнаты или карточка авторитета ещё не пришла.
+func authority_user_id() -> String:
+	var a := authority_id()
+	if a == 0:
+		return ""
+	if a == _my_id:
+		return Settings.user_id
+	return _user_ids.get(a, "")
+
+
+## Таймкипер видео — первый частный случай авторитета (правило выбора идентично). Оставлен
+## отдельным именем ради читаемости вызовов в VrwebVideoManager; делегирует в has_authority.
+func is_timekeeper() -> bool:
+	return has_authority()
+
+
+## Пересчитать авторитет и, если сменился, оповестить. Зовётся после любого изменения состава
+## (вход/выход пира, подъём/снос меша).
+func _refresh_authority() -> void:
+	var a := authority_id()
+	if a != _authority:
+		_authority = a
+		var is_me := a != 0 and a == _my_id
+		authority_changed.emit(a, is_me)
+		if is_me:
+			# Стали авторитетом — фиксируем свой ранг 0 ЯВНО в таблице (см. docs/ranks.md):
+			# так он унаследуется пирами и переживёт наш перезаход, даже когда авторитетом
+			# станет кто-то другой. И сразу рассылаем таблицу (мы — её новый владелец).
+			_claim_authority_rank()
+		elif a != 0 and _can_rpc():
+			# Авторитет сменился на другого пира — подтягиваем у него таблицу (pull). Закрывает
+			# гонку: его push мог прийти по мешу раньше, чем мы обработали peer_leave старого
+			# авторитета (peer_leave идёт через сигналинг) и потому отвергли бы его. См. docs/ranks.md.
+			rpc_id(a, "_request_ranks")
+
+
+# --- Ранги (таблица user_id -> rank; владелец — авторитет). См. docs/ranks.md. ---
+
+## Ранг по user_id. Нет в таблице → DEFAULT_RANK (практически без прав).
+func rank_of_user(user_id: String) -> int:
+	return int(_ranks.get(user_id, DEFAULT_RANK))
+
+
+## Ранг пира по его эфемерному peer_id. Авторитет всегда считается рангом 0 — даже до того,
+## как обновление таблицы разойдётся (каждый вычисляет авторитета сам, см. authority_id).
+func rank_of_peer(peer_id: int) -> int:
+	if peer_id != 0 and peer_id == authority_id():
+		return 0
+	var uid: String = _user_ids.get(peer_id, "")
+	return DEFAULT_RANK if uid == "" else rank_of_user(uid)
+
+
+## Наш собственный текущий ранг.
+func my_rank() -> int:
+	if has_authority():
+		return 0
+	return rank_of_user(Settings.user_id)
+
+
+## user_id пира (из его карточки) — "", если ещё не пришла.
+func user_id_of(peer_id: int) -> String:
+	return _user_ids.get(peer_id, "")
+
+
+## Назначить ранг пользователю по его user_id. Только авторитет; у остальных — no-op с
+## предупреждением (их обновление всё равно отклонят получатели). Рассылает всю таблицу.
+func set_rank(user_id: String, rank: int) -> void:
+	if not has_authority():
+		push_warning("set_rank: только авторитет может менять ранги")
+		return
+	if user_id == "":
+		return
+	_ranks[user_id] = rank
+	ranks_changed.emit()
+	_broadcast_ranks()
+
+
+## Убрать запись о ранге (пользователь вернётся к DEFAULT_RANK). Только авторитет.
+func clear_rank(user_id: String) -> void:
+	if not has_authority():
+		push_warning("clear_rank: только авторитет может менять ранги")
+		return
+	if _ranks.erase(user_id):
+		ranks_changed.emit()
+		_broadcast_ranks()
+
+
+## Снимок всей таблицы (копия) — для UI/отладки.
+func ranks_snapshot() -> Dictionary:
+	return _ranks.duplicate()
+
+
+func _claim_authority_rank() -> void:
+	if Settings.user_id != "" and int(_ranks.get(Settings.user_id, -1)) != 0:
+		_ranks[Settings.user_id] = 0
+		ranks_changed.emit()
+	_broadcast_ranks()
+
+
+func _broadcast_ranks() -> void:
+	if _can_rpc():
+		rpc("_recv_ranks", _ranks)
 
 
 func nick_of(id: int) -> String:
@@ -221,6 +365,16 @@ func nick_of(id: int) -> String:
 ## микрофон, пока некому слать.
 func peer_count() -> int:
 	return _connections.size()
+
+
+## Список peer_id онлайн-пиров (без нас). Для UI вроде раздела «Пользователи».
+func peer_ids() -> Array:
+	return _connections.keys()
+
+
+## Мы в инстансе (комнате): меш поднят и у нас есть id. Раздел «Пользователи» доступен только так.
+func in_room() -> bool:
+	return _mesh != null and _my_id != 0
 
 
 # --- Внутреннее ---
@@ -292,6 +446,8 @@ func _setup_mesh() -> void:
 	# put_packet падает с «max channels: 3». Все пиры создают меш одинаково — каналы совпадают.
 	_mesh.create_mesh(_my_id, [MultiplayerPeer.TRANSFER_MODE_UNRELIABLE_ORDERED])
 	multiplayer.multiplayer_peer = _mesh
+	# Подняли меш — пока одни, авторитет наш (min == _my_id). Зафиксируем и оповестим.
+	_refresh_authority()
 
 
 func _teardown_mesh() -> void:
@@ -299,10 +455,16 @@ func _teardown_mesh() -> void:
 		emit_signal("peer_left", id)
 	_connections.clear()
 	_nicks.clear()
+	# Таблица рангов и привязки — состояние комнаты. Уходя, сбрасываем: при перезаходе
+	# авторитет пришлёт актуальную таблицу заново (а наш ранг хранится в ЕГО копии). См. docs/ranks.md.
+	_user_ids.clear()
+	_ranks.clear()
 	if _mesh != null:
 		if multiplayer.multiplayer_peer == _mesh:
 			multiplayer.multiplayer_peer = null
 		_mesh = null
+	# Меша больше нет — авторитета тоже. Оповестим (a == 0), если он был.
+	_refresh_authority()
 
 
 ## Заводит p2p-соединение к пиру и, если мы — сторона с меньшим id, шлёт offer.
@@ -317,6 +479,7 @@ func _register_peer(id: int, nick: String) -> void:
 	_connections[id] = conn
 	_mesh.add_peer(conn, id)
 	peer_joined.emit(id, _nicks[id])
+	_refresh_authority()
 	# Антиглар: offer инициирует пир с меньшим id.
 	if _my_id < id:
 		conn.create_offer()
@@ -327,10 +490,14 @@ func _drop_peer(id: int) -> void:
 		return
 	_connections.erase(id)
 	_nicks.erase(id)
+	# Снимаем только привязку peer_id->user_id. Сам ранг в _ranks НЕ трогаем — он привязан к
+	# user_id и должен пережить уход пира (вернётся при перезаходе). См. docs/ranks.md.
+	_user_ids.erase(id)
 	# mesh мог сам убрать пира при закрытии канала — снимаем только если ещё есть.
 	if _mesh != null and _mesh.has_peer(id):
 		_mesh.remove_peer(id)
 	peer_left.emit(id)
+	_refresh_authority()
 
 
 func _on_session_created(type: String, sdp: String, id: int) -> void:
@@ -383,10 +550,34 @@ func _recv_chat(text: String) -> void:
 
 
 @rpc("any_peer", "reliable", "call_remote")
-func _recv_identity(nick: String, face_png: PackedByteArray, avatar_uri: String) -> void:
+func _recv_identity(user_id: String, nick: String, face_png: PackedByteArray, avatar_uri: String) -> void:
 	var id := multiplayer.get_remote_sender_id()
 	_nicks[id] = nick if nick != "" else "Guest-%d" % id
+	# Привязка peer_id -> user_id нужна, чтобы по эфемерному id пира найти его ранг в таблице.
+	# user_id самозаявлен и не проверяется подписью — см. оговорку в docs/ranks.md.
+	if user_id != "":
+		_user_ids[id] = user_id
+		ranks_changed.emit()  # ранг пира теперь резолвится — слушатели могут перечитать
 	identity_received.emit(id, _nicks[id], _decode_face(face_png), avatar_uri)
+
+
+## Полная таблица рангов от авторитета. ДОВЕРИЕ: принимаем только если отправитель — авторитет
+## по нашему собственному расчёту (sender_is_authority). Иначе игнорируем — подсунуть чужую
+## таблицу нельзя. Таблица замещается целиком (авторитет — единственный источник истины).
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_ranks(table: Dictionary) -> void:
+	if not sender_is_authority():
+		return
+	_ranks = table.duplicate()
+	ranks_changed.emit()
+
+
+## Пир просит у нас таблицу рангов (pull при смене авторитета). Отвечаем, только если мы и
+## правда авторитет — иначе наш ответ всё равно отвергнут получателем (sender_is_authority).
+@rpc("any_peer", "reliable", "call_remote")
+func _request_ranks() -> void:
+	if has_authority() and _can_rpc():
+		rpc_id(multiplayer.get_remote_sender_id(), "_recv_ranks", _ranks)
 
 
 @rpc("any_peer", "reliable", "call_remote")

@@ -80,7 +80,8 @@
 last-writer-wins) и `@rpc("any_peer","unreliable_ordered") _recv_video_sync(player_id, position,
 playing)` (heartbeat: позиция + состояние). Heartbeat шлёт **таймкипер** —
 пир с наименьшим id (`NetworkManager.is_timekeeper()`), так что late-join и autoplay
-синхронизируются автоматически. Привязка по `player_id` (страница одна = id одни), применяет
+синхронизируются автоматически. Таймкипер — частный случай **авторитета комнаты**
+(детерминированный «первому», без переговоров; полностью — в [authority.md](authority.md)). Привязка по `player_id` (страница одна = id одни), применяет
 `VrwebVideoManager`. Подробно — в [video-player.md](video-player.md).
 
 **Голос.** Идёт отдельным RPC `@rpc("any_peer","unreliable_ordered","call_remote", 1)`

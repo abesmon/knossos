@@ -43,9 +43,16 @@ const THRESH_MAX := 0.15
 @onready var _face_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow/Clear
 @onready var _avatar: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Avatar
 @onready var _avatar_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Clear
+@onready var _user_id: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow/UserId
+@onready var _user_id_copy: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow/Copy
+@onready var _user_id_reissue: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow/Reissue
 @onready var _face_dialog: FileDialog = $FaceDialog
 @onready var _cache_size: Label = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow/Size
 @onready var _cache_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow/Clear
+@onready var _tabs: TabContainer = $Panel/Margin/VBoxContainer/TabContainer
+@onready var _users_root: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings
+@onready var _users_list: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/UsersScroll/List
+@onready var _users_empty: Label = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Empty
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
 
@@ -61,6 +68,8 @@ func _ready() -> void:
 	_nick_clear.pressed.connect(_nick.clear)
 	_face_clear.pressed.connect(_on_face_clear)
 	_avatar_clear.pressed.connect(_avatar.clear)
+	_user_id_copy.pressed.connect(_on_user_id_copy)
+	_user_id_reissue.pressed.connect(_on_user_id_reissue)
 	# Микрофон: выбор устройства применяем сразу (живьём), чтобы проверка шла на нём.
 	_device.item_selected.connect(_on_device_selected)
 	_device_refresh.pressed.connect(_populate_devices)
@@ -75,6 +84,15 @@ func _ready() -> void:
 	_gain_slider.value_changed.connect(_on_gain_changed)
 	_thresh_slider.value_changed.connect(_on_thresh_changed)
 	_cache_clear.pressed.connect(_on_cache_clear)
+	# Раздел «Пользователи» — живой список пиров и рангов. Любое изменение состава/таблицы/
+	# авторитета/онлайна перестраивает его (хэндлеры no-op, пока экран скрыт). unbind отбрасывает
+	# аргументы сигналов — нам нужен только факт изменения.
+	NetworkManager.peer_joined.connect(_users_dirty.unbind(2))
+	NetworkManager.peer_left.connect(_users_dirty.unbind(1))
+	NetworkManager.identity_received.connect(_users_dirty.unbind(4))
+	NetworkManager.ranks_changed.connect(_users_dirty)
+	NetworkManager.authority_changed.connect(_users_dirty.unbind(2))
+	NetworkManager.connection_changed.connect(_users_dirty.unbind(1))
 
 
 ## Показать экран, заполнив поля текущими значениями.
@@ -84,6 +102,7 @@ func open() -> void:
 	_url.text = Settings.signaling_url
 	_nick.text = Settings.nick
 	_avatar.text = Settings.avatar_uri
+	_user_id.text = Settings.user_id
 	_face_preview.texture = Settings.face_texture()
 	_populate_devices()
 	_populate_out_devices()
@@ -99,6 +118,8 @@ func open() -> void:
 	_monitor.button_pressed = false
 	_level.value = 0.0
 	_update_cache_size()
+	_update_users_availability()
+	_refresh_users()
 	show()
 	_nick.grab_focus()
 
@@ -112,6 +133,143 @@ func _update_cache_size() -> void:
 func _on_cache_clear() -> void:
 	Cache.clear()
 	_update_cache_size()
+
+
+# --- Раздел «Пользователи» (см. docs/ranks.md) ---
+
+## Реакция на любое сетевое изменение: пока экран виден — пересобрать вкладку. Иначе no-op.
+func _users_dirty() -> void:
+	if not visible:
+		return
+	_update_users_availability()
+	_refresh_users()
+
+
+## Вкладка «Пользователи» доступна только онлайн и в инстансе. Иначе прячем её (и, если она
+## была активной, уводим на «Сеть»).
+func _update_users_availability() -> void:
+	var available := NetworkManager.is_online() and NetworkManager.in_room()
+	var idx := _tabs.get_tab_idx_from_control(_users_root)
+	if idx < 0:
+		return
+	_tabs.set_tab_hidden(idx, not available)
+	if not available and _tabs.current_tab == idx:
+		_tabs.current_tab = 0
+
+
+## Перестроить список: мы + все онлайн-пиры + записи о рангах для офлайн-юзеров. Для
+## авторитета у чужих строк — контролы правки ранга. Отметка авторитета — символом «★».
+func _refresh_users() -> void:
+	for child in _users_list.get_children():
+		child.queue_free()
+	var ranks := NetworkManager.ranks_snapshot()
+	var is_auth := NetworkManager.has_authority()
+	var authority_uid := NetworkManager.authority_user_id()
+	var shown_uids := {}
+	var rows := 0
+	# 1) Мы сами — первой строкой (только просмотр).
+	_add_user_row(Settings.nick, Settings.user_id, true, ranks, is_auth, authority_uid, true)
+	shown_uids[Settings.user_id] = true
+	rows += 1
+	# 2) Онлайн-пиры (у некоторых user_id может быть ещё не получен из карточки).
+	for pid in NetworkManager.peer_ids():
+		var uid := NetworkManager.user_id_of(pid)
+		if uid != "":
+			shown_uids[uid] = true
+		_add_user_row(NetworkManager.nick_of(pid), uid, true, ranks, is_auth, authority_uid, false)
+		rows += 1
+	# 3) Ранги без онлайн-пира: запись есть, человека нет.
+	for uid in ranks.keys():
+		if shown_uids.has(uid):
+			continue
+		_add_user_row("", uid, false, ranks, is_auth, authority_uid, false)
+		rows += 1
+	_users_empty.visible = rows == 0
+
+
+## Одна строка списка. uid == "" — карточка пира ещё не пришла (рангом управлять нельзя).
+## is_self — это мы (только просмотр). authority_uid — user_id авторитета (для отметки «★»).
+func _add_user_row(nick: String, uid: String, online: bool, ranks: Dictionary, is_auth: bool, authority_uid: String, is_self: bool) -> void:
+	var has_rank := uid != "" and ranks.has(uid)
+	var is_authority := uid != "" and uid == authority_uid
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+
+	var name_label := Label.new()
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.text = _user_display_name(nick, uid, online, is_self, is_authority)
+	var tip := "user_id: %s" % uid if uid != "" else ""
+	if is_authority:
+		tip = (tip + "\n" if tip != "" else "") + "★ — авторитет (раздаёт ранги)"
+	name_label.tooltip_text = tip
+	if not online:
+		name_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	row.add_child(name_label)
+
+	if is_self or not is_auth:
+		# Себя и обычные пиры — только просмотр. Нет ранга — не выводим явную инфу (просто «—»).
+		var rank_label := Label.new()
+		rank_label.text = ("ранг %d" % int(ranks[uid])) if has_rank else "—"
+		if not has_rank:
+			rank_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+		row.add_child(rank_label)
+	elif uid != "":
+		# Авторитет правит чужой ранг: задать значение и удалить запись.
+		var spin := SpinBox.new()
+		spin.min_value = 0
+		spin.max_value = 1 << 20
+		spin.step = 1
+		spin.value = ranks.get(uid, 1) if has_rank else 1
+		spin.custom_minimum_size = Vector2(90, 0)
+		spin.tooltip_text = "Ранг (0 — максимум прав)"
+		row.add_child(spin)
+		var set_btn := Button.new()
+		set_btn.text = "Задать"
+		set_btn.pressed.connect(_on_set_rank.bind(uid, spin))
+		row.add_child(set_btn)
+		var del_btn := Button.new()
+		del_btn.text = "Удалить ранг"
+		del_btn.disabled = not has_rank
+		del_btn.tooltip_text = "Убрать запись о ранге (вернётся к минимальным правам)"
+		del_btn.pressed.connect(_on_clear_rank.bind(uid))
+		row.add_child(del_btn)
+	else:
+		# Онлайн-пир без полученной карточки — рангом пока управлять нельзя.
+		var note := Label.new()
+		note.text = "ID ещё не получен"
+		note.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+		row.add_child(note)
+
+	_users_list.add_child(row)
+
+
+## Подпись строки: ник для онлайн-пира, короткий user_id для офлайн-записи, «(вы)» для себя,
+## «★» для авторитета.
+func _user_display_name(nick: String, uid: String, online: bool, is_self: bool, is_authority: bool) -> String:
+	var base := ""
+	if online:
+		var who := nick if nick != "" else "Гость"
+		base = "● %s" % who
+		if uid == "":
+			base += " (ID ещё не получен)"
+	else:
+		base = "○ ID %s… (офлайн)" % uid.substr(0, 8)
+	if is_self:
+		base += " (вы)"
+	if is_authority:
+		base += " ★"
+	return base
+
+
+## Авторитет задаёт ранг пиру (по user_id и значению спинбокса). Рассылка/перерисовка —
+## по сигналу ranks_changed.
+func _on_set_rank(uid: String, spin: SpinBox) -> void:
+	NetworkManager.set_rank(uid, int(spin.value))
+
+
+## Авторитет удаляет запись о ранге пользователя.
+func _on_clear_rank(uid: String) -> void:
+	NetworkManager.clear_rank(uid)
 
 
 ## Заполняет список входных устройств и выделяет текущее (по Settings.input_device).
@@ -222,6 +380,20 @@ func _on_face_selected(path: String) -> void:
 func _on_face_clear() -> void:
 	Settings.reset_face()
 	_face_preview.texture = Settings.face_texture()
+
+
+## «Копировать» сетевой ID в системный буфер обмена (надёжнее ручного выделения, особенно на iOS).
+func _on_user_id_copy() -> void:
+	DisplayServer.clipboard_set(Settings.user_id)
+
+
+## «Переиздать» сетевой ID: сразу генерим новый, персистим и показываем. Действие применяется
+## немедленно (как очистка кэша/смена лица), не дожидаясь «Сохранить». Если онлайн — рассылаем
+## обновлённую карточку, чтобы пиры обновили привязку peer_id→user_id. Старые ранги, выданные
+## прежнему id, при этом теряются (см. docs/ranks.md).
+func _on_user_id_reissue() -> void:
+	_user_id.text = Settings.regenerate_user_id()
+	NetworkManager.broadcast_identity()
 
 
 func _on_save() -> void:

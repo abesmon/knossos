@@ -45,6 +45,13 @@ var bus_volumes := {"Master": 1.0, "World": 1.0, "Voice": 1.0}
 var signaling_url: String = DEFAULT_SIGNALING_URL
 var nick: String = ""
 var avatar_uri: String = DEFAULT_AVATAR_URI
+## Постоянный идентификатор этого пользователя (UUID-подобная hex-строка), генерится один раз
+## и персистится в user://. Стабилен между перезапусками и переходами по страницам — служит
+## ключом таблицы рангов (см. NetworkManager.set_rank, docs/ranks.md), чтобы ранг переживал
+## перезаход (в отличие от эфемерного peer_id). ВНИМАНИЕ: это самозаявленный id БЕЗ подписи —
+## его можно подделать (скопировать чужой). Осознанный временный компромисс: настоящая
+## проверка идентичности появится позже через центры авторизации. Подробно — в docs/ranks.md.
+var user_id: String = ""
 
 ## Фактические пути с учётом dev-песочницы (Sandbox): без --sandbox равны константам, с ним —
 ## уходят под user://<id>/. Резолвим один раз в _ready.
@@ -58,8 +65,30 @@ func _ready() -> void:
 	load_settings()
 	if nick.strip_edges() == "":
 		nick = random_nick()
+	if user_id.strip_edges() == "":
+		# Первый запуск (или апгрейд без id) — генерим постоянный id и сразу персистим.
+		user_id = _new_user_id()
+		save()
 	_ensure_face()
 	apply_audio()
+
+
+## Случайный постоянный id пользователя: 16 криптослучайных байт в hex. Crypto — core-класс,
+## доступен и без webrtc-аддона (офлайн).
+static func _new_user_id() -> String:
+	return Crypto.new().generate_random_bytes(16).hex_encode()
+
+
+## Переиздать user_id: сгенерировать новый и сразу персистить (точечно — только секцию
+## identity, не трогая прочие настройки и не эмитя changed). Старые выданные нам ранги
+## привязаны к прежнему id и будут потеряны — см. docs/ranks.md. Возвращает новый id.
+func regenerate_user_id() -> String:
+	user_id = _new_user_id()
+	var cfg := ConfigFile.new()
+	cfg.load(_path)  # сохраняем уже записанные значения; отсутствие файла не критично
+	cfg.set_value("identity", "user_id", user_id)
+	cfg.save(_path)
+	return user_id
 
 
 ## Применяет аудионастройки к AudioServer: выходное устройство и громкости шин. Зовётся на
@@ -136,6 +165,7 @@ func load_settings() -> void:
 		bus_volumes[bus_name] = clampf(cfg.get_value("audio", "vol_" + bus_name, bus_volumes[bus_name]), 0.0, 1.0)
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
 	nick = cfg.get_value("net", "nick", nick)
+	user_id = cfg.get_value("identity", "user_id", user_id)
 	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
 	if avatar_uri.strip_edges() == "":
 		avatar_uri = DEFAULT_AVATAR_URI
@@ -154,6 +184,7 @@ func save() -> void:
 		cfg.set_value("audio", "vol_" + bus_name, bus_volumes[bus_name])
 	cfg.set_value("net", "signaling_url", signaling_url)
 	cfg.set_value("net", "nick", nick)
+	cfg.set_value("identity", "user_id", user_id)
 	cfg.set_value("avatar", "uri", avatar_uri)
 	cfg.save(_path)
 	apply_audio()
