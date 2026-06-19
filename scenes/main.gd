@@ -39,6 +39,15 @@ var _remote_view: Node3D
 var _chat_root: VBoxContainer
 var _chat_log: RichTextLabel
 var _chat_input: LineEdit
+# Чат живёт только в RAM: кольцевой буфер последних CHAT_HISTORY_MAX записей, на диск ничего
+# не пишется. Запись = {kind:"user", nick, text} либо {kind:"system", text} (отбивки переходов).
+const CHAT_HISTORY_MAX := 50
+var _chat_history: Array[Dictionary] = []
+# Таймер угасания: в режиме перемещения через 30с после последнего сообщения лог гаснет до 10%.
+var _chat_idle_timer: Timer
+var _chat_fade_tween: Tween
+# Захвачена ли мышь (режим перемещения) — определяет вид чата: поле ввода и угасание.
+var _mouse_captured: bool = true
 
 
 func _ready() -> void:
@@ -96,6 +105,14 @@ func _on_go() -> void:
 ## достала; при выходе — снова разрешаем кликать и печатать в навбаре/чате.
 func _on_mouse_capture_changed(captured: bool) -> void:
 	_set_ui_focusable(not captured)
+	_mouse_captured = captured
+	# В режиме перемещения поле ввода не нужно (печатать всё равно нельзя — оно открывается
+	# по Enter через _on_chat_requested), показываем только лог; в UI-режиме — лог + поле.
+	if _chat_input != null:
+		_chat_input.visible = not captured
+	# Смена режима будит чат: полная видимость и заново заведённый таймер угасания
+	# (он стартует лишь в режиме перемещения, см. _chat_wake).
+	_chat_wake()
 
 
 ## Enter в браузинге мира — открываем строку чата: освобождаем мышь (делает UI фокусируемым)
@@ -169,6 +186,11 @@ func _on_fetched(html: String, final_url: String) -> void:
 	# Комната мультиплеера = страница. В онлайне переключаемся на комнату нового URL
 	# (NetworkManager рвёт старые p2p-соединения и пересоздаёт mesh).
 	_join_current_room()
+
+	# Отбивка в чате — граница между мирами в общей (сквозной) истории. Только онлайн:
+	# оффлайн чат скрыт, а собеседников нет.
+	if Settings.online_enabled:
+		_push_system_chat("Присоединились к миру %s" % final_url)
 
 
 func _on_failed(message: String, url: String) -> void:
@@ -428,6 +450,14 @@ func _build_chat_ui(ui: Control) -> void:
 	ui.add_child(_chat_root)
 	_chat_root.visible = false
 
+	# Таймер бездействия: в режиме перемещения через 30с после последнего сообщения лог
+	# плавно угасает до 10% непрозрачности, чтобы не мешать обзору (см. _on_chat_idle_timeout).
+	_chat_idle_timer = Timer.new()
+	_chat_idle_timer.one_shot = true
+	_chat_idle_timer.wait_time = 30.0
+	_chat_idle_timer.timeout.connect(_on_chat_idle_timeout)
+	add_child(_chat_idle_timer)
+
 
 func _on_chat_submitted(text: String) -> void:
 	text = text.strip_edges().left(NetworkManager.MAX_CHAT_CHARS)
@@ -444,8 +474,35 @@ func _on_chat_received(id: int, text: String) -> void:
 
 
 func _append_chat(nick: String, text: String) -> void:
-	if _chat_log != null:
-		_chat_log.append_text("[b]%s[/b]: %s\n" % [_esc_bb(nick), _esc_bb(text)])
+	_push_chat({"kind": "user", "nick": nick, "text": text})
+
+
+## Системная строка чата (серым курсивом) — отбивки переходов между мирами и пр.
+func _push_system_chat(text: String) -> void:
+	_push_chat({"kind": "system", "text": text})
+
+
+## Кладёт запись в кольцевой буфер (последние CHAT_HISTORY_MAX, без записи на диск),
+## перерисовывает лог и будит чат (видимость + сброс таймера угасания).
+func _push_chat(entry: Dictionary) -> void:
+	_chat_history.append(entry)
+	if _chat_history.size() > CHAT_HISTORY_MAX:
+		_chat_history = _chat_history.slice(_chat_history.size() - CHAT_HISTORY_MAX)
+	_render_chat()
+	_chat_wake()
+
+
+## Перерисовывает лог из буфера (≤50 строк — дёшево). clear()+append_text заодно обрезает
+## старое при переполнении буфера; scroll_following держит прокрутку у низа.
+func _render_chat() -> void:
+	if _chat_log == null:
+		return
+	_chat_log.clear()
+	for e: Dictionary in _chat_history:
+		if e.get("kind", "") == "system":
+			_chat_log.append_text("[i][color=#9aa0a6]— %s —[/color][/i]\n" % _esc_bb(e.get("text", "")))
+		else:
+			_chat_log.append_text("[b]%s[/b]: %s\n" % [_esc_bb(e.get("nick", "")), _esc_bb(e.get("text", ""))])
 
 
 ## Экранирует "[" в пользовательском тексте, чтобы он не воспринимался как BBCode-тег.
@@ -453,9 +510,35 @@ func _esc_bb(s: String) -> String:
 	return s.replace("[", "[lb]")
 
 
+## Будит чат: полная непрозрачность и (только в режиме перемещения) перезапуск 30-сек таймера,
+## по истечении которого лог плавно угаснет до 10% (_on_chat_idle_timeout). В UI-режиме таймер
+## не заводится — чат остаётся читаемым, пока мышь свободна.
+func _chat_wake() -> void:
+	if _chat_fade_tween != null:
+		_chat_fade_tween.kill()
+		_chat_fade_tween = null
+	if _chat_root != null:
+		_chat_root.modulate.a = 1.0
+	if _chat_idle_timer == null:
+		return
+	_chat_idle_timer.stop()
+	if _mouse_captured and Settings.online_enabled:
+		_chat_idle_timer.start()
+
+
+## 30с без сообщений в режиме перемещения — плавно гасим лог до 10%, чтобы не мешал обзору.
+func _on_chat_idle_timeout() -> void:
+	if _chat_root == null or not (_mouse_captured and Settings.online_enabled):
+		return
+	_chat_fade_tween = create_tween()
+	_chat_fade_tween.tween_property(_chat_root, "modulate:a", 0.1, 0.6)
+
+
 func _update_chat_visibility() -> void:
 	if _chat_root != null:
 		_chat_root.visible = Settings.online_enabled
+	# Онлайн-состояние влияет на угасание (оффлайн чат скрыт целиком).
+	_chat_wake()
 
 
 # --- Окружение и UI ---
