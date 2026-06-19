@@ -68,6 +68,8 @@ func _ready() -> void:
 	_player.mouse_capture_changed.connect(_on_mouse_capture_changed)
 	# Enter в браузинге открывает строку чата (быстрый ввод сообщения без клика).
 	_player.chat_requested.connect(_on_chat_requested)
+	# Esc при уже свободной мыши (возимся с UI) открывает настройки.
+	_player.settings_requested.connect(_open_settings)
 	_world.add_child(_player)
 
 	_go.pressed.connect(_on_go)
@@ -362,7 +364,8 @@ func _setup_net() -> void:
 	# Overlay настроек поверх UI, изначально скрыт.
 	_settings_overlay = SETTINGS_SCENE.instantiate()
 	ui.add_child(_settings_overlay)
-	_settings_overlay.closed.connect(_on_settings_closed)
+	# Закрытие настроек оставляет мышь свободной (UI-режим) — обратно в перемещение
+	# возвращает клик по 3D, а не само закрытие. Поэтому closed здесь ни к чему не цепляем.
 
 	_settings_btn.pressed.connect(_open_settings)
 	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
@@ -380,10 +383,6 @@ func _setup_net() -> void:
 func _open_settings() -> void:
 	_player.capture_mouse(false)
 	_settings_overlay.open()
-
-
-func _on_settings_closed() -> void:
-	_player.capture_mouse(true)
 
 
 func _on_settings_changed() -> void:

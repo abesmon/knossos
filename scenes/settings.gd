@@ -417,7 +417,10 @@ func _close() -> void:
 	closed.emit()
 
 
-func _unhandled_input(event: InputEvent) -> void:
+## Esc закрывает экран. Ловим в _input (а не _unhandled_input), чтобы перехватить событие
+## раньше игрока: при открытом оверлее мышь свободна, и иначе Player._unhandled_input принял
+## бы тот же Esc за «открыть настройки» и погасил бы его (оверлей бы не закрылся).
+func _input(event: InputEvent) -> void:
 	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		_close()
 		get_viewport().set_input_as_handled()

@@ -19,6 +19,10 @@ signal mouse_capture_changed(captured: bool)
 ## ставит фокус в поле ввода (отправка по Enter вернёт нас в браузинг).
 signal chat_requested
 
+## Esc, когда мышь уже отпущена (мы возимся с UI) — просьба открыть настройки.
+## В браузинге мира тот же Esc сначала отпускает мышь (см. _unhandled_input).
+signal settings_requested
+
 ## Отладочный режим инспектора провенанса (F3) включён/выключен. main показывает/прячет оверлей.
 signal debug_toggled(on: bool)
 ## Текст провенанса узла под прицелом в отладочном режиме (пустой — под прицелом ничего).
@@ -175,7 +179,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_ESCAPE:
-				capture_mouse(false)
+				if _looking:
+					# Из браузинга мира — сначала отпускаем мышь.
+					capture_mouse(false)
+				else:
+					# Мышь уже свободна (возимся с UI) — Esc открывает настройки.
+					# Гасим событие: иначе тот же Esc долетит до _unhandled_input
+					# оверлея настроек и сразу же его закроет (а закрытие — recapture).
+					settings_requested.emit()
+					get_viewport().set_input_as_handled()
 			KEY_E:
 				_try_interact()
 			KEY_F3:
