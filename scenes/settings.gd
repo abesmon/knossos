@@ -44,6 +44,8 @@ const THRESH_MAX := 0.15
 @onready var _avatar: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Avatar
 @onready var _avatar_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Clear
 @onready var _face_dialog: FileDialog = $FaceDialog
+@onready var _cache_size: Label = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow/Size
+@onready var _cache_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow/Clear
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
 
@@ -72,6 +74,7 @@ func _ready() -> void:
 	# Усиление и порог активации микрофона — применяем живьём (слышно/видно при проверке).
 	_gain_slider.value_changed.connect(_on_gain_changed)
 	_thresh_slider.value_changed.connect(_on_thresh_changed)
+	_cache_clear.pressed.connect(_on_cache_clear)
 
 
 ## Показать экран, заполнив поля текущими значениями.
@@ -95,8 +98,20 @@ func open() -> void:
 	_test.button_pressed = false
 	_monitor.button_pressed = false
 	_level.value = 0.0
+	_update_cache_size()
 	show()
 	_nick.grab_focus()
+
+
+## Обновляет подпись с текущим размером дискового кэша (аватары + видео).
+func _update_cache_size() -> void:
+	_cache_size.text = "Размер кэша: %s" % Cache.format_size(Cache.total_size())
+
+
+## «Очистить кэш» — удаляет скачанные аватары и видео, обновляет подпись с размером.
+func _on_cache_clear() -> void:
+	Cache.clear()
+	_update_cache_size()
 
 
 ## Заполняет список входных устройств и выделяет текущее (по Settings.input_device).

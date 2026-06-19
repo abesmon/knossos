@@ -50,6 +50,7 @@ layout_mode = 2
 current_tab = 1
 tab_0/title = "Сеть"
 tab_1/title = "Звук"
+tab_2/title = "Прочее"
 
 [node name="NetSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=1884775178]
 visible = false
@@ -340,6 +341,37 @@ custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
 text = "100%"
 horizontal_alignment = 2
+
+[node name="MiscSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=864797000]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 2
+metadata/_tab_name = "Прочее"
+
+[node name="CacheLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings" unique_id=864797001]
+layout_mode = 2
+text = "Кэш"
+
+[node name="CacheRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings" unique_id=864797002]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Size" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow" unique_id=864797003]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Размер кэша: …"
+
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow" unique_id=864797004]
+layout_mode = 2
+tooltip_text = "Удалить кэш скачанных аватаров и видео"
+text = "Очистить кэш"
+
+[node name="CacheHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings" unique_id=864797005]
+layout_mode = 2
+text = "Кэшируются скачанные аватары и видео. Их можно безопасно удалить — при необходимости загрузятся заново."
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer" unique_id=1634399168]
 layout_mode = 2
