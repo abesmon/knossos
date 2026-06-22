@@ -13,6 +13,7 @@ const THRESH_MAX := 0.15
 
 @onready var _online: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Online
 @onready var _voice: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Voice
+@onready var _denoise: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Denoise
 @onready var _device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Device
 @onready var _device_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Refresh
 @onready var _test: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/TestRow/Test
@@ -140,6 +141,7 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_page_meta = page_meta
 	_online.button_pressed = Settings.online_enabled
 	_voice.button_pressed = Settings.voice_enabled
+	_denoise.button_pressed = Settings.voice_denoise
 	_home.text = Settings.home_page
 	_url.text = Settings.signaling_url
 	_nick.text = Settings.nick
@@ -599,6 +601,9 @@ func _on_user_id_reissue() -> void:
 func _on_save() -> void:
 	Settings.online_enabled = _online.button_pressed
 	Settings.voice_enabled = _voice.button_pressed
+	# Денойз применяем живьём (пересоберёт энкодер), чтобы изменение действовало сразу.
+	Settings.voice_denoise = _denoise.button_pressed
+	VoiceManager.set_denoise(Settings.voice_denoise)
 	# Домашняя страница: пусто — без автозагрузки при запуске.
 	Settings.home_page = _home.text.strip_edges()
 	# Пустые поля → дефолты.

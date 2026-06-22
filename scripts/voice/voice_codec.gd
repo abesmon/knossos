@@ -22,17 +22,21 @@ extends RefCounted
 const ENCODER_CLASS := "TwovoipOpusEncoder"
 const STREAM_CLASS := "AudioStreamOpus"
 
-## Частота голосового тракта Opus. 24 кГц — компромисс «разборчивость речи / трафик / CPU»
-## (речь до ~12 кГц). Энкодер сам ресемплит сюда захват с частоты микшера; декодер (AudioStreamOpus)
-## выдаёт на этой частоте, аудиосервер доресемплит к микшеру.
-const OPUS_RATE := 24000
+## Частота голосового тракта Opus. 48 кГц — ОБЯЗАТЕЛЬНО для денойза: RNNoise в twovoip
+## включается только при opus_sample_rate == 48000 и НЕ ресемплит внутри (см. make_encoder и
+## opus_encoder_object.cpp в аддоне). Раньше было 24 кГц (компромисс «речь/трафик/CPU»), но
+## трафик ограничен BITRATE и от частоты почти не зависит — подъём до 48 кГц стоит лишь немного
+## CPU. Протокол у нас фиксированной частоты (пакеты без заголовков на поток), поэтому частота
+## общая для всех: и энкодер, и декодер берут OPUS_RATE. Энкодер ресемплит сюда захват с частоты
+## микшера; аудиосервер доресемплит выход к микшеру.
+const OPUS_RATE := 48000
 ## Моно: голос не нуждается в стерео, а 1 канал вдвое дешевле по битрейту.
 const OPUS_CHANNELS := 1
 ## Длительность кадра, мс. 40 мс → 25 пакетов/с (как было на PCM): крупнее — меньше накладных
 ## расходов RPC, мельче — ниже задержка. Opus допускает до 60 мс.
 const FRAME_MS := 40
-## Размер кадра в семплах ВЫХОДА (opus-частоты): 24000×40/1000 = 960. Передаётся в
-## process_pre_encoded_chunk как opus_chunk_size.
+## Размер кадра в семплах ВЫХОДА (opus-частоты): 48000×40/1000 = 1920. Передаётся в
+## process_pre_encoded_chunk как opus_chunk_size. Кратен кадру RNNoise (480) — денойз применим.
 @warning_ignore("integer_division")
 const OPUS_CHUNK_SIZE := OPUS_RATE * FRAME_MS / 1000
 ## Целевой битрейт энкодера (бит/с). ~20 кбит/с — внятная речь; ~×19 легче прежнего PCM16.
@@ -53,12 +57,14 @@ static func opus_available() -> bool:
 
 ## Создать и сконфигурировать Opus-энкодер под наш тракт. input_rate — частота захвата
 ## (= AudioServer.get_mix_rate(), на ней приходят кадры с шины). Внутренний ресемплер аддона
-## приводит её к OPUS_RATE. Возвращает null, если аддон недоступен.
-static func make_encoder(input_rate: float):
+## приводит её к OPUS_RATE. denoise — включить RNNoise (4-й аргумент create_sampler заводит
+## rnnoise-состояние; реально применяется по флагу в process_pre_encoded_chunk). Работает только
+## при OPUS_RATE == 48000. Смена denoise требует пересоздания энкодера. null, если аддон недоступен.
+static func make_encoder(input_rate: float, denoise := false):
 	if not opus_available():
 		return null
 	var enc = ClassDB.instantiate(ENCODER_CLASS)
-	enc.create_sampler(int(input_rate), OPUS_RATE, OPUS_CHANNELS, false)
+	enc.create_sampler(int(input_rate), OPUS_RATE, OPUS_CHANNELS, denoise)
 	enc.create_opus_encoder(BITRATE, COMPLEXITY, OPTIMIZE_FOR_VOICE)
 	return enc
 

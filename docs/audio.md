@@ -57,6 +57,9 @@
 - **Порог активации** (`vad_threshold`, RMS открытия VAD, дефолт `0.04`) — выше порог, громче
   нужно говорить, чтобы пошла передача. Порог закрытия VoiceManager держит вдвое ниже
   (`CLOSE_TO_OPEN_RATIO`) — гистерезис против дребезга на паузах.
+- **Шумоподавление** (`voice_denoise`, дефолт `вкл`) — RNNoise-денойз twovoip на передаче,
+  чекбокс «Шумоподавление (RNNoise)». Применяется через `VoiceManager.set_denoise` (пересобирает
+  энкодер). Требует `OPUS_RATE` 48 кГц — детали в [voice-chat.md](voice-chat.md).
 
 Оба применяются живьём (`VoiceManager.set_input_gain` / `set_vad_threshold`) при движении
 ползунков, на старте подтягиваются `VoiceManager.apply_tuning()` из `Settings`.

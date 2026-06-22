@@ -207,6 +207,11 @@ layout_mode = 2
 tooltip_text = "Передавать голос с микрофона другим в комнате (работает только онлайн)"
 text = "Голосовой чат (микрофон)"
 
+[node name="Denoise" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1321079379]
+layout_mode = 2
+tooltip_text = "Шумоподавление микрофона (RNNoise): убирает фоновый шум из передаваемого голоса"
+text = "Шумоподавление (RNNoise)"
+
 [node name="MicLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1797282142]
 layout_mode = 2
 text = "Микрофон"

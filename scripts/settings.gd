@@ -36,6 +36,9 @@ var mic_gain: float = 1.0
 ## Порог активации голоса (RMS открытия VAD). Выше — нужно говорить громче, чтобы началась
 ## передача. Порог закрытия VoiceManager держит вдвое ниже (гистерезис). См. VoiceManager.
 var vad_threshold: float = 0.04
+## Шумоподавление микрофона (RNNoise в twovoip) на передаче. Требует OPUS_RATE 48 кГц (см.
+## VoiceCodec). Применяется через VoiceManager.set_denoise; отключаемо в настройках звука.
+var voice_denoise: bool = true
 ## Имя выходного аудиоустройства (как в AudioServer.get_output_device_list()). "Default" —
 ## следовать системному выбору. ВНИМАНИЕ: на macOS смена выхода в рантайме не переключает
 ## конфигурацию входа для голоса — см. ограничение Bluetooth в docs/voice-chat.md.
@@ -163,6 +166,7 @@ func load_settings() -> void:
 	input_device = cfg.get_value("voice", "input_device", input_device)
 	mic_gain = maxf(0.0, cfg.get_value("voice", "mic_gain", mic_gain))
 	vad_threshold = maxf(0.0, cfg.get_value("voice", "vad_threshold", vad_threshold))
+	voice_denoise = cfg.get_value("voice", "denoise", voice_denoise)
 	output_device = cfg.get_value("audio", "output_device", output_device)
 	for bus_name in AUDIO_BUSES:
 		bus_volumes[bus_name] = clampf(cfg.get_value("audio", "vol_" + bus_name, bus_volumes[bus_name]), 0.0, 1.0)
@@ -183,6 +187,7 @@ func save() -> void:
 	cfg.set_value("voice", "input_device", input_device)
 	cfg.set_value("voice", "mic_gain", mic_gain)
 	cfg.set_value("voice", "vad_threshold", vad_threshold)
+	cfg.set_value("voice", "denoise", voice_denoise)
 	cfg.set_value("audio", "output_device", output_device)
 	for bus_name in AUDIO_BUSES:
 		cfg.set_value("audio", "vol_" + bus_name, bus_volumes[bus_name])

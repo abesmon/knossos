@@ -65,6 +65,7 @@ var _mic_player: AudioStreamPlayer = null
 # аддон недоступен (VoiceCodec.opus_available()). Создаётся в _setup_capture.
 var _encoder = null
 var _rate := 0.0   # частота захвата (= get_mix_rate), под которую собран энкодер/монитор
+var _denoise := false   # включён ли RNNoise-денойз (под этот флаг собран энкодер); из Settings
 # Сколько кадров ВХОДА (на _rate) энкодер съедает за один Opus-кадр (calc_audio_chunk_size).
 var _enc_chunk_in := 0
 # Накопитель захвата для энкодера: моно как Vector2(m,m) на _rate, скармливается ровно по _enc_chunk_in.
@@ -111,6 +112,22 @@ func set_input_gain(gain: float) -> void:
 func set_vad_threshold(open_rms: float) -> void:
 	_vad_open = maxf(0.0, open_rms)
 	_vad_close = _vad_open * CLOSE_TO_OPEN_RATIO
+
+
+## Включить/выключить шумоподавление (RNNoise) на передаче, живьём. RNNoise-состояние заводится
+## в семплере энкодера (create_sampler), поэтому смену флага делаем пересозданием энкодера.
+## Накопитель сбрасываем — у нового энкодера свой ресемпл/состояние. Работает только при
+## OPUS_RATE == 48000 (см. VoiceCodec); иначе аддон просто не применит денойз.
+func set_denoise(enabled: bool) -> void:
+	if _denoise == enabled:
+		return
+	_denoise = enabled
+	if _encoder == null:
+		return
+	_encoder = VoiceCodec.make_encoder(_rate, _denoise)
+	if _encoder != null:
+		_enc_chunk_in = _encoder.calc_audio_chunk_size(VoiceCodec.OPUS_CHUNK_SIZE)
+	_enc_accum.clear()
 
 
 func is_speaking() -> bool:
@@ -181,7 +198,9 @@ func _setup_capture() -> void:
 
 	# Opus-энкодер: сам ресемплит захват (_rate) → VoiceCodec.OPUS_RATE, поэтому свой LinearResampler
 	# на передаче больше не нужен. _enc_chunk_in — сколько кадров входа уходит на один Opus-кадр.
-	_encoder = VoiceCodec.make_encoder(_rate)
+	# denoise (RNNoise) зашит в семплер энкодера — читаем стартовое значение из Settings.
+	_denoise = Settings.voice_denoise
+	_encoder = VoiceCodec.make_encoder(_rate, _denoise)
 	if _encoder != null:
 		_enc_chunk_in = _encoder.calc_audio_chunk_size(VoiceCodec.OPUS_CHUNK_SIZE)
 	else:
@@ -269,7 +288,7 @@ func _feed_encoder(mono: PackedFloat32Array) -> void:
 	while _enc_accum.size() >= _enc_chunk_in:
 		var chunk := _enc_accum.slice(0, _enc_chunk_in)
 		_enc_accum = _enc_accum.slice(_enc_chunk_in)
-		_encoder.process_pre_encoded_chunk(chunk, VoiceCodec.OPUS_CHUNK_SIZE, false, false)
+		_encoder.process_pre_encoded_chunk(chunk, VoiceCodec.OPUS_CHUNK_SIZE, _denoise, false)
 		if _speaking:
 			var pkt: PackedByteArray = _encoder.encode_chunk(_OPUS_PREFIX, 1.0)
 			if not pkt.is_empty():
