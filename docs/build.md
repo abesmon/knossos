@@ -22,11 +22,39 @@
 
 ```
 build/
-  knossos-macos.zip      # внутри knossos.app (universal, ad-hoc подпись)
-  knossos-windows.zip    # knossos.exe + knossos.pck + ffmpeg/webrtc dll
+  knossos-0.0.0-b7-macos.zip      # внутри knossos.app (universal, ad-hoc подпись)
+  knossos-0.0.0-b7-windows.zip    # knossos.exe + knossos.pck + ffmpeg/webrtc dll
+  .build_number                   # локальный счётчик билдов (не в гите)
 ```
 
 `build/` целиком в `.gitignore`.
+
+## Версия и номер билда
+
+Имя архива и метаданные билда содержат версию вида `<semver>-b<номер>`:
+
+- **Номер билда** — автоинкрементный счётчик в `build/.build_number`. Растёт на 1 за
+  каждый запуск `build.sh` (mac и win в одной сборке делят номер), **в гит не коммитится**
+  (весь `build/` в `.gitignore`). Если удалить `build/`, счёт начнётся заново.
+- **Semver** — источник правды — `application/config/version` в **Настройках проекта**
+  (`project.godot`). `build.sh` читает его сам. Можно разово переопределить переменной
+  `VERSION` (`VERSION=1.4.0 ./build.sh all`); фолбэк `0.0.0`, если нигде не задано.
+
+  > Godot **не** подставляет `config/version` в Info.plist/ресурс `.exe` автоматически —
+  > за это отвечают per-preset поля версии, которые `build.sh` и заполняет (см. ниже).
+
+Куда попадает номер:
+
+| Платформа | Поле | Что это |
+|-----------|------|---------|
+| macOS  | `application/version` → CFBundleVersion | номер билда в `Info.plist` |
+| macOS  | `application/short_version` → CFBundleShortVersionString | semver |
+| Windows| `application/file_version` / `application/product_version` | `<semver>.<номер>` в ресурсе версии `.exe` |
+| обе    | имя `.zip` | `knossos-<semver>-b<номер>-<платформа>.zip` |
+
+`export_presets.cfg` закоммичен с **пустыми** полями версии. `build.sh` штампует их
+временно перед экспортом и восстанавливает файл байт-в-байт после (через `trap`), так что
+рабочая копия и гит остаются чистыми.
 
 ## Что делает build.sh
 

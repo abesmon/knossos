@@ -13,6 +13,7 @@
 #
 # Переопределяемые переменные окружения:
 #   GODOT   — путь к бинарю Godot (по умолчанию ищется автоматически)
+#   VERSION — semver; по умолчанию берётся config/version из project.godot
 #
 set -euo pipefail
 
@@ -21,6 +22,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD="$ROOT/build"
 CACHE="$BUILD/.cache"
 NAME="knossos"
+PRESETS="$ROOT/export_presets.cfg"
+BUILD_NUMBER_FILE="$BUILD/.build_number"   # локальный счётчик, не в гите (весь build/ в .gitignore)
 
 cd "$ROOT"
 
@@ -86,6 +89,52 @@ check_private_config() {
   fi
 }
 
+# --- semver -----------------------------------------------------------------
+# Источник правды — application/config/version из project.godot (Настройки проекта).
+# Можно переопределить переменной VERSION. Фолбэк 0.0.0, если нигде не задано.
+project_version() {
+  sed -nE 's/^config\/version="([^"]*)".*/\1/p' "$ROOT/project.godot" | head -1
+}
+
+# --- номер билда ------------------------------------------------------------
+# Локальный автоинкрементный счётчик в build/.build_number (build/ в .gitignore).
+# Инкрементируется один раз за запуск — mac и win в одной сборке делят номер.
+next_build_number() {
+  local n=0
+  [[ -f "$BUILD_NUMBER_FILE" ]] && n="$(tr -dc '0-9' < "$BUILD_NUMBER_FILE")"
+  [[ -z "$n" ]] && n=0
+  n=$((n + 1))
+  mkdir -p "$BUILD"
+  printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
+  printf '%s' "$n"
+}
+
+# --- штамповка версий в export_presets.cfg ----------------------------------
+# export_presets.cfg в гите, поэтому правим временно: бэкап + восстановление в trap.
+# macOS:   short_version -> CFBundleShortVersionString, version -> CFBundleVersion (Info.plist)
+# Windows: file_version / product_version (ресурс версии .exe)
+PRESETS_BACKUP=""
+restore_presets() {
+  if [[ -n "$PRESETS_BACKUP" && -f "$PRESETS_BACKUP" ]]; then
+    cp -f "$PRESETS_BACKUP" "$PRESETS"
+    rm -f "$PRESETS_BACKUP"
+    PRESETS_BACKUP=""
+  fi
+}
+set_preset_key() {  # $1 = ключ (как в cfg), $2 = значение
+  local esc_key="${1//\//\\/}"
+  sed -i '' -E "s/^${esc_key}=.*/${esc_key}=\"$2\"/" "$PRESETS"
+}
+stamp_versions() {  # $1 = semver, $2 = build number
+  PRESETS_BACKUP="$(mktemp)"
+  cp "$PRESETS" "$PRESETS_BACKUP"
+  trap restore_presets EXIT
+  set_preset_key 'application/short_version'  "$1"        # macOS semver
+  set_preset_key 'application/version'         "$2"        # macOS build number (CFBundleVersion)
+  set_preset_key 'application/file_version'    "$1.$2"     # Windows
+  set_preset_key 'application/product_version' "$1.$2"     # Windows
+}
+
 # --- импорт ресурсов (без него первый headless-экспорт может промахнуться) ---
 import_assets() {
   step "Импорт ресурсов проекта"
@@ -134,9 +183,10 @@ build_mac() {
   fi
 
   step "Упаковка в zip (ditto, чтобы сохранить структуру бандла)"
-  rm -f "$BUILD/$NAME-macos.zip"
-  ( cd "$dir" && ditto -c -k --sequesterRsrc --keepParent "$NAME.app" "$BUILD/$NAME-macos.zip" )
-  ok "macOS готов: build/$NAME-macos.zip ($(du -h "$BUILD/$NAME-macos.zip" | cut -f1))"
+  local zip="$BUILD/$NAME-$ARCHIVE_TAG-macos.zip"
+  rm -f "$zip"
+  ( cd "$dir" && ditto -c -k --sequesterRsrc --keepParent "$NAME.app" "$zip" )
+  ok "macOS готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
 }
 
 # --- сборка Windows ---------------------------------------------------------
@@ -157,9 +207,10 @@ build_win() {
   fi
 
   step "Упаковка в zip"
-  rm -f "$BUILD/$NAME-windows.zip"
-  ( cd "$dir" && zip -qr "$BUILD/$NAME-windows.zip" . )
-  ok "Windows готов: build/$NAME-windows.zip ($(du -h "$BUILD/$NAME-windows.zip" | cut -f1))"
+  local zip="$BUILD/$NAME-$ARCHIVE_TAG-windows.zip"
+  rm -f "$zip"
+  ( cd "$dir" && zip -qr "$zip" . )
+  ok "Windows готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
 }
 
 # --- main -------------------------------------------------------------------
@@ -174,6 +225,14 @@ esac
 step "Godot: $GODOT ($VERSION_FULL)"
 check_private_config
 import_assets
+
+# Версия билда: semver (project.godot, либо VERSION) + автоинкрементный номер билда.
+SEMVER="${VERSION:-$(project_version)}"
+[[ -z "$SEMVER" ]] && SEMVER="0.0.0"
+BUILD_NUMBER="$(next_build_number)"
+ARCHIVE_TAG="$SEMVER-b$BUILD_NUMBER"
+step "Версия: $SEMVER, билд #$BUILD_NUMBER (архивы: $NAME-$ARCHIVE_TAG-*.zip)"
+stamp_versions "$SEMVER" "$BUILD_NUMBER"
 
 case "$target" in
   mac|macos)        build_mac ;;
