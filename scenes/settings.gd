@@ -608,7 +608,7 @@ func _on_save() -> void:
 	Settings.home_page = _home.text.strip_edges()
 	# Пустые поля → дефолты.
 	var url := _url.text.strip_edges()
-	Settings.signaling_url = url if url != "" else Settings.DEFAULT_SIGNALING_URL
+	Settings.signaling_url = url if url != "" else BuildConfig.signaling_url
 	var nick := _nick.text.strip_edges()
 	Settings.nick = nick if nick != "" else Settings.random_nick()
 	# Пустой адрес аватара → дефолт из пака (vrwebavatar://1).

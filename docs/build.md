@@ -14,6 +14,10 @@
 В VSCode: **Cmd+Shift+B** → выбрать задачу (`Build: All / macOS / Windows / Clean`).
 Задачи описаны в [.vscode/tasks.json](../.vscode/tasks.json).
 
+> **Перед первой сборкой** заведите приватный конфиг с адресами сигналинга/ICE:
+> `cp config/build.example.cfg config/build.private.cfg` и впишите значения. Без него билд
+> соберётся, но онлайн/голос работать не будут. Подробно — [build-config.md](build-config.md).
+
 Результат:
 
 ```

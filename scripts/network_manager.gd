@@ -47,37 +47,8 @@ const MAX_CHAT_CHARS := 280
 ## поэтому дефолт берём заведомо «далеко от нуля» — практически без прав. См. docs/ranks.md.
 const DEFAULT_RANK := 1 << 30
 
-const ICE_SERVERS := {
-	"iceServers": [
-		{
-			"urls": ["stun:stun.l.google.com:19302"]
-		},
-		{
-			"urls": "stun:stun.relay.metered.ca:80",
-		},
-		{
-			"urls": "turn:global.relay.metered.ca:80",
-			"username": "609dc0c20c8274554e649868",
-			"credential": "B/2s+iW8VmDd+9AL",
-		},
-		{
-			"urls": "turn:global.relay.metered.ca:80?transport=tcp",
-			"username": "609dc0c20c8274554e649868",
-			"credential": "B/2s+iW8VmDd+9AL",
-		},
-		{
-			"urls": "turn:global.relay.metered.ca:443",
-			"username": "609dc0c20c8274554e649868",
-			"credential": "B/2s+iW8VmDd+9AL",
-		},
-		{
-			"urls": "turns:global.relay.metered.ca:443?transport=tcp",
-			"username": "609dc0c20c8274554e649868",
-			"credential": "B/2s+iW8VmDd+9AL",
-		}
-	]
-	
-}
+## ICE/TURN-серверы берём из приватного конфига сборки (BuildConfig), а не зашиваем сюда —
+## адреса и учётка TURN не должны жить в коде/репозитории. См. config/build_config.gd.
 
 var _ws: WebSocketPeer
 var _was_open := false
@@ -473,7 +444,7 @@ func _register_peer(id: int, nick: String) -> void:
 		return
 	_nicks[id] = nick if nick != "" else "Guest-%d" % id
 	var conn = ClassDB.instantiate("WebRTCPeerConnection")
-	conn.initialize(ICE_SERVERS)
+	conn.initialize(BuildConfig.ice_servers)
 	conn.session_description_created.connect(_on_session_created.bind(id))
 	conn.ice_candidate_created.connect(_on_ice_created.bind(id))
 	_connections[id] = conn

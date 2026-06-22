@@ -8,7 +8,6 @@ extends Node
 signal changed
 
 const PATH := "user://settings.cfg"
-const DEFAULT_SIGNALING_URL := "https://signaling.vrweb.home.syrupmg.ru"
 ## Лицо аватара. Всегда храним в user:// как 256×256 PNG (с альфой) — это и отдаётся по
 ## сети другим игрокам. При первом запуске копируем сюда дефолт.
 const FACE_PATH := "user://face.png"
@@ -45,7 +44,9 @@ var voice_denoise: bool = true
 var output_device: String = "Default"
 ## Громкости шин, линейные [0..1]. Имя шины → множитель. Применяются к AudioServer в apply_audio().
 var bus_volumes := {"Master": 1.0, "World": 1.0, "Voice": 1.0}
-var signaling_url: String = DEFAULT_SIGNALING_URL
+## Дефолт берём из приватного конфига сборки (BuildConfig); пользователь может переопределить
+## его в настройках, тогда значение персистится в user://settings.cfg и читается в load_settings.
+var signaling_url: String = ""
 ## Домашняя страница: адрес, который грузится автоматически при запуске (см. main._ready).
 ## Пусто — без автозагрузки: стартуем на пустом экране с фокусом в адресной строке.
 var home_page: String = ""
@@ -68,6 +69,9 @@ var _face_path := FACE_PATH
 func _ready() -> void:
 	_path = Sandbox.resolve(PATH)
 	_face_path = Sandbox.resolve(FACE_PATH)
+	# Дефолт сигналинга — из приватного конфига сборки; load_settings ниже переопределит его
+	# сохранённым значением, если пользователь менял адрес в настройках.
+	signaling_url = BuildConfig.signaling_url
 	load_settings()
 	if nick.strip_edges() == "":
 		nick = random_nick()

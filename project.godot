@@ -26,6 +26,7 @@ driver/mix_rate=48000
 
 [autoload]
 
+BuildConfig="*res://config/build_config.gd"
 Settings="*res://scripts/settings.gd"
 NetworkManager="*res://scripts/network_manager.gd"
 VoiceManager="*res://scripts/voice/voice_manager.gd"

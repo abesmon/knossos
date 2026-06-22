@@ -74,6 +74,18 @@ ensure_templates() {
   ok "Шаблоны установлены в $TPL_DEST"
 }
 
+# --- приватный конфиг сборки ------------------------------------------------
+# config/build.private.cfg хранит адреса сигналинга/ICE и учётку TURN (в .gitignore).
+# Запекается в билд через include_filter; без него онлайн-функции в билде не заведутся.
+check_private_config() {
+  if [[ -f "$ROOT/config/build.private.cfg" ]]; then
+    ok "Приватный конфиг config/build.private.cfg на месте"
+  else
+    warn "Нет config/build.private.cfg — билд соберётся, но онлайн/голос работать не будут."
+    warn "Скопируйте config/build.example.cfg в config/build.private.cfg и впишите адреса."
+  fi
+}
+
 # --- импорт ресурсов (без него первый headless-экспорт может промахнуться) ---
 import_assets() {
   step "Импорт ресурсов проекта"
@@ -160,6 +172,7 @@ case "$target" in
 esac
 
 step "Godot: $GODOT ($VERSION_FULL)"
+check_private_config
 import_assets
 
 case "$target" in

@@ -7,3 +7,7 @@
 
 # Сборки (build.sh)
 /build/
+
+# Приватный конфиг сборки (адреса сигналинга/ICE, учётка TURN) — см. docs/build-config.md.
+# Коммитим только шаблон config/build.example.cfg.
+/config/build.private.cfg
