@@ -9,10 +9,13 @@ extends Node
 ## заявленной частотой и рваным потоком (talkbox/робовойс). Подробности и известное ограничение
 ## Bluetooth — в docs/voice-chat.md.
 ##
-## Тракт: микрофон → шина (get_mix_rate) → даунмикс в моно → VAD → ресемпл к VoiceCodec.RATE
-## (с антиалиасингом при понижении) → кадры → кодирование → NetworkManager.send_voice. Приём и
-## пространственное воспроизведение — на капсулах (RemotePlayer/VoicePlayback). Есть режим
-## МОНИТОРИНГА (проверка микрофона в настройках): уровень входа + опциональный loopback.
+## Тракт: микрофон → шина (get_mix_rate) → даунмикс в моно → VAD → Opus-энкодер (twovoip,
+## сам ресемплит к VoiceCodec.OPUS_RATE) → NetworkManager.send_voice. Энкодер stateful и принимает
+## кадры порциями фиксированного размера (calc_audio_chunk_size), поэтому моно копится в
+## _enc_accum и скармливается ровно по чанку: process_pre_encoded_chunk (ресемпл+буфер), затем —
+## пока открыт VAD — encode_chunk. Приём и пространственное воспроизведение — на капсулах
+## (RemotePlayer/VoicePlayback, через AudioStreamOpus). Подробно — docs/voice-chat.md.
+## Есть режим МОНИТОРИНГА (проверка микрофона в настройках): уровень входа + опциональный loopback.
 
 ## Локальная речь открылась/закрылась (по VAD) — для индикации в UI.
 signal local_speaking_changed(speaking: bool)
@@ -57,10 +60,18 @@ var _vad_close := DEFAULT_OPEN_RMS * CLOSE_TO_OPEN_RATIO
 var _bus_idx := -1
 var _capture: AudioEffectCapture = null
 var _mic_player: AudioStreamPlayer = null
-var _codec := VoiceCodec.new()
-var _resampler: LinearResampler = null
-var _rate := 0.0   # частота захвата (= get_mix_rate), под которую собран ресемплер/монитор
-var _send_accum := PackedFloat32Array()
+# Opus-энкодер аддона twovoip (TwovoipOpusEncoder). Untyped: класс приходит из GDExtension и в
+# сборке без аддона отсутствует — статическая типизация сломала бы парсинг автолоада. null, если
+# аддон недоступен (VoiceCodec.opus_available()). Создаётся в _setup_capture.
+var _encoder = null
+var _rate := 0.0   # частота захвата (= get_mix_rate), под которую собран энкодер/монитор
+# Сколько кадров ВХОДА (на _rate) энкодер съедает за один Opus-кадр (calc_audio_chunk_size).
+var _enc_chunk_in := 0
+# Накопитель захвата для энкодера: моно как Vector2(m,m) на _rate, скармливается ровно по _enc_chunk_in.
+var _enc_accum := PackedVector2Array()
+# Префикс Opus-пакета. Пустой — без порядковых номеров (lenchunkprefix 0 на приёме): осознанно
+# простое воспроизведение без переупорядочивания/FEC, как было на PCM (см. docs/voice-chat.md).
+var _OPUS_PREFIX := PackedByteArray()
 var _speaking := false
 var _silence_sec := 0.0
 
@@ -168,7 +179,13 @@ func _setup_capture() -> void:
 	_mic_player.bus = BUS_NAME
 	add_child(_mic_player)
 
-	_resampler = LinearResampler.new(_rate, float(VoiceCodec.RATE))
+	# Opus-энкодер: сам ресемплит захват (_rate) → VoiceCodec.OPUS_RATE, поэтому свой LinearResampler
+	# на передаче больше не нужен. _enc_chunk_in — сколько кадров входа уходит на один Opus-кадр.
+	_encoder = VoiceCodec.make_encoder(_rate)
+	if _encoder != null:
+		_enc_chunk_in = _encoder.calc_audio_chunk_size(VoiceCodec.OPUS_CHUNK_SIZE)
+	else:
+		push_warning("Opus недоступен: положите аддон twovoip в addons/twovoip — голос не будет кодироваться")
 
 	# Локальный loopback-плеер (для «слышать себя»): генератор на частоте микшера.
 	# Буфер с запасом (0.4 с) — Bluetooth-вывод даёт высокую/рваную задержку, на коротком
@@ -208,7 +225,7 @@ func _process(delta: float) -> void:
 			_mic_player.play()
 		else:
 			_mic_player.stop()
-			_send_accum.clear()
+			_enc_accum.clear()
 			_set_speaking(false)
 			_level = 0.0
 			_check_device = ""   # захват остановлен — проверку входа отменяем
@@ -232,19 +249,31 @@ func _process(delta: float) -> void:
 		for i in m:
 			_monitor_pb.push_frame(Vector2(mono[i], mono[i]))
 
-	# Сетевой путь: ресемплим, пока есть кому слать (непрерывная фаза), в эфир кладём только
-	# во время речи. В одиночку (send=false) звук не кодируем — захват идёт лишь ради зеркала.
-	if send and _resampler != null:
-		_resampler.process(mono, _send_accum)
-		if _speaking:
-			while _send_accum.size() >= VoiceCodec.FRAME_SAMPLES:
-				var frame := _send_accum.slice(0, VoiceCodec.FRAME_SAMPLES)
-				NetworkManager.send_voice(_codec.encode(frame))
-				_send_accum = _send_accum.slice(VoiceCodec.FRAME_SAMPLES)
-		else:
-			_send_accum.clear()
+	# Сетевой путь: пока есть кому слать (непрерывная фаза) — кормим энкодер кадрами захвата,
+	# в эфир кладём Opus-пакеты только во время речи. В одиночку (send=false) не кодируем —
+	# захват идёт лишь ради зеркала. Энкодер сам ресемплит и буферизует, см. _feed_encoder.
+	if send and _encoder != null:
+		_feed_encoder(mono)
 	else:
-		_send_accum.clear()
+		_enc_accum.clear()
+
+
+## Кормит Opus-энкодер моно-кадрами захвата (как Vector2(m,m) на _rate — усиление уже в mono).
+## Энкодер принимает вход ровно по _enc_chunk_in кадров на один Opus-кадр: копим в _enc_accum и
+## отдаём порциями. process_pre_encoded_chunk ресемплит и буферизует ВСЕГДА (непрерывность ресемпла
+## и lead-in), а encode_chunk/отправку делаем только пока открыт VAD. Перед первым кадром речи
+## энкодер сброшен в _set_speaking — приёмник начинает поток «с чистого листа».
+func _feed_encoder(mono: PackedFloat32Array) -> void:
+	for s in mono:
+		_enc_accum.push_back(Vector2(s, s))
+	while _enc_accum.size() >= _enc_chunk_in:
+		var chunk := _enc_accum.slice(0, _enc_chunk_in)
+		_enc_accum = _enc_accum.slice(_enc_chunk_in)
+		_encoder.process_pre_encoded_chunk(chunk, VoiceCodec.OPUS_CHUNK_SIZE, false, false)
+		if _speaking:
+			var pkt: PackedByteArray = _encoder.encode_chunk(_OPUS_PREFIX, 1.0)
+			if not pkt.is_empty():
+				NetworkManager.send_voice(pkt)
 
 
 ## Стерео-буфер захвата → моно с усилением.
@@ -323,4 +352,8 @@ func _set_speaking(value: bool) -> void:
 	if _speaking == value:
 		return
 	_speaking = value
+	# На старте речи сбрасываем энкодер: каждый «спурт» уходит в эфир самостоятельным Opus-потоком
+	# (приёмник AudioStreamOpus начинает декод с чистого состояния, без хвостов прошлой фразы).
+	if value and _encoder != null:
+		_encoder.reset_opus_encoder()
 	local_speaking_changed.emit(value)

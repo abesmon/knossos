@@ -2,42 +2,74 @@ class_name VoiceCodec
 extends RefCounted
 
 ## Кодек голоса — граница, за которой прячется представление аудио «на проводе».
-## Сейчас это сырой PCM16 (моно, VOICE_RATE Гц): float-семплы [-1;1] квантуются в int16
-## little-endian. Заведомо неэффективно (см. docs/voice-chat.md), но без зависимостей и
-## целиком на GDScript — это намеренный первый шаг.
+## Сейчас это **Opus** через нативный аддон twovoip (addons/twovoip): libopus, собранный
+## GDExtension'ом под все платформы (вкл. web/wasm). До этого был сырой PCM16 — см. git-лог и
+## docs/voice-chat.md, где описан этот переход и зачем он (PCM16 24 кГц ≈ 384 кбит/с против
+## ~20 кбит/с у Opus, плюс FEC/PLC).
 ##
-## Контракт сделан под будущую замену на Opus: у энкодера/декодера может появиться
-## внутреннее состояние (Opus его требует — FEC/PLC), поэтому это инстанс-класс, а не
-## статические функции. VoiceManager держит один энкодер; каждая капсула (поток пира) —
-## свой декодер. Чтобы перейти на Opus, достаточно подменить тело encode/decode и константы,
-## не трогая транспорт и захват.
+## ВАЖНО: API twovoip не «чистая функция encode/decode». Энкодер (TwovoipOpusEncoder)
+## stateful, сам ресемплит вход→OPUS_RATE и принимает кадры порциями (process+encode).
+## Декодер существует ТОЛЬКО как AudioStreamOpus (полноценный AudioStream) — отдельной
+## «decode → семплы» нет. Поэтому VoiceCodec теперь не кодирует сам, а:
+##   • держит единый источник истины по параметрам Opus (частота/каналы/битрейт/кадр);
+##   • отдаёт сконфигурированные энкодер (make_encoder) и поток-декодер (make_stream).
+## Энкодер живёт в VoiceManager; AudioStreamOpus вешается на капсулу пира (VoicePlayback,
+## AudioStreamPlayer3D — так сохраняется пространственность). См. docs/voice-chat.md.
+##
+## Классы аддона резолвятся через ClassDB (как WebRTC в NetworkManager): без статической
+## типизации, чтобы автолоад/сцены парсились даже в сборке без аддона. Доступность — opus_available().
 
-## Частота дискретизации голосового тракта. 24 кГц — компромисс «разборчивость/трафик»:
-## речь до ~12 кГц передаётся, а поток вдвое легче 48 кГц. И захват, и воспроизведение
-## ресемплятся к этой частоте.
-const RATE := 24000
-## Длина кадра в семплах. 40 мс при RATE → 960 семплов на пакет (25 пакетов/с): крупнее
-## — меньше накладных расходов RPC, мельче — ниже задержка. См. расчёты в доке.
-const FRAME_SAMPLES := 960
-## Целевой размер пакета PCM16 (байт) — для справки/проверок: 2 байта на семпл.
-const FRAME_BYTES := FRAME_SAMPLES * 2
+const ENCODER_CLASS := "TwovoipOpusEncoder"
+const STREAM_CLASS := "AudioStreamOpus"
+
+## Частота голосового тракта Opus. 24 кГц — компромисс «разборчивость речи / трафик / CPU»
+## (речь до ~12 кГц). Энкодер сам ресемплит сюда захват с частоты микшера; декодер (AudioStreamOpus)
+## выдаёт на этой частоте, аудиосервер доресемплит к микшеру.
+const OPUS_RATE := 24000
+## Моно: голос не нуждается в стерео, а 1 канал вдвое дешевле по битрейту.
+const OPUS_CHANNELS := 1
+## Длительность кадра, мс. 40 мс → 25 пакетов/с (как было на PCM): крупнее — меньше накладных
+## расходов RPC, мельче — ниже задержка. Opus допускает до 60 мс.
+const FRAME_MS := 40
+## Размер кадра в семплах ВЫХОДА (opus-частоты): 24000×40/1000 = 960. Передаётся в
+## process_pre_encoded_chunk как opus_chunk_size.
+@warning_ignore("integer_division")
+const OPUS_CHUNK_SIZE := OPUS_RATE * FRAME_MS / 1000
+## Целевой битрейт энкодера (бит/с). ~20 кбит/с — внятная речь; ~×19 легче прежнего PCM16.
+const BITRATE := 20000
+## Сложность кодирования Opus (0..10): компромисс CPU/качество. 5 — как в примере аддона.
+const COMPLEXITY := 5
+## Подсказка кодеку оптимизироваться под голос (SILK/VOIP-режим).
+const OPTIMIZE_FOR_VOICE := true
+## Длина буфера декодера (с) — джиттер-буфер AudioStreamOpus, сглаживает неравномерность сети.
+const STREAM_BUFFER_SEC := 0.5
 
 
-## Кодирует кадр моно-семплов [-1;1] @ RATE в байты «провода» (PCM16 LE).
-func encode(mono: PackedFloat32Array) -> PackedByteArray:
-	var out := PackedByteArray()
-	out.resize(mono.size() * 2)
-	for i in mono.size():
-		var s := int(round(clampf(mono[i], -1.0, 1.0) * 32767.0))
-		out.encode_s16(i * 2, s)
-	return out
+## Доступен ли нативный Opus-аддон (twovoip). Без него голос не кодируется/не воспроизводится,
+## но проект работает (как и без webrtc-native). Голос всё равно требует онлайна и WebRTC.
+static func opus_available() -> bool:
+	return ClassDB.class_exists(ENCODER_CLASS) and ClassDB.class_exists(STREAM_CLASS)
 
 
-## Декодирует байты «провода» обратно в моно-семплы [-1;1] @ RATE.
-func decode(payload: PackedByteArray) -> PackedFloat32Array:
-	var n := payload.size() / 2
-	var out := PackedFloat32Array()
-	out.resize(n)
-	for i in n:
-		out[i] = float(payload.decode_s16(i * 2)) / 32767.0
-	return out
+## Создать и сконфигурировать Opus-энкодер под наш тракт. input_rate — частота захвата
+## (= AudioServer.get_mix_rate(), на ней приходят кадры с шины). Внутренний ресемплер аддона
+## приводит её к OPUS_RATE. Возвращает null, если аддон недоступен.
+static func make_encoder(input_rate: float):
+	if not opus_available():
+		return null
+	var enc = ClassDB.instantiate(ENCODER_CLASS)
+	enc.create_sampler(int(input_rate), OPUS_RATE, OPUS_CHANNELS, false)
+	enc.create_opus_encoder(BITRATE, COMPLEXITY, OPTIMIZE_FOR_VOICE)
+	return enc
+
+
+## Создать и сконфигурировать AudioStreamOpus для воспроизведения потока одного пира.
+## Вешается на AudioStreamPlayer3D (VoicePlayback). Возвращает null, если аддон недоступен.
+static func make_stream():
+	if not opus_available():
+		return null
+	var stream = ClassDB.instantiate(STREAM_CLASS)
+	stream.opus_sample_rate = OPUS_RATE
+	stream.opus_channels = OPUS_CHANNELS
+	stream.buffer_length = STREAM_BUFFER_SEC
+	return stream
