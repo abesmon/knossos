@@ -98,7 +98,12 @@ func _on_identity_received(id: int, nick: String, face: Texture2D, avatar_uri: S
 ## поэтому в колбэке перепроверяем: капсула жива и желаемый аватар не сменился. Дубли одного
 ## аватара (уже смонтирован) пропускаем — чтобы не пересобирать тело зря.
 func _apply_avatar(id: int, uri: String) -> void:
-	if uri.strip_edges() == "" or _avatar_applied.get(id) == uri:
+	if uri.strip_edges() == "":
+		return
+	# Вердикт легитимности считаем даже если сцена уже смонтирована (манифест мог измениться /
+	# капсула пересоздалась): он не завязан на дедуп монтажа аватара.
+	_apply_verdict(id, uri)
+	if _avatar_applied.get(id) == uri:
 		return
 	_resolver.resolve(uri, func(scene: PackedScene) -> void:
 		if scene == null:
@@ -108,6 +113,21 @@ func _apply_avatar(id: int, uri: String) -> void:
 			return
 		cap.set_avatar(scene)
 		_avatar_applied[id] = uri
+	)
+
+
+## Резолвит манифест прав аватара и проставляет капсуле вердикт легитимности (жёлтый «⚠» у
+## ника). Личность пира пока невозможно верифицировать (нет слоя идентичности), поэтому
+## evaluate зовётся с identity_verified=false — всё кроме allow:["*"] даёт UNCONFIRMED.
+## См. docs/avatars.md → «Защита владения аватаром».
+func _apply_verdict(id: int, uri: String) -> void:
+	_resolver.resolve_manifest(uri, func(m: AvatarManifest) -> void:
+		var cap: RemotePlayer = _capsules.get(id)
+		if cap == null or _avatar_uris.get(id) != uri:
+			return
+		var verdict := (AvatarManifest.Verdict.UNCONFIRMED if m == null
+			else m.evaluate("", false))
+		cap.set_avatar_legitimacy(verdict)
 	)
 
 

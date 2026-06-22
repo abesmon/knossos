@@ -8,6 +8,9 @@ extends Node3D
 
 @onready var _host: AvatarHost = $AvatarHost
 @onready var _label: Label3D = $Label
+# Жёлтый «⚠» над ником: законность аватара не подтверждена (нет манифеста прав / личность пира
+# пока невозможно верифицировать). Создаём кодом, чтобы не править .tscn. См. docs/avatars.md.
+var _warn: Label3D = null
 # Бабл — это UI-плашка (PanelContainer + Label со скруглённым фоном), отрендеренная через
 # SubViewport на billboard-Sprite3D. Так получаем настоящий «пузырь», а не голый текст.
 @onready var _bubble: Sprite3D = $Bubble
@@ -39,15 +42,24 @@ func _ready() -> void:
 	# Ник/лицо могли задать до входа в дерево (когда @onready ещё null) — применяем тут.
 	_label.text = _nick
 	_host.apply_identity(_nick, _face_tex)
+	_warn = Label3D.new()
+	_warn.text = "⚠"
+	_warn.modulate = Color(1.0, 0.82, 0.2)
+	_warn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_warn.no_depth_test = true
+	_warn.visible = false
+	add_child(_warn)
 	_bubble.texture = _bubble_viewport.get_texture()
 	_bubble_timer.timeout.connect(_hide_bubble)
 	_position_overlays()
 
 
-## Ставит неймплейт и бабл над головой текущего аватара (у разных аватаров разный рост).
+## Ставит неймплейт, «⚠» и бабл над головой текущего аватара (у разных аватаров разный рост).
 func _position_overlays() -> void:
 	var h := _host.current_nameplate_height()
 	_label.position.y = h
+	if _warn != null:
+		_warn.position.y = h + 0.22   # чуть выше ника
 	_bubble.position.y = h + 0.5
 
 
@@ -55,6 +67,14 @@ func _position_overlays() -> void:
 func set_avatar(scene: PackedScene) -> void:
 	_host.set_avatar(scene)
 	_position_overlays()
+
+
+## Вердикт легитимности аватара (см. AvatarManifest). Всё, кроме ALLOWED, показывает у ника
+## жёлтый «⚠» — «законность не подтверждена». DENIED (скрытие аватара) появится со слоем
+## идентичности; пока сюда приходит только ALLOWED/UNCONFIRMED.
+func set_avatar_legitimacy(verdict: AvatarManifest.Verdict) -> void:
+	if _warn != null:
+		_warn.visible = verdict != AvatarManifest.Verdict.ALLOWED
 
 
 ## Показать речевой бабл с сообщением чата на BUBBLE_SECONDS секунд. Новое сообщение
