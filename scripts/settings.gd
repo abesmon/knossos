@@ -43,6 +43,9 @@ var output_device: String = "Default"
 ## Громкости шин, линейные [0..1]. Имя шины → множитель. Применяются к AudioServer в apply_audio().
 var bus_volumes := {"Master": 1.0, "World": 1.0, "Voice": 1.0}
 var signaling_url: String = DEFAULT_SIGNALING_URL
+## Домашняя страница: адрес, который грузится автоматически при запуске (см. main._ready).
+## Пусто — без автозагрузки: стартуем на пустом экране с фокусом в адресной строке.
+var home_page: String = ""
 var nick: String = ""
 var avatar_uri: String = DEFAULT_AVATAR_URI
 ## Постоянный идентификатор этого пользователя (UUID-подобная hex-строка), генерится один раз
@@ -164,6 +167,7 @@ func load_settings() -> void:
 	for bus_name in AUDIO_BUSES:
 		bus_volumes[bus_name] = clampf(cfg.get_value("audio", "vol_" + bus_name, bus_volumes[bus_name]), 0.0, 1.0)
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
+	home_page = cfg.get_value("browser", "home_page", home_page)
 	nick = cfg.get_value("net", "nick", nick)
 	user_id = cfg.get_value("identity", "user_id", user_id)
 	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
@@ -183,6 +187,7 @@ func save() -> void:
 	for bus_name in AUDIO_BUSES:
 		cfg.set_value("audio", "vol_" + bus_name, bus_volumes[bus_name])
 	cfg.set_value("net", "signaling_url", signaling_url)
+	cfg.set_value("browser", "home_page", home_page)
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("identity", "user_id", user_id)
 	cfg.set_value("avatar", "uri", avatar_uri)

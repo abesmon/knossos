@@ -34,6 +34,8 @@ const THRESH_MAX := 0.15
 	"World": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolWorld/Value,
 	"Voice": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolVoice/Value,
 }
+@onready var _home: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow/Home
+@onready var _home_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow/Clear
 @onready var _url: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Url
 @onready var _url_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Clear
 @onready var _nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow/Nick
@@ -68,6 +70,7 @@ func _ready() -> void:
 	_face_pick.pressed.connect(_face_dialog.popup_centered_ratio)
 	_face_dialog.file_selected.connect(_on_face_selected)
 	# Очистка полей: пустые на сохранении превратятся в дефолты (placeholder подсказывает).
+	_home_clear.pressed.connect(_home.clear)
 	_url_clear.pressed.connect(_url.clear)
 	_nick_clear.pressed.connect(_nick.clear)
 	_face_clear.pressed.connect(_on_face_clear)
@@ -107,6 +110,7 @@ func _ready() -> void:
 func open() -> void:
 	_online.button_pressed = Settings.online_enabled
 	_voice.button_pressed = Settings.voice_enabled
+	_home.text = Settings.home_page
 	_url.text = Settings.signaling_url
 	_nick.text = Settings.nick
 	_avatar.text = Settings.avatar_uri
@@ -444,6 +448,8 @@ func _on_user_id_reissue() -> void:
 func _on_save() -> void:
 	Settings.online_enabled = _online.button_pressed
 	Settings.voice_enabled = _voice.button_pressed
+	# Домашняя страница: пусто — без автозагрузки при запуске.
+	Settings.home_page = _home.text.strip_edges()
 	# Пустые поля → дефолты.
 	var url := _url.text.strip_edges()
 	Settings.signaling_url = url if url != "" else Settings.DEFAULT_SIGNALING_URL
