@@ -17,6 +17,12 @@ extends Node
 ## Локальная речь открылась/закрылась (по VAD) — для индикации в UI.
 signal local_speaking_changed(speaking: bool)
 
+## Только что выбранный вход не отдаёт звук: за INPUT_CHECK_GRACE при активном микрофоне не
+## пришло ни кадра захвата. Признак бага драйвера CoreAudio на macOS (краш -10863: входной
+## AudioUnit нельзя переконфигурировать под частоту/режим, отличные от инициализации). UI ловит
+## и просит перезапуск. Подробно — docs/godot-coreaudio-input-rate-bug.md.
+signal input_device_failed(device_name: String)
+
 const BUS_NAME := "VoiceCapture"
 ## Длина буфера эффекта захвата (с). С запасом перекрывает интервал кадра.
 const CAPTURE_BUFFER := 0.1
@@ -32,6 +38,10 @@ const CLOSE_TO_OPEN_RATIO := 0.5
 const HOLD_SEC := 0.35
 ## Скорость спада индикатора уровня (ед./с): атака мгновенная (пик), спад плавный.
 const LEVEL_DECAY := 6.0
+## Окно проверки только что выбранного входа (с): сколько ждём первых кадров захвата, прежде чем
+## счесть устройство «молчащим» (вход сломан, см. input_device_failed). С запасом на раскрутку
+## Bluetooth-устройства, чтобы не было ложного срабатывания на медленном подключении.
+const INPUT_CHECK_GRACE := 2.0
 
 var muted := false:
 	set(value):
@@ -53,6 +63,11 @@ var _rate := 0.0   # частота захвата (= get_mix_rate), под ко
 var _send_accum := PackedFloat32Array()
 var _speaking := false
 var _silence_sec := 0.0
+
+# Проверка только что выбранного входа (детект «молчащего» устройства, см. input_device_failed).
+var _check_device := ""   # имя проверяемого устройства; "" — проверка не идёт
+var _check_elapsed := 0.0  # сколько уже ждём кадры (с, копится только при активном захвате)
+var _check_frames := 0     # сколько кадров захвата пришло за окно проверки
 
 # Мониторинг (проверка в настройках).
 var _monitoring := false
@@ -108,6 +123,14 @@ func input_mix_rate() -> float:
 ## Переключить вход на устройство по имени. Пустое/неизвестное → "Default".
 func apply_input_device(device_name: String) -> void:
 	AudioServer.input_device = device_name if device_name != "" else "Default"
+	# Запускаем проверку нового входа: ждём первых кадров захвата. Их отсутствие при активном
+	# микрофоне = драйвер не отдаёт звук с этого устройства (краш -10863 под частотой/режимом,
+	# отличными от инициализации). Тогда _check_input_device шлёт input_device_failed → UI просит
+	# перезапуск. Частоту устройства из GDScript достоверно не прочитать (get_input_mix_rate
+	# баговый), поэтому ловим следствие — «тишину». См. docs/godot-coreaudio-input-rate-bug.md.
+	_check_device = AudioServer.input_device
+	_check_elapsed = 0.0
+	_check_frames = 0
 
 
 # --- Мониторинг (проверка микрофона) ---
@@ -188,10 +211,12 @@ func _process(delta: float) -> void:
 			_send_accum.clear()
 			_set_speaking(false)
 			_level = 0.0
+			_check_device = ""   # захват остановлен — проверку входа отменяем
 	if not want or _capture == null:
 		return
 
 	var avail := _capture.get_frames_available()
+	_check_input_device(avail, delta)
 	if avail <= 0:
 		_decay_level(delta)
 		return
@@ -255,6 +280,26 @@ func _rms(mono: PackedFloat32Array) -> float:
 
 func _decay_level(delta: float) -> void:
 	_level = maxf(0.0, _level - LEVEL_DECAY * delta)
+
+
+## Проверка только что выбранного входа: ждём кадры захвата. Отсутствие кадров за INPUT_CHECK_GRACE
+## при активном микрофоне = драйвер не отдаёт звук с устройства (краш -10863 в CoreAudio под
+## частотой/режимом, отличными от инициализации). Таймер копится только пока идёт захват (вызов из
+## _process после проверки want) — иначе «тишина» от неактивного микрофона дала бы ложное
+## срабатывание. Ловим следствие, а не сам rate: частоту устройства из GDScript достоверно не
+## прочитать (get_input_mix_rate баговый). NB: кейс «робовойса» сюда не попадает — там кадры идут,
+## просто искажённые. Подробно — docs/godot-coreaudio-input-rate-bug.md.
+func _check_input_device(avail: int, delta: float) -> void:
+	if _check_device == "":
+		return
+	_check_elapsed += delta
+	_check_frames += avail
+	if _check_frames > 0:
+		_check_device = ""          # устройство отдаёт звук — всё в порядке
+	elif _check_elapsed >= INPUT_CHECK_GRACE:
+		var failed := _check_device
+		_check_device = ""
+		input_device_failed.emit(failed)
 
 
 ## VAD: считаем RMS кадра и ведём состояние речи с гистерезисом и удержанием.

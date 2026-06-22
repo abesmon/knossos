@@ -56,6 +56,10 @@ const THRESH_MAX := 0.15
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
 
+## Мягкий хинт под выбором микрофона (только macOS): смена входа на лету ограничена драйвером
+## CoreAudio — показываем после первой смены устройства. Создаётся в рантайме (см. _ready).
+var _mic_hint: Label = null
+
 
 func _ready() -> void:
 	hide()
@@ -73,6 +77,10 @@ func _ready() -> void:
 	# Микрофон: выбор устройства применяем сразу (живьём), чтобы проверка шла на нём.
 	_device.item_selected.connect(_on_device_selected)
 	_device_refresh.pressed.connect(_populate_devices)
+	# Вход не отдаёт звук после смены устройства (баг драйвера CoreAudio на macOS, -10863) —
+	# просим перезапуск. См. docs/godot-coreaudio-input-rate-bug.md.
+	VoiceManager.input_device_failed.connect(_on_input_device_failed)
+	_setup_mic_hint()
 	_test.toggled.connect(_on_test_toggled)
 	_monitor.toggled.connect(_on_monitor_toggled)
 	# Вывод и громкости применяем сразу (живьём), чтобы изменения было слышно до сохранения.
@@ -285,9 +293,46 @@ func _populate_devices() -> void:
 		_device.select(selected)
 
 
+## Создаёт мягкий хинт под строкой выбора микрофона — только на macOS, где смена входа на лету
+## ограничена драйвером CoreAudio (см. docs/godot-coreaudio-input-rate-bug.md). Скрыт, пока
+## пользователь не переключит устройство (_on_device_selected).
+func _setup_mic_hint() -> void:
+	if OS.get_name() != "macOS":
+		return
+	_mic_hint = Label.new()
+	_mic_hint.text = "macOS: смена микрофона на лету ограничена (особенно Bluetooth). Если после " \
+		+ "переключения звук искажён или пропал — перезапустите приложение."
+	_mic_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mic_hint.add_theme_font_size_override("font_size", 12)
+	_mic_hint.modulate = Color(1.0, 1.0, 1.0, 0.6)
+	_mic_hint.hide()
+	var mic_row: Node = _device.get_parent()
+	var sound: Node = mic_row.get_parent()
+	sound.add_child(_mic_hint)
+	sound.move_child(_mic_hint, mic_row.get_index() + 1)
+
+
 func _on_device_selected(idx: int) -> void:
 	Settings.input_device = _device.get_item_text(idx)
 	VoiceManager.apply_input_device(Settings.input_device)
+	# Мягкий хинт: смена входа на лету ненадёжна на macOS — показываем после первого переключения.
+	if _mic_hint:
+		_mic_hint.show()
+
+
+## Выбранный микрофон не отдаёт звук (вход залип в режиме/частоте старта — баг драйвера CoreAudio
+## на macOS, см. docs/godot-coreaudio-input-rate-bug.md). Из рантайма не лечится — просим перезапуск
+## с нужным устройством по умолчанию. Диалог создаём лениво (нужен редко).
+func _on_input_device_failed(device_name: String) -> void:
+	var dialog := AcceptDialog.new()
+	dialog.title = "Микрофон недоступен"
+	dialog.dialog_text = "Не удалось включить «%s».\n\nНа macOS смена микрофона на лету " % device_name \
+		+ "ограничена аудиодрайвером (особенно с Bluetooth-гарнитурой). Перезапустите " \
+		+ "приложение — выбранное устройство применится при старте."
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
 
 
 ## Заполняет список выходных устройств и выделяет текущее (по Settings.output_device).
