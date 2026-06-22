@@ -53,6 +53,7 @@ tab_1/title = "Сеть"
 tab_2/title = "Звук"
 tab_3/title = "Прочее"
 tab_4/title = "Пользователи"
+tab_5/title = "Мир"
 
 [node name="GeneralSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=991100000]
 layout_mode = 2
@@ -458,6 +459,72 @@ theme_override_constants/separation = 6
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "В инстансе больше никого."
+
+[node name="WorldSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=992100000]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 5
+metadata/_tab_name = "Мир"
+
+[node name="InfoScroll" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100001]
+custom_minimum_size = Vector2(440, 260)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Info" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll" unique_id=992100002]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="Thumb" type="TextureRect" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100003]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Title" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100004]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "—"
+autowrap_mode = 3
+
+[node name="Url" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100005]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+autowrap_mode = 3
+
+[node name="Desc" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100006]
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="MetaLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100007]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "О странице"
+
+[node name="Meta" type="RichTextLabel" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100008]
+custom_minimum_size = Vector2(0, 60)
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+
+[node name="MakeHome" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100009]
+layout_mode = 2
+tooltip_text = "Сделать этот инстанс домашним: он будет загружаться при запуске"
+text = "Сделать инстанс домашним"
+
+[node name="HomeStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100010]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.8, 0.55, 1)
+text = "Это ваш домашний инстанс."
+
+[node name="GoHome" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100011]
+layout_mode = 2
+tooltip_text = "Загрузить домашний инстанс"
+text = "Вернуться домой"
 
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer" unique_id=1634399168]
 layout_mode = 2

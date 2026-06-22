@@ -22,6 +22,9 @@ var _cross: Label
 var _current_url: String = ""
 # База для относительных URL (учитывает <base href>); по умолчанию = _current_url.
 var _base_url: String = ""
+# «Паспорт» текущей страницы из <head> (title/description/thumbnail/metas) — заполняется в
+# _on_fetched и отдаётся вкладке «Мир» настроек (см. _extract_page_meta).
+var _page_meta: Dictionary = {}
 # Браузерная история: список записей {url, pose} и индекс текущей. Переход назад/вперёд
 # двигает _history_index; новая навигация обрезает «вперёд» и добавляет запись.
 var _history: Array[Dictionary] = []
@@ -175,6 +178,8 @@ func _on_fetched(html: String, final_url: String) -> void:
 	# без него база = адрес страницы. seed/история/комната по-прежнему по final_url.
 	var base_url := _resolve_base_url(doc, final_url)
 	_base_url = base_url
+	# «Паспорт» страницы из <head> для вкладки «Мир» в настройках (заголовок/описание/превью).
+	_page_meta = _extract_page_meta(doc, base_url, final_url)
 	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
@@ -217,6 +222,79 @@ func _resolve_base_url(doc: HtmlNode, page_url: String) -> String:
 		if href != "":
 			return PageFetcher.resolve_url(href, page_url)
 	return page_url
+
+
+## Человекочитаемые meta-теги для вкладки «Мир» — только осмысленные подписи, без технических
+## (viewport, charset, theme-color и т.п.). Ключ (lowercase name/property) → подпись. Заголовок,
+## описание и превью показываются отдельно, поэтому их здесь нет.
+const MEANINGFUL_META := {
+	"author": "Автор",
+	"article:author": "Автор",
+	"og:site_name": "Сайт",
+	"application-name": "Приложение",
+	"keywords": "Ключевые слова",
+	"og:type": "Тип",
+	"article:published_time": "Опубликовано",
+	"article:section": "Раздел",
+}
+
+
+## Собирает «паспорт» страницы из <head>: заголовок (<title> или og:title), описание
+## (description/og:description), превью (og:image/twitter:image, резолвится относительно базы)
+## и осмысленные meta-теги (без технических). Отдаётся настройкам в _open_settings.
+func _extract_page_meta(doc: HtmlNode, base_url: String, url: String) -> Dictionary:
+	var metas: Array = []
+	_collect_meta(doc, metas)
+	var description := ""
+	var og_title := ""
+	var thumb := ""
+	# Только человекочитаемые теги из белого списка (с подписью), без дублей по подписи.
+	var info: Array = []
+	var seen_labels := {}
+	for m in metas:
+		var key: String = m["key"]
+		var value: String = m["value"]
+		match key.to_lower():
+			"description", "og:description", "twitter:description":
+				if description == "":
+					description = value
+			"og:title", "twitter:title":
+				if og_title == "":
+					og_title = value
+			"og:image", "og:image:url", "og:image:secure_url", "twitter:image", "twitter:image:src":
+				if thumb == "":
+					thumb = value
+		var label: String = MEANINGFUL_META.get(key.to_lower(), "")
+		if label != "" and not seen_labels.has(label):
+			seen_labels[label] = true
+			info.append({"label": label, "value": value})
+	var title_node := doc.find_descendant("title")
+	var title := title_node.collect_text().strip_edges() if title_node != null else ""
+	if title == "":
+		title = og_title
+	if thumb != "":
+		thumb = PageFetcher.resolve_url(thumb, base_url)
+	return {
+		"url": url,
+		"title": title,
+		"description": description,
+		"thumbnail": thumb,
+		"metas": info,
+	}
+
+
+## Рекурсивно собирает meta-теги поддерева в out как [{key, value}]. key — name или property,
+## value — content. Пустые ключ/значение пропускаем.
+func _collect_meta(node: HtmlNode, out: Array) -> void:
+	for c in node.children:
+		if c.tag == "meta":
+			var key := c.get_attr("name")
+			if key == "":
+				key = c.get_attr("property")
+			var value := c.get_attr("content")
+			if key != "" and value != "":
+				out.append({"key": key, "value": value})
+		_collect_meta(c, out)
 
 
 func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
@@ -374,6 +452,8 @@ func _setup_net() -> void:
 	ui.add_child(_settings_overlay)
 	# Закрытие настроек оставляет мышь свободной (UI-режим) — обратно в перемещение
 	# возвращает клик по 3D, а не само закрытие. Поэтому closed здесь ни к чему не цепляем.
+	# «Вернуться домой» с вкладки «Мир» — грузим домашний инстанс.
+	_settings_overlay.home_requested.connect(_on_home_requested)
 
 	_settings_btn.pressed.connect(_open_settings)
 	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
@@ -390,7 +470,18 @@ func _setup_net() -> void:
 
 func _open_settings() -> void:
 	_player.capture_mouse(false)
-	_settings_overlay.open()
+	_settings_overlay.open(_current_url, _page_meta)
+
+
+## «Вернуться домой» из настроек: грузим домашний инстанс (как ввод адреса в омнибоксе —
+## абсолютный URL, без базы) и уводим мышь обратно в перемещение.
+func _on_home_requested() -> void:
+	var home := Settings.home_page.strip_edges()
+	if home == "":
+		return
+	_address.text = home
+	_navigate(home, "", true)
+	_player.capture_mouse(true)
 
 
 func _on_settings_changed() -> void:

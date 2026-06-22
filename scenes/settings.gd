@@ -5,6 +5,8 @@ extends Control
 ## Сам мир не трогает — поэтому навигация/состояние не теряются.
 
 signal closed
+## «Вернуться домой» на вкладке «Мир»: просим main загрузить домашний инстанс.
+signal home_requested
 
 ## Верх диапазона ползунка порога активации (RMS) — для перевода значения в проценты в подписи.
 const THRESH_MAX := 0.15
@@ -53,6 +55,16 @@ const THRESH_MAX := 0.15
 @onready var _cache_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow/Clear
 @onready var _tabs: TabContainer = $Panel/Margin/VBoxContainer/TabContainer
 @onready var _users_root: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings
+@onready var _world_root: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings
+@onready var _world_thumb: TextureRect = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Thumb
+@onready var _world_title: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Title
+@onready var _world_url: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Url
+@onready var _world_desc: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Desc
+@onready var _world_meta_label: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/MetaLabel
+@onready var _world_meta: RichTextLabel = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Meta
+@onready var _world_make_home: Button = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/MakeHome
+@onready var _world_home_status: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/HomeStatus
+@onready var _world_go_home: Button = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/GoHome
 @onready var _users_list: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/UsersScroll/List
 @onready var _users_empty: Label = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Empty
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
@@ -62,11 +74,25 @@ const THRESH_MAX := 0.15
 ## CoreAudio — показываем после первой смены устройства. Создаётся в рантайме (см. _ready).
 var _mic_hint: Label = null
 
+## Текущий инстанс (его URL) и его «паспорт» из <head> страницы (title/description/thumbnail/
+## metas) — заполняет main при открытии настроек (см. open). Пусто — мы не в мире, вкладка
+## «Мир» скрыта (как «Пользователи»).
+var _instance_url: String = ""
+var _page_meta: Dictionary = {}
+## Лоадер превью для вкладки «Мир». Создаётся лениво; _thumb_url — URL текущего запрошенного
+## превью (отбрасываем колбэки, пришедшие после смены инстанса).
+var _thumb_loader: ImageLoader = null
+var _thumb_url: String = ""
+
 
 func _ready() -> void:
 	hide()
+	_setup_tabs()
 	_save.pressed.connect(_on_save)
 	_cancel.pressed.connect(_close)
+	# Вкладка «Мир»: сделать инстанс домашним и вернуться домой.
+	_world_make_home.pressed.connect(_on_make_home)
+	_world_go_home.pressed.connect(_on_go_home)
 	_face_pick.pressed.connect(_face_dialog.popup_centered_ratio)
 	_face_dialog.file_selected.connect(_on_face_selected)
 	# Очистка полей: пустые на сохранении превратятся в дефолты (placeholder подсказывает).
@@ -106,8 +132,12 @@ func _ready() -> void:
 	NetworkManager.connection_changed.connect(_users_dirty.unbind(1))
 
 
-## Показать экран, заполнив поля текущими значениями.
-func open() -> void:
+## Показать экран, заполнив поля текущими значениями. instance_url/page_meta — текущий инстанс
+## и его «паспорт» из <head> (см. main._extract_page_meta); пусто — мы не в мире, вкладка «Мир»
+## скрыта.
+func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
+	_instance_url = instance_url
+	_page_meta = page_meta
 	_online.button_pressed = Settings.online_enabled
 	_voice.button_pressed = Settings.voice_enabled
 	_home.text = Settings.home_page
@@ -132,6 +162,8 @@ func open() -> void:
 	_update_cache_size()
 	_update_users_availability()
 	_refresh_users()
+	_update_world_availability()
+	_refresh_world()
 	show()
 	_nick.grab_focus()
 
@@ -145,6 +177,125 @@ func _update_cache_size() -> void:
 func _on_cache_clear() -> void:
 	Cache.clear()
 	_update_cache_size()
+
+
+# --- Порядок вкладок ---
+
+## «Мир» и «Пользователи» — вторая и третья вкладки. В сцене они объявлены в конце (чтобы не
+## ломать редакторские tab_N/title), поэтому переставляем их в рантайме. Заголовки задаём явно
+## по имени узла — надёжнее, чем полагаться на индексные tab_N/title после move_child.
+func _setup_tabs() -> void:
+	_tabs.move_child(_world_root, 1)
+	_tabs.move_child(_users_root, 2)
+	var titles := {
+		"GeneralSettings": "Основные",
+		"WorldSettings": "Мир",
+		"UsersSettings": "Пользователи",
+		"NetSettings": "Сеть",
+		"SoundSettings": "Звук",
+		"MiscSettings": "Прочее",
+	}
+	for i in _tabs.get_tab_count():
+		var ctrl := _tabs.get_tab_control(i)
+		if ctrl != null and titles.has(ctrl.name):
+			_tabs.set_tab_title(i, titles[ctrl.name])
+
+
+# --- Раздел «Мир» (инфо об инстансе) ---
+
+## Вкладка «Мир» доступна только когда мы в инстансе (загружена страница). Иначе прячем её
+## (и, если она была активной, уводим на «Основные») — по аналогии с «Пользователями».
+func _update_world_availability() -> void:
+	var available := _instance_url != ""
+	var idx := _tabs.get_tab_idx_from_control(_world_root)
+	if idx < 0:
+		return
+	_tabs.set_tab_hidden(idx, not available)
+	if not available and _tabs.current_tab == idx:
+		_tabs.current_tab = 0
+
+
+## Заполняет вкладку «Мир» из _page_meta: заголовок, адрес, описание, прочие meta-теги и превью.
+func _refresh_world() -> void:
+	if _instance_url == "":
+		return
+	var title := str(_page_meta.get("title", "")).strip_edges()
+	_world_title.text = title if title != "" else "(страница без заголовка)"
+	_world_url.text = _instance_url
+	var desc := str(_page_meta.get("description", "")).strip_edges()
+	_world_desc.text = desc
+	_world_desc.visible = desc != ""
+	_refresh_world_meta()
+	_load_thumb(str(_page_meta.get("thumbnail", "")))
+	_update_home_status()
+
+
+## Осмысленные meta-данные страницы (подпись → значение; технические теги отфильтрованы в
+## main._extract_page_meta). Скрываем блок и заголовок, если показывать нечего.
+func _refresh_world_meta() -> void:
+	var metas: Array = _page_meta.get("metas", [])
+	_world_meta.clear()
+	var shown := 0
+	for m in metas:
+		var label := str(m.get("label", ""))
+		var value := str(m.get("value", ""))
+		if label == "" or value == "":
+			continue
+		_world_meta.append_text("[b]%s[/b]: %s\n" % [_esc_bb(label), _esc_bb(value)])
+		shown += 1
+	_world_meta.visible = shown > 0
+	_world_meta_label.visible = shown > 0
+
+
+## Экранирует "[" в тексте, чтобы он не воспринимался как BBCode-тег.
+func _esc_bb(s: String) -> String:
+	return s.replace("[", "[lb]")
+
+
+## Подгружает превью инстанса (og:image и т.п.) по URL. Лоадер общий с миром (ImageLoader):
+## декодирует/кэширует сам. Колбэк проверяет актуальность (мог прийти после смены инстанса).
+func _load_thumb(url: String) -> void:
+	_thumb_url = url
+	_world_thumb.texture = null
+	_world_thumb.visible = url != ""
+	if url == "":
+		return
+	if _thumb_loader == null:
+		_thumb_loader = ImageLoader.new()
+		add_child(_thumb_loader)
+	_thumb_loader.request_image(url, func(tex: Texture2D) -> void:
+		if _thumb_url != url:
+			return
+		_world_thumb.texture = tex
+		_world_thumb.visible = tex != null
+	)
+
+
+## Обновляет подпись/кнопки в зависимости от того, является ли текущий инстанс домашним и
+## задан ли вообще домашний инстанс.
+func _update_home_status() -> void:
+	var home := Settings.home_page.strip_edges()
+	var is_home := home != "" and home == _instance_url
+	_world_make_home.disabled = is_home
+	_world_home_status.visible = is_home
+	_world_go_home.disabled = home == ""
+	_world_go_home.tooltip_text = "Домашний инстанс не задан" if home == "" else "Загрузить домашний инстанс"
+
+
+## «Сделать инстанс домашним»: запоминаем текущий URL как домашнюю страницу и сразу сохраняем
+## (как очистка кэша/смена лица — не дожидаясь «Сохранить»). Поле на вкладке «Основные» тоже
+## обновляем, чтобы оно не перетёрло значение при следующем «Сохранить».
+func _on_make_home() -> void:
+	Settings.home_page = _instance_url
+	Settings.save()
+	_home.text = _instance_url
+	_update_home_status()
+
+
+## «Вернуться домой»: просим main загрузить домашний инстанс и закрываемся.
+func _on_go_home() -> void:
+	home_requested.emit()
+	_close()
 
 
 # --- Раздел «Пользователи» (см. docs/ranks.md) ---
