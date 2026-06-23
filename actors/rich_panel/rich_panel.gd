@@ -143,6 +143,9 @@ func _build_bbcode() -> void:
 	_metas.clear()
 	var sb := ""
 	for r in _runs:
+		if str(r.get("type", "")) == "image":
+			sb += _image_token(r)
+			continue
 		var text := str(r.get("text", "")).replace("[", "[lb]")
 		var fn = r.get("function", null)
 		if fn != null and typeof(fn) == TYPE_DICTIONARY:
@@ -156,6 +159,25 @@ func _build_bbcode() -> void:
 		else:
 			sb += text
 	_bbcode = sb
+
+
+## Картинка-прогон (в ячейке/пункте/абзаце) пока без растрового рендера: показываем alt
+## (или маркер 🖼) токеном — кликабельным, если у картинки есть функция перехода. Инлайн
+## самой текстуры — отдельная задача (RichTextLabel.add_image + асинхронная докачка).
+func _image_token(r: Dictionary) -> String:
+	var alt := str(r.get("alt", "")).strip_edges()
+	var label := ("🖼 " + alt) if alt != "" else "🖼"
+	label = label.replace("[", "[lb]")
+	var fn = r.get("function", null)
+	if fn != null and typeof(fn) == TYPE_DICTIONARY:
+		var idx := _metas.size()
+		_metas.append(fn)
+		var col := "#5cc8ff"  # navigate по умолчанию
+		match fn.get("kind", ""):
+			"teleport": col = "#9be7ff"
+			"external": col = "#c69bff"
+		return "[color=%s][u][url=%d]%s[/url][/u][/color]" % [col, idx, label]
+	return "[color=#9fb0c0]%s[/color]" % label
 
 
 func _estimate_height() -> void:

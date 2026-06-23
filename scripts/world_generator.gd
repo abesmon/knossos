@@ -299,7 +299,7 @@ func _measure_objects() -> void:
 
 func _measure_object(obj: Dictionary) -> Vector2:
 	var type: String = obj.get("type", "text")
-	if type == "image":
+	if type == "image" or type == "figure":
 		return _measure_image(obj)
 	if type == "media" and obj.get("content", {}).get("media_tag", "") == "video":
 		return _measure_video(obj)
@@ -309,9 +309,9 @@ func _measure_object(obj: Dictionary) -> Vector2:
 	var runs: Array = obj.get("content", {}).get("runs", [])
 	if type == "text" and not runs.is_empty() and (_runs_have_links(runs) or _obj_text(obj).length() > 200):
 		return Vector2(_rich_w_m, RichPanel.estimate_height_m(runs, _rich_font_px))
-	if type == "list" and _list_has_links(obj):
+	if type == "list" and (_list_has_links(obj) or _list_has_images(obj)):
 		return Vector2(_rich_w_m, RichPanel.estimate_height_m(_list_runs(obj), _rich_font_px))
-	if type == "table" and _table_has_links(obj):
+	if type == "table" and (_table_has_links(obj) or _table_has_images(obj)):
 		return Vector2(_rich_w_m, RichPanel.estimate_height_m(_table_runs(obj), _rich_font_px))
 	return _measure_panel(obj)
 
@@ -1432,6 +1432,10 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 	if obj.get("type", "") == "image":
 		return _build_image_panel(obj, holder, local_pos, yaw, fn if is_link else null, on_transition)
 
+	# <figure> рендерим как картину (alt = подпись из <figcaption>).
+	if obj.get("type", "") == "figure":
+		return _build_image_panel(obj, holder, local_pos, yaw, null, on_transition)
+
 	if obj.get("type", "") == "media" and obj.get("content", {}).get("media_tag", "") == "video":
 		var screen := _build_video_screen(obj, holder, local_pos, yaw)
 		if screen != null:
@@ -1466,15 +1470,25 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 			return _build_panel(holder, local_pos, yaw, "▢ " + _obj_text(obj),
 				Color(0.5, 0.7, 0.5), _base_px)
 		"list":
-			if _list_has_links(obj):
+			if _list_has_links(obj) or _list_has_images(obj):
 				return _build_rich_panel(_list_runs(obj), holder, local_pos, yaw, on_transition)
 			return _build_panel(holder, local_pos, yaw, _list_text(obj),
 				Color(0.6, 0.6, 0.65), _base_px)
 		"table":
-			if _table_has_links(obj):
+			if _table_has_links(obj) or _table_has_images(obj):
 				return _build_rich_panel(_table_runs(obj), holder, local_pos, yaw, on_transition)
 			return _build_panel(holder, local_pos, yaw, _table_text(obj),
 				Color(0.55, 0.6, 0.6), _base_px * 0.9)
+		"code":
+			# Блок кода: отдельная тёмная панель (моноширинный рендер — на будущее).
+			return _build_panel(holder, local_pos, yaw, _obj_text(obj),
+				Color(0.16, 0.18, 0.22), _base_px)
+		"quote":
+			var qruns: Array = obj.get("content", {}).get("runs", [])
+			if not qruns.is_empty() and _runs_have_links(qruns):
+				return _build_rich_panel(qruns, holder, local_pos, yaw, on_transition)
+			return _build_panel(holder, local_pos, yaw, "« " + _obj_text(obj) + " »",
+				Color(0.38, 0.40, 0.5), _base_px)
 		_:
 			return _build_panel(holder, local_pos, yaw, _obj_text(obj),
 				Color(0.85, 0.85, 0.85), _base_px)
@@ -1581,6 +1595,30 @@ func _runs_have_links(runs: Array) -> bool:
 	for r in runs:
 		if r.get("function", null) != null:
 			return true
+	return false
+
+
+## Есть ли среди прогонов картинка — повод отрисовать список/таблицу богатой панелью
+## (RichPanel показывает картинку-прогон), а не плоской текстовой табличкой.
+func _runs_have_images(runs: Array) -> bool:
+	for r in runs:
+		if str(r.get("type", "")) == "image":
+			return true
+	return false
+
+
+func _list_has_images(obj: Dictionary) -> bool:
+	for it in obj.get("content", {}).get("items", []):
+		if _runs_have_images(it.get("runs", [])):
+			return true
+	return false
+
+
+func _table_has_images(obj: Dictionary) -> bool:
+	for row in obj.get("content", {}).get("rows", []):
+		for cell in row.get("cells", []):
+			if _runs_have_images(cell.get("runs", [])):
+				return true
 	return false
 
 

@@ -1,25 +1,29 @@
 class_name TopologyBuilder
 extends RefCounted
 
-## Фаза топологии (docs/content-sectioning.md): дерево HtmlNode -> сериализуемый
-## артефакт БЕЗ единой 3D-координаты. Геометрия его не касается — между ними только
-## этот Dictionary.
+## Фаза топологии (docs/clustering.md): дерево HtmlNode -> сериализуемый артефакт БЕЗ
+## единой 3D-координаты. Геометрия его не касается — между ними только этот Dictionary.
 ##
-## МОДЕЛЬ: иерархия комнат строится по ОГЛАВЛЕНИЮ ЗАГОЛОВКОВ, а не по вложенности DOM.
-##   1. Линеаризация (§2): обход контента в порядке чтения -> поток маркеров
-##      HEADING(rank) / object / anchor / css. Контейнеры схлопываются полностью.
-##   2. Сегментация (§4): стек по рангам. Заголовок ранга R закрывает секции ранга ≥R и
-##      открывает новую; контент до следующего заголовка — наполнение секции. Секция ->
-##      комната; подсекции (заголовки младше) -> вложенные комнаты.
-##   3. Внутри секции — ПЛОСКИЙ список терминальных объектов, без под-комнат (§6).
-## Нет заголовков -> одна корневая комната с плоским мешком объектов.
+## МОДЕЛЬ: КЛАСТЕРИЗАЦИЯ. div и контейнеры больше НЕ источник комнат. Комнаты рождаются
+## из дерева кластеров по разным сигналам:
+##   - структурные семантические (body/main/section/article/header/footer/aside) -> комнаты;
+##   - заголовки h1..h6 (явные и визуальные) -> «именованный» кластер, вес = ранг; старт на
+##     заголовке, конец — у следующего заголовка веса ≥ в пределах того же DOM-кластера ЛИБО
+##     у закрытия DOM-кластера;
+##   - лёгкие кластеры (nav, группа ссылок ≥3) -> объекты-группы В комнате родителя, не комнаты;
+##   - прозрачные контейнеры (div, обёртки) -> не кластеры, проходим насквозь, но СОБИРАЕМ их
+##     мету (id -> якоря, css-box bg/border -> хинты, чтобы не потерять при «развоплощении»).
+## Кластер = объекты, гарантированно в одной комнате. Внутри кластера ДРОБИТЕЛИ
+## (table/form/video/iframe/canvas/embed/pre/blockquote/figure/list/одиночная блок-img)
+## становятся отдельными объектами; смежный текст/inline/ссылки/inline-картинки сливаются
+## в один RichText.
 ##
-## Артефакт:
+## Артефакт (контракт неизменен):
 ## {
-##   "rooms": { id: Room },     # плоский словарь всех комнат/соединителей
-##   "root":  id,               # корневое пространство
-##   "labels": { anchorId: id }, # цели якорей #id -> комната/объект
-##   "typography": { base_px }   # базовый кегль текста (масштаб геометрии)
+##   "rooms":  { id: Room },      # плоский словарь всех комнат/соединителей
+##   "root":   id,                # корневое пространство
+##   "labels": { anchorId: id },  # цели якорей #id -> комната/объект
+##   "typography": { base_px }    # базовый кегль текста (масштаб геометрии)
 ## }
 ## Room   = { id, kind:"room"|"connector", objects:[Object], children:[id], hints:{...} }
 ## Object = { id, type, function:Transition|null, content:{...} }
@@ -35,9 +39,14 @@ const HEADING_TAGS := {
 	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
 }
 
+## Структурные семантические контейнеры -> кластеры-КОМНАТЫ (по DOM-границе).
+const SEMANTIC_TAGS := {
+	"body": true, "main": true, "section": true, "article": true,
+	"header": true, "footer": true, "aside": true,
+}
+
 ## Phrasing / inline-теги: их содержимое — часть текстового потока, а не отдельные
-## пространства. Контейнер, где ВСЁ содержимое такое, сворачивается в один rich-text
-## объект (абзац) с inline-ссылками — либо распознаётся как визуальный заголовок.
+## пространства. Сливаются в rich-text прогоны (абзац) с inline-ссылками/картинками.
 const PHRASING_TAGS := {
 	"a": true, "span": true, "em": true, "strong": true, "b": true, "i": true,
 	"u": true, "s": true, "strike": true, "small": true, "big": true, "sub": true,
@@ -48,6 +57,8 @@ const PHRASING_TAGS := {
 	"center": true,
 }
 
+const LINK_GROUP_MIN := 3        # ≥ столько ссылок в контейнере -> лёгкий кластер-«меню»
+
 # Внутреннее состояние построителя.
 var _rooms: Dictionary = {}      # id -> Room
 var _labels: Dictionary = {}     # anchorId -> id
@@ -55,6 +66,8 @@ var _next_id: int = 0
 var _base_px: float = 16.0       # базовый кегль страницы (нужен детектору заголовков)
 var _debug: bool = false         # собирать ли карту id -> исходный HTML (только для отладки)
 var _sources: Dictionary = {}    # id -> реконструированный HTML (заполняется при _debug)
+var _pending_anchors: Array = [] # id-ы прозрачных контейнеров, ждущие владельца-кластера
+var _pending_css: Dictionary = {} # css-box прозрачных контейнеров, ждущий владельца
 
 
 ## debug=true добавляет в артефакт ключ "sources" (id -> HTML-кусок, из которого собран
@@ -69,12 +82,18 @@ static func build(root: HtmlNode, debug: bool = false) -> Dictionary:
 func _build(root: HtmlNode) -> Dictionary:
 	var body := _find_body(root)
 	# Типографику считаем ПЕРВОЙ: базовый кегль нужен детектору визуальных заголовков
-	# (ранг — от относительного размера к base_px) и масштабу геометрии (§13 старого дока).
+	# (ранг — от относительного размера к base_px) и масштабу геометрии.
 	_base_px = _compute_base_px(body)
 
-	var stream: Array = []
-	_linearize(body, stream)
-	var root_id := _segment(stream, body)
+	_pending_anchors = []
+	_pending_css = {}
+	var root_frame := _new_frame("root", body, 0, null, "")
+	var stack: Array = [root_frame]
+	for c in body.children:
+		_classify(c, stack)
+	_pop_to(root_frame, stack)        # сбрасываем хвостовой runbuf + висящие заголовочные фреймы
+
+	var root_id := _materialize(root_frame)
 
 	var artifact := {
 		"rooms": _rooms, "root": root_id, "labels": _labels,
@@ -97,20 +116,41 @@ func _find_body(root: HtmlNode) -> HtmlNode:
 	return root
 
 
-# --- Фаза 1: линеаризация в поток маркеров (порядок чтения) ---
+# --- Фаза 1: построение дерева кластеров (DFS со стеком фреймов, порядок чтения) ---
 
-## Маркеры потока:
-##   {kind:"heading", rank, obj, node} — заголовок (явный или визуальный)
-##   {kind:"object",  obj}             — терминальный объект (image/text/list/table/...)
-##   {kind:"anchor",  id}              — id схлопнутого контейнера (для labels)
-##   {kind:"css",     css}            — визуальный box контейнера (bg/border) для хинтов
-func _linearize(node: HtmlNode, stream: Array) -> void:
-	if node == null:
-		return
+## Фрейм-кластер:
+##   type        : "root" | "semantic" | "heading" | "light"
+##   weight      : ранг заголовка (1..6); 0 для прочих
+##   title       : объект-heading (подпись комнаты) или null
+##   node        : исходный HtmlNode (для хинтов/семантики/якорей)
+##   light_kind  : "nav" | "linkgroup" | "" (для лёгких кластеров)
+##   items       : упорядоченный контент: {k:"runs",runs} | {k:"object",obj} | {k:"frame",frame}
+##   anchors     : id-якоря, осевшие на этом кластере (свой + прозрачные обёртки)
+##   css         : css-box (bg/border) кластера и обёрток
+##   runbuf      : открытый буфер inline-прогонов (склейка текста/ссылок до блок-границы)
+func _new_frame(type: String, node, weight: int, title, light_kind: String) -> Dictionary:
+	var anchors: Array = []
+	if node != null and node.has_attr("id"):
+		anchors.append(node.get_attr("id"))
+	var css := {}
+	if node != null:
+		_merge_into(css, _css_hints(node))
+	return {
+		"type": type, "weight": weight, "title": title, "node": node,
+		"light_kind": light_kind, "items": [], "anchors": anchors,
+		"css": css, "runbuf": [],
+	}
+
+
+## Главный диспетчер: классифицирует узел и либо открывает кластер, либо эмитит объект/прогон.
+func _classify(node: HtmlNode, stack: Array) -> void:
 	if node.is_text():
-		var t := node.text.strip_edges()
-		if t != "":
-			stream.append({"kind": "object", "obj": _text_object(t)})
+		if node.text.strip_edges() != "":
+			_emit_inline(node, stack)   # значимый текст -> в inline-буфер текущего кластера
+		elif node.text != "" and not (stack[-1]["runbuf"] as Array).is_empty():
+			# Пробел между inline-сиблингами (схлопнутый перенос: <a>A</a> <a>B</a> -> «A B»).
+			# Только в начатой строке прогонов — иначе на границах блоков плодились бы пробелы.
+			_append_text_run(stack[-1]["runbuf"], " ")
 		return
 
 	var tag := node.tag
@@ -119,204 +159,364 @@ func _linearize(node: HtmlNode, stream: Array) -> void:
 	if _is_hidden(node):
 		return
 
-	# --- Терминальные объекты (классификация по содержимому, §3 старого дока) ---
+	# --- Кластеры-источники ---
+	if HEADING_TAGS.has(tag):
+		_open_heading(node, int(tag.substr(1)), stack)   # явный заголовок: ранг = уровень тега
+		return
+	if SEMANTIC_TAGS.has(tag):
+		_open_semantic(node, stack)
+		return
+
+	# --- Терминальные объекты / дробители (проверяем ДО лёгких кластеров: ul/table и т.п.
+	#     остаются цельными объектами, а не превращаются в «группу ссылок») ---
 	match tag:
 		"img":
-			var img_content := {"src": node.get_attr("src"), "alt": node.get_attr("alt")}
-			img_content.merge(_image_dims(node))
-			stream.append({"kind": "object", "obj": _leaf_object(node, "image", img_content)})
+			_emit_object(_leaf_object(node, "image", _img_content(node)), stack)
 			return
 		"video":
-			# <video> становится логическим видео-плеером VRWeb (см. docs/video-player.md):
-			# media_tag="video" + резолвимый src — WorldGenerator строит из него VrwebVideoScreen.
-			# src — из атрибута video[src] или первого <source src> (стандарт HTML).
-			var v_src := node.get_attr("src")
-			if v_src == "":
-				var source := node.find_descendant("source")
-				if source != null:
-					v_src = source.get_attr("src")
-			var v_content := {
-				"src": v_src, "text": node.collect_text(), "media_tag": "video",
-				"autoplay": node.has_attr("autoplay"), "loop": node.has_attr("loop"),
-			}
-			v_content.merge(_image_dims(node))
-			stream.append({"kind": "object", "obj": _leaf_object(node, "media", v_content)})
+			_emit_object(_video_object(node), stack)
 			return
 		"audio", "iframe", "canvas", "embed":
-			stream.append({"kind": "object", "obj": _leaf_object(node, "media", {
+			_emit_object(_leaf_object(node, "media", {
 				"src": node.get_attr("src"), "text": node.collect_text(),
-			})})
+			}), stack)
 			return
 		"button":
-			stream.append({"kind": "object", "obj": _leaf_object(node, "button", {
-				"text": node.collect_text(),
-			})})
+			_emit_object(_leaf_object(node, "button", {"text": node.collect_text()}), stack)
 			return
 		"input", "textarea", "select":
-			stream.append({"kind": "object", "obj": _leaf_object(node, "input", {
-				"text": node.get_attr("placeholder", node.get_attr("value", node.collect_text())),
-				"input_type": node.get_attr("type", "text"),
-			})})
+			# Поле без выводимой подписи (ни value/placeholder/aria-label/title, ни текста) —
+			# «немое», ничего не сообщает (типичный UI-чекбокс скина) -> объекта нет.
+			var label := _input_label(node)
+			if label == "":
+				return
+			_emit_object(_leaf_object(node, "input", {
+				"text": label, "input_type": node.get_attr("type", "text"),
+			}), stack)
 			return
 		"ul", "ol":
-			# Гомогенный повтор -> один объект-коллекция (§7), а не N комнат.
-			stream.append({"kind": "object", "obj": _list_object(node)})
+			# Пустой список (<ul></ul> без пунктов, частый артефакт меню-скинов) -> объекта нет.
+			if not _has_list_items(node):
+				return
+			_emit_object(_list_object(node), stack)        # объект-коллекция (дробитель)
 			return
 		"table":
-			# Таблица — цельный объект (§7), а не россыпь комнат из <tr>/<td>.
-			stream.append({"kind": "object", "obj": _table_object(node)})
+			_emit_object(_table_object(node), stack)
 			return
 		"form":
-			# Форма — цельный интерактивный объект-коллекция (как список/таблица).
-			stream.append({"kind": "object", "obj": _form_object(node)})
+			_emit_object(_form_object(node), stack)
+			return
+		"figure":
+			_emit_object(_figure_object(node), stack)
+			return
+		"pre":
+			_emit_object(_code_object(node), stack)        # блок кода: моноширинный, отдельно
+			return
+		"blockquote":
+			_emit_object(_quote_object(node), stack)
 			return
 		"a":
-			stream.append({"kind": "object", "obj": _anchor_object(node)})
-			return
-		"h1", "h2", "h3", "h4", "h5", "h6":
-			# Явный заголовок: ранг = уровень тега (намерение автора бьёт кегль, §3.1).
-			stream.append(_heading_marker(node, int(tag.substr(1))))
+			_emit_inline(node, stack)                      # ссылка вливается в прозу
 			return
 		"br", "hr":
 			return
 
-	# --- Чистый inline-блок: визуальный заголовок ЛИБО абзац (rich-text) ---
-	if _is_pure_inline(node):
-		var rank := HeadingDetector.visual_rank(node, _base_px)
-		if rank > 0:
-			stream.append(_heading_marker(node, rank))
-		else:
-			var runs := _build_runs(node)
-			if _runs_have_text(runs):
-				stream.append({"kind": "object", "obj": _rich_text_object(node, runs)})
+	# --- Лёгкие кластеры (объекты-группы в комнате родителя) ---
+	if tag == "nav":
+		_open_light(node, "nav", stack)
+		return
+	if _is_link_group(node):
+		_open_light(node, "linkgroup", stack)
 		return
 
-	# --- Контейнер: схлопывается полностью; комнат не порождает (§6) ---
-	# Сохраняем id (якорь) и визуальный box контейнера как pending-маркеры — сегментатор
-	# прикрепит их к ближайшей открывающейся секции (если за ними сразу идёт заголовок)
-	# или к текущей секции (если пошёл контент). См. _segment.
-	if node.has_attr("id"):
-		stream.append({"kind": "anchor", "id": node.get_attr("id")})
-	var box := _css_hints(node)
-	if not box.is_empty():
-		stream.append({"kind": "css", "css": box})
+	# --- Фразовый элемент ИЛИ чистый inline-блок: визуальный заголовок / инлайн-прогон /
+	#     абзац. Голые фразовые сиблинги (span/b/em вне <p>) сливаются в общий буфер прогонов,
+	#     а не дробятся каждый в свой абзац; блочный pure-inline (<p>, <div> с текстом) — абзац. ---
+	if PHRASING_TAGS.has(tag) or _is_pure_inline(node):
+		var rank := HeadingDetector.visual_rank(node, _base_px)
+		if rank > 0:
+			_open_heading(node, rank, stack)
+		elif PHRASING_TAGS.has(tag):
+			_emit_inline(node, stack)
+		else:
+			_emit_paragraph(node, stack)
+		return
+
+	# --- Прозрачный контейнер: НЕ кластер. Собираем мету и идём насквозь. ---
+	_harvest(node)
 	for c in node.children:
-		_linearize(c, stream)
+		_classify(c, stack)
 
 
-func _heading_marker(node: HtmlNode, rank: int) -> Dictionary:
-	var obj := _leaf_object(node, "heading", {
+# --- Операции со стеком фреймов ---
+
+func _push_frame(frame: Dictionary, stack: Array) -> void:
+	var parent: Dictionary = stack[-1]
+	_flush_runbuf(parent)                                # открытие кластера закрывает абзац родителя
+	(parent["items"] as Array).append({"k": "frame", "frame": frame})
+	_flush_pending(frame)                                # обёртки вокруг кластера -> на сам кластер
+	stack.append(frame)
+
+
+## Снимает со стека всё до указанного фрейма ВКЛЮЧИТЕЛЬНО, сбрасывая их inline-буферы.
+func _pop_to(frame: Dictionary, stack: Array) -> void:
+	while not stack.is_empty() and stack[-1] != frame:
+		_flush_runbuf(stack[-1])
+		stack.pop_back()
+	if not stack.is_empty():
+		_flush_runbuf(frame)
+		stack.pop_back()
+
+
+## Заголовок: закрывает заголовочные фреймы веса ≥ ранга В ПРЕДЕЛАХ текущего DOM-кластера
+## (цикл стопится на не-heading фрейме), затем открывает новый заголовочный фрейм.
+func _open_heading(node: HtmlNode, rank: int, stack: Array) -> void:
+	while stack.size() > 1 and stack[-1]["type"] == "heading" and int(stack[-1]["weight"]) >= rank:
+		_flush_runbuf(stack[-1])
+		stack.pop_back()
+	var title := _leaf_object(node, "heading", {
 		"text": node.collect_text(), "level": clampi(rank, 1, 6),
 	})
-	return {"kind": "heading", "rank": rank, "obj": obj, "node": node}
+	var frame := _new_frame("heading", node, rank, title, "")
+	_push_frame(frame, stack)
+	# Текст заголовка — его подпись; в детей не спускаемся (последующие сиблинги — наполнение).
 
 
-# --- Фаза 2: сегментация по рангам заголовков (стек) ---
-
-## Строит дерево секций из потока §1 и материализует его в комнаты. Возвращает root id.
-func _segment(stream: Array, body: HtmlNode) -> int:
-	var root_sec := _new_section(0, null, body)   # rank 0 — преамбула (до первого заголовка)
-	var stack: Array = [root_sec]
-	var pending_anchors: Array = []
-	var pending_css: Dictionary = {}
-
-	for item in stream:
-		match item["kind"]:
-			"heading":
-				var r: int = item["rank"]
-				# Закрываем все секции равного/младшего ранга (§4).
-				while stack.size() > 1 and int(stack[-1]["rank"]) >= r:
-					stack.pop_back()
-				var sec := _new_section(r, item["obj"], item["node"])
-				(stack[-1]["children"] as Array).append(sec)
-				stack.append(sec)
-				# Контейнер обрамлял ИМЕННО этот заголовок -> его id/box едут в новую секцию.
-				_flush_pending(sec, pending_anchors, pending_css)
-				pending_anchors = []
-				pending_css = {}
-			"object":
-				# Контент пошёл в текущую секцию -> pending принадлежит ей.
-				_flush_pending(stack[-1], pending_anchors, pending_css)
-				pending_anchors = []
-				pending_css = {}
-				(stack[-1]["objects"] as Array).append(item["obj"])
-			"anchor":
-				pending_anchors.append(item["id"])
-			"css":
-				_merge_into(pending_css, item["css"])
-
-	_flush_pending(stack[-1], pending_anchors, pending_css)
-
-	# Пустая корневая обёртка (нет своего наполнения и ровно один ребёнок) — не плодим
-	# лишнюю комнату-в-комнате: верхняя секция документа становится корнем сама.
-	if root_sec["title"] == null and (root_sec["objects"] as Array).is_empty() \
-			and (root_sec["anchors"] as Array).is_empty() and (root_sec["css"] as Dictionary).is_empty() \
-			and (root_sec["children"] as Array).size() == 1:
-		return _materialize_section((root_sec["children"] as Array)[0])
-	return _materialize_section(root_sec)
+func _open_semantic(node: HtmlNode, stack: Array) -> void:
+	var frame := _new_frame("semantic", node, 0, null, "")
+	_push_frame(frame, stack)
+	for c in node.children:
+		_classify(c, stack)
+	_pop_to(frame, stack)
 
 
-func _new_section(rank: int, title, node) -> Dictionary:
-	return {
-		"rank": rank, "title": title, "node": node,
-		"objects": [], "children": [], "anchors": [], "css": {},
-	}
+func _open_light(node: HtmlNode, kind: String, stack: Array) -> void:
+	var frame := _new_frame("light", node, 0, null, kind)
+	_push_frame(frame, stack)
+	for c in node.children:
+		_classify(c, stack)
+	_pop_to(frame, stack)
 
 
-func _flush_pending(sec: Dictionary, anchors: Array, css: Dictionary) -> void:
-	for aid in anchors:
-		(sec["anchors"] as Array).append(aid)
-	_merge_into(sec["css"], css)
+func _emit_object(obj: Dictionary, stack: Array) -> void:
+	var top: Dictionary = stack[-1]
+	_flush_pending(top)
+	_flush_runbuf(top)                                   # дробитель разрывает абзац
+	(top["items"] as Array).append({"k": "object", "obj": obj})
 
 
-## Рекурсивно превращает дерево секций в комнаты артефакта. Возвращает id комнаты.
-func _materialize_section(sec: Dictionary) -> int:
+func _emit_inline(node: HtmlNode, stack: Array) -> void:
+	var top: Dictionary = stack[-1]
+	_flush_pending(top)
+	_append_node_runs(node, top["runbuf"])               # копим прогоны в открытом буфере
+
+
+func _emit_paragraph(node: HtmlNode, stack: Array) -> void:
+	var top: Dictionary = stack[-1]
+	# Абзац сливается в node-less RichText, поэтому его id/css сами не осядут — собираем их
+	# в pending (как у прозрачной обёртки), чтобы #id-якорь абзаца не потерялся.
+	_harvest(node)
+	_flush_pending(top)
+	_flush_runbuf(top)
+	var runs := _build_runs(node)
+	if _runs_have_content(runs):
+		(top["items"] as Array).append({"k": "runs", "runs": runs})
+
+
+## Сбрасывает открытый inline-буфер фрейма в его items как один прогон-сегмент.
+func _flush_runbuf(frame: Dictionary) -> void:
+	var buf: Array = frame["runbuf"]
+	if _runs_have_content(buf):
+		(frame["items"] as Array).append({"k": "runs", "runs": buf})
+	frame["runbuf"] = []
+
+
+## Прицепляет накопленные «висящие» якоря/css прозрачных обёрток к указанному фрейму.
+func _flush_pending(frame: Dictionary) -> void:
+	for aid in _pending_anchors:
+		(frame["anchors"] as Array).append(aid)
+	_merge_into(frame["css"], _pending_css)
+	_pending_anchors = []
+	_pending_css = {}
+
+
+## Собирает мету прозрачного контейнера (id -> якорь, css-box -> хинт) в pending —
+## так инфа из div, который больше не комната, не теряется.
+func _harvest(node: HtmlNode) -> void:
+	if node.has_attr("id"):
+		_pending_anchors.append(node.get_attr("id"))
+	var box := _css_hints(node)
+	if not box.is_empty():
+		_merge_into(_pending_css, box)
+
+
+## Контейнер ≥LINK_GROUP_MIN ссылок-«пунктов», где ссылки доминируют над прозой -> лёгкий
+## кластер-«меню». Работает и для inline-контейнеров (навбар из <span>+<a>): меню от абзаца
+## отличаем по тому, что почти весь текст лежит ВНУТРИ ссылок (а не вокруг них).
+func _is_link_group(node: HtmlNode) -> bool:
+	if _count_grouped_links(node) < LINK_GROUP_MIN:
+		return false
+	if _has_structural_descendant(node):
+		return false   # есть заголовки/секции -> это структура, а не плоское меню
+	var total := node.collect_text().length()
+	var linked := _linked_text_len(node)
+	return (total - linked) <= linked   # текст вне ссылок не больше, чем в ссылках
+
+
+## Содержит ли поддерево заголовок или семантический контейнер (признак структуры, а не
+## плоского меню). Защищает от поглощения контентного div лёгким кластером (потери заголовков).
+func _has_structural_descendant(node: HtmlNode) -> bool:
+	for c in node.children:
+		if c.is_text():
+			continue
+		if HEADING_TAGS.has(c.tag) or SEMANTIC_TAGS.has(c.tag):
+			return true
+		if _has_structural_descendant(c):
+			return true
+	return false
+
+
+## Считает «пункты-ссылки» среди ПРЯМЫХ детей: сам <a href> либо обёртка (любая), чьё
+## наполнение — ссылка. Только прямые дети — поэтому ссылки, разбросанные в абзацах прозы,
+## порог не наберут.
+func _count_grouped_links(node: HtmlNode) -> int:
+	var n := 0
+	for c in node.children:
+		if c.is_text():
+			continue
+		if c.tag == "a" and c.has_attr("href"):
+			n += 1
+		elif c.has_descendant_tag("a"):
+			var a := c.find_descendant("a")
+			if a != null and a.has_attr("href"):
+				n += 1
+	return n
+
+
+## Суммарная длина текста внутри <a href> поддерева (для отличения меню от прозы).
+func _linked_text_len(node: HtmlNode) -> int:
+	if node.tag == "a" and node.has_attr("href"):
+		return node.collect_text().length()
+	var total := 0
+	for c in node.children:
+		if not c.is_text():
+			total += _linked_text_len(c)
+	return total
+
+
+# --- Фаза 2: материализация дерева кластеров в комнаты ---
+
+func _is_room_frame(frame: Dictionary) -> bool:
+	var t: String = frame["type"]
+	return t == "root" or t == "semantic" or t == "heading"
+
+
+## Лёгкие кластеры не становятся комнатами — но их мету (якоря/css) нельзя терять:
+## поднимаем её в ближайшую комнату-владельца.
+func _absorb_light_meta(frame: Dictionary) -> void:
+	for item in frame["items"]:
+		if item["k"] == "frame" and not _is_room_frame(item["frame"]):
+			var lf: Dictionary = item["frame"]
+			_absorb_light_meta(lf)
+			for aid in lf["anchors"]:
+				(frame["anchors"] as Array).append(aid)
+			_merge_into(frame["css"], lf["css"])
+
+
+## Рекурсивно превращает фрейм-кластер в комнату артефакта. Возвращает id комнаты.
+func _materialize(frame: Dictionary) -> int:
+	_absorb_light_meta(frame)
+	var objects := _form_objects(frame)
+
 	var child_ids: Array = []
-	for child in sec["children"]:
-		child_ids.append(_materialize_section(child))
+	for item in frame["items"]:
+		if item["k"] == "frame" and _is_room_frame(item["frame"]):
+			child_ids.append(_materialize(item["frame"]))
 
-	var objects: Array = []
-	if sec["title"] != null:
-		objects.append(sec["title"])   # заголовок секции — первый объект (подпись комнаты)
-	objects.append_array(sec["objects"])
+	# Проходная комната: пустой родитель (нет подписи/наполнения) c единственным ребёнком —
+	# это коридор-обёртка к тому, что внутри. Сливаем родителя в ребёнка, ПЕРЕНОСЯ якоря/css/
+	# семантику (мета не теряется), чтобы не плодить пустую комнату-в-комнате. Коннекторы
+	# (≥2 детей) не трогаем — это реальные развилки.
+	if frame["title"] == null and objects.is_empty() and child_ids.size() == 1:
+		_merge_meta_into_room(frame, child_ids[0])
+		return child_ids[0]
 
 	var id := _alloc()
 	var weight := objects.size()
 	for cid in child_ids:
 		weight += int(_rooms[cid]["hints"].get("weight", 0))
 
-	# Соединитель — секция, чья роль ТОЛЬКО ветвиться: ≥2 детей и никакого своего наполнения.
-	# Иначе обычная комната (возможно с детьми). Степень — хинт геометрии (§6 старого дока).
+	# Соединитель — кластер, чья роль ТОЛЬКО ветвиться: ≥2 детей и нет своего наполнения.
 	var kind := "connector" if (child_ids.size() >= 2 and objects.is_empty()) else "room"
 	var hints := {"weight": weight}
 	if child_ids.size() >= 2:
 		hints["degree"] = child_ids.size()
-
-	var node = sec["node"]
-	if node != null:
-		var sem := _semantic_tag(node.tag)
+	if frame["node"] != null:
+		var sem := _semantic_tag(frame["node"].tag)
 		if sem != "":
 			hints["semanticTag"] = sem
-	var css := {}
-	_merge_into(css, sec["css"])
-	if node != null:
-		_merge_into(css, _css_hints(node))
-	if not css.is_empty():
-		hints["css"] = css
+	if not (frame["css"] as Dictionary).is_empty():
+		hints["css"] = frame["css"]
 
 	_rooms[id] = {
 		"id": id, "kind": kind, "objects": objects,
 		"children": child_ids, "hints": hints,
 	}
-
-	# Якоря: id-ы схлопнутых контейнеров секции + id самого заголовка -> на эту комнату
-	# (teleport #id приводит игрока в комнату секции, а не в объект-подпись).
-	for aid in sec["anchors"]:
+	for aid in frame["anchors"]:
 		_labels[aid] = id
-	if node != null and node.get_attr("id") != "":
-		_labels[node.get_attr("id")] = id
-	_record_source(id, node)
+	_record_source(id, frame["node"])
 	return id
+
+
+## Собственные объекты кластера: подпись + слияние смежных прогонов в RichText, разрывы
+## на дробителях, инлайн объектов лёгких подкластеров. Дочерние КОМНАТЫ пропускаются.
+func _form_objects(frame: Dictionary) -> Array:
+	var result: Array = []
+	if frame["title"] != null:
+		result.append(frame["title"])   # заголовок — первый объект (подпись комнаты)
+	var merge: Array = []                # копим прогоны текущего RichText-сегмента
+	for item in frame["items"]:
+		match item["k"]:
+			"runs":
+				if not merge.is_empty():
+					merge.append({"text": "\n", "function": null})   # граница абзацев
+				merge.append_array(item["runs"])
+			"object":
+				_flush_merge(merge, result)
+				merge = []
+				result.append(item["obj"])
+			"frame":
+				var ch: Dictionary = item["frame"]
+				if _is_room_frame(ch):
+					continue             # дочерняя комната — не объект этого кластера
+				# Лёгкий подкластер (nav/группа ссылок) -> его объекты прямо здесь.
+				# NB: заголовок внутри лёгкого кластера (редкость) тут потерялся бы.
+				_flush_merge(merge, result)
+				merge = []
+				result.append_array(_form_objects(ch))
+	_flush_merge(merge, result)
+	return result
+
+
+func _flush_merge(merge: Array, result: Array) -> void:
+	if _runs_have_content(merge):
+		result.append(_rich_text_object(null, merge))
+
+
+## Переносит мету схлопнутого родителя-проходной в комнату-ребёнка: якоря (-> labels на
+## ребёнка), css-box (стены/пол), семантический тег (если у ребёнка своего нет).
+func _merge_meta_into_room(frame: Dictionary, room_id: int) -> void:
+	var room: Dictionary = _rooms[room_id]
+	for aid in frame["anchors"]:
+		_labels[aid] = room_id
+	if not (frame["css"] as Dictionary).is_empty():
+		var css: Dictionary = room["hints"].get("css", {})
+		_merge_into(css, frame["css"])
+		room["hints"]["css"] = css
+	if frame["node"] != null:
+		var sem := _semantic_tag(frame["node"].tag)
+		if sem != "" and not room["hints"].has("semanticTag"):
+			room["hints"]["semanticTag"] = sem
 
 
 func _merge_into(dst: Dictionary, src: Dictionary) -> void:
@@ -327,10 +527,6 @@ func _merge_into(dst: Dictionary, src: Dictionary) -> void:
 
 # --- Конструкторы объектов ---
 
-func _text_object(text: String) -> Dictionary:
-	return {"id": _alloc(), "type": "text", "function": null, "content": {"text": text}}
-
-
 func _leaf_object(node: HtmlNode, type: String, content: Dictionary) -> Dictionary:
 	var obj := {"id": _alloc(), "type": type, "function": null, "content": content}
 	_register_anchor(node, obj["id"])
@@ -338,20 +534,64 @@ func _leaf_object(node: HtmlNode, type: String, content: Dictionary) -> Dictiona
 	return obj
 
 
-func _anchor_object(node: HtmlNode) -> Dictionary:
-	# Что это как объект — по содержимому; href навешивает функцию перехода (§3).
-	var type := "image" if node.has_descendant_tag("img") else "text"
-	var content := {"text": node.collect_text()}
-	if type == "image":
-		content["alt"] = node.collect_text()
-		var img: HtmlNode = node.find_descendant("img")
-		if img != null:
-			content["src"] = img.get_attr("src")
-			content.merge(_image_dims(img))
-	var obj := {"id": _alloc(), "type": type, "function": _transition_for(node), "content": content}
-	_register_anchor(node, obj["id"])
-	_record_source(obj["id"], node)
-	return obj
+func _img_content(node: HtmlNode) -> Dictionary:
+	var content := {"src": node.get_attr("src"), "alt": node.get_attr("alt")}
+	content.merge(_image_dims(node))
+	return content
+
+
+## <video> -> логический видео-плеер VRWeb (docs/video-player.md): media_tag="video" +
+## резолвимый src — WorldGenerator строит из него VrwebVideoScreen. src из video[src] или
+## первого <source src> (стандарт HTML).
+func _video_object(node: HtmlNode) -> Dictionary:
+	var v_src := node.get_attr("src")
+	if v_src == "":
+		var source := node.find_descendant("source")
+		if source != null:
+			v_src = source.get_attr("src")
+	var v_content := {
+		"src": v_src, "text": node.collect_text(), "media_tag": "video",
+		"autoplay": node.has_attr("autoplay"), "loop": node.has_attr("loop"),
+	}
+	v_content.merge(_image_dims(node))
+	return _leaf_object(node, "media", v_content)
+
+
+## <figure> -> цельный объект (картинка + подпись из <figcaption>).
+func _figure_object(node: HtmlNode) -> Dictionary:
+	var content := {}
+	var cap := node.find_descendant("figcaption")
+	var caption := cap.collect_text() if cap != null else ""
+	content["caption"] = caption
+	var img := node.find_descendant("img")
+	if img != null:
+		content["src"] = img.get_attr("src")
+		content["alt"] = img.get_attr("alt")
+		content.merge(_image_dims(img))
+	content["text"] = caption if caption != "" else (img.get_attr("alt") if img != null else "")
+	return _leaf_object(node, "figure", content)
+
+
+## <pre> -> блок кода. Сохраняем СЫРОЙ текст (с переносами/отступами), без нормализации.
+func _code_object(node: HtmlNode) -> Dictionary:
+	return _leaf_object(node, "code", {"text": _raw_text(node)})
+
+
+## <blockquote> -> цитата. runs сохраняют inline-ссылки (как абзац).
+func _quote_object(node: HtmlNode) -> Dictionary:
+	return _leaf_object(node, "quote", {
+		"text": node.collect_text(), "runs": _build_runs(node),
+	})
+
+
+## Сырой текст поддерева без нормализации пробелов (для <pre>).
+func _raw_text(node: HtmlNode) -> String:
+	if node.is_text():
+		return node.text
+	var s := ""
+	for c in node.children:
+		s += _raw_text(c)
+	return s
 
 
 ## true, если в поддереве нет блочных элементов — только текст и inline-теги.
@@ -371,54 +611,90 @@ func _is_pure_inline(node: HtmlNode) -> bool:
 
 
 ## Линеаризует inline-поддерево в массив «прогонов» (runs) в порядке чтения.
-## run = { "text": String, "function": Transition|null }. Ссылки становятся отдельными
-## прогонами с функцией перехода; смежный обычный текст склеивается.
+## run = { "text", "function":Transition|null } | { "type":"image", "src","alt",..,"function" }.
 func _build_runs(node: HtmlNode) -> Array:
 	var runs: Array = []
-	_collect_runs(node, runs)
+	for child in node.children:
+		_append_node_runs(child, runs)
 	return runs
 
 
-func _collect_runs(node: HtmlNode, runs: Array) -> void:
-	for child in node.children:
-		if child.is_text():
-			_append_text_run(runs, child.text)
-		elif SKIP_TAGS.get(child.tag, false):
-			continue
-		elif child.tag == "a":
-			var fn = _transition_for(child)
-			var text := child.collect_text()
-			if fn != null:
-				runs.append({"text": text, "function": fn})
-			else:
-				_append_text_run(runs, text)
-		elif PHRASING_TAGS.has(child.tag):
-			_collect_runs(child, runs)
+## Добавляет один узел в массив прогонов: текст склеивается, <a> -> ссылка-прогон,
+## <img> -> картинка-прогон, inline-теги рекурсивно, прочее -> плоский текст (с картинкой).
+func _append_node_runs(node: HtmlNode, runs: Array) -> void:
+	if node.is_text():
+		_append_text_run(runs, node.text)
+		return
+	if SKIP_TAGS.get(node.tag, false):
+		return
+	if node.tag == "br":
+		_append_text_run(runs, "\n")   # перенос строки внутри абзаца (в т.ч. кривой </br>)
+		return
+	if node.tag == "img":
+		runs.append(_image_run(node, null))
+		return
+	if node.tag == "a":
+		var fn = _transition_for(node)
+		var text := node.collect_text()
+		# <a><img></a> -> картинка-прогон с функцией перехода (как объект-image).
+		if text.strip_edges() == "" and node.has_descendant_tag("img"):
+			runs.append(_image_run(node.find_descendant("img"), fn))
+		elif fn != null:
+			runs.append({"text": text, "function": fn})
 		else:
-			_append_text_run(runs, child.collect_text())
+			_append_text_run(runs, text)
+		return
+	if PHRASING_TAGS.has(node.tag):
+		for child in node.children:
+			_append_node_runs(child, runs)
+		return
+	# Блочная обёртка в inline-контексте: текст склеиваем; если текста нет, а внутри есть
+	# картинка (<div><img></div>) — не теряем её (берём первую).
+	var t := node.collect_text()
+	if t.strip_edges() == "" and node.has_descendant_tag("img"):
+		runs.append(_image_run(node.find_descendant("img"), null))
+	else:
+		_append_text_run(runs, t)
 
 
 func _append_text_run(runs: Array, text: String) -> void:
 	if text == "":
 		return
 	# Склеиваем с предыдущим текстовым прогоном (без функции), сохраняя пробелы.
-	if not runs.is_empty() and runs[-1].get("function", null) == null:
-		runs[-1]["text"] = str(runs[-1]["text"]) + text
+	if not runs.is_empty() and runs[-1].get("function", null) == null and not runs[-1].has("type"):
+		runs[-1]["text"] = str(runs[-1].get("text", "")) + text
 	else:
 		runs.append({"text": text, "function": null})
 
 
-func _runs_have_text(runs: Array) -> bool:
+## Есть ли в прогонах значимое содержимое (текст ИЛИ картинка).
+func _runs_have_content(runs: Array) -> bool:
 	for r in runs:
+		if str(r.get("type", "")) == "image":
+			return true
 		if str(r.get("text", "")).strip_edges() != "":
 			return true
 	return false
 
 
-func _rich_text_object(node: HtmlNode, runs: Array) -> Dictionary:
+## Прогон-картинка внутри абзаца/ячейки/пункта: несёт src/alt/размеры как объект-image
+## плюс опциональную функцию перехода, если картинка была завёрнута в <a href>.
+func _image_run(img: HtmlNode, fn) -> Dictionary:
+	if img == null:
+		return {"text": "", "function": fn}
+	var run := {
+		"type": "image", "src": img.get_attr("src"),
+		"alt": img.get_attr("alt"), "function": fn,
+	}
+	run.merge(_image_dims(img))
+	return run
+
+
+## RichText-объект из готовых прогонов. node может быть null (склейка нескольких сегментов).
+func _rich_text_object(node, runs: Array) -> Dictionary:
 	var plain := ""
 	for r in runs:
-		plain += str(r["text"])
+		plain += str(r.get("text", ""))
 	var obj := {
 		"id": _alloc(), "type": "text", "function": null,
 		"content": {"text": plain.strip_edges(), "runs": runs},
@@ -428,12 +704,39 @@ func _rich_text_object(node: HtmlNode, runs: Array) -> Dictionary:
 	return obj
 
 
+## Есть ли в списке хоть один пункт <li> (иначе объект пустой — выкидываем).
+func _has_list_items(node: HtmlNode) -> bool:
+	for li in node.children:
+		if li.tag == "li":
+			return true
+	return false
+
+
+## Подпись поля ввода. Видимого текста у <input> обычно нет, поэтому берём косвенные
+## признаки. Для кнопок надпись — value; для checkbox/radio value не надпись, берём aria-label/
+## title; для текстовых — placeholder; aria-label/title — общий фолбэк. Иначе поле «немое».
+func _input_label(node: HtmlNode) -> String:
+	var t := node.get_attr("type").to_lower()
+	var order: Array
+	if t == "submit" or t == "button" or t == "reset":
+		order = ["value", "aria-label", "title"]
+	elif t == "checkbox" or t == "radio":
+		order = ["aria-label", "title"]
+	else:
+		order = ["placeholder", "aria-label", "value", "title"]
+	for attr in order:
+		var v := node.get_attr(attr).strip_edges()
+		if v != "":
+			return v
+	return node.collect_text().strip_edges()   # <select>/<textarea> — текст содержимого
+
+
 func _list_object(node: HtmlNode) -> Dictionary:
 	var items: Array = []
 	for li in node.children:
 		if li.tag != "li":
 			continue
-		# Содержимое элемента линеаризуется в «прогоны» (как абзац, §3): каждая <a href>
+		# Содержимое элемента линеаризуется в «прогоны» (как абзац): каждая <a href>
 		# внутри становится отдельным прогоном со своей Transition, текст склеивается.
 		items.append({"text": li.collect_text(), "runs": _build_runs(li)})
 	var obj := {"id": _alloc(), "type": "list", "function": null, "content": {"items": items}}
@@ -442,7 +745,7 @@ func _list_object(node: HtmlNode) -> Dictionary:
 	return obj
 
 
-## Таблица -> один объект-коллекция (§7). Строки собираются сквозь обёртки
+## Таблица -> один объект-коллекция. Строки собираются сквозь обёртки
 ## <thead>/<tbody>/<tfoot>; ячейка = { text, runs, header }. <caption> -> подпись.
 func _table_object(node: HtmlNode) -> Dictionary:
 	var rows: Array = []
@@ -688,8 +991,8 @@ func _extract_css_value(style: String, prop: String) -> String:
 
 
 ## Элемент невидим «для глаза» — выкидываем на фазе линеаризации.
-## Внешний CSS не резолвится (нет движка/рендера, см. docs §11/A), поэтому ловим
-## только надёжные инлайновые признаки и атрибуты, не требующие layout-пасса.
+## Внешний CSS не резолвится (нет движка/рендера), поэтому ловим только надёжные
+## инлайновые признаки и атрибуты, не требующие layout-пасса.
 func _is_hidden(node: HtmlNode) -> bool:
 	# Атрибуты, явно убирающие элемент из видимого/доступного дерева.
 	if node.has_attr("hidden"):

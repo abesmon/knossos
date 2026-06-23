@@ -152,9 +152,12 @@ static func _self_bold(node: HtmlNode) -> bool:
 	return false
 
 
+## Класс/id намекает на заголовок. Берём только надёжные «title»/«heading»: «header»/«head»
+## выкинуты — это сплошь навбары/баннеры/шапки (`body-header`, `site-header`, `.header`),
+## а не текстовые заголовки, и давали массовые ложные срабатывания.
 static func _has_heading_class(node: HtmlNode) -> bool:
 	var s := (node.get_attr("class") + " " + node.get_attr("id")).to_lower()
-	return s.contains("title") or s.contains("heading") or s.contains("header") or s.contains("head")
+	return s.contains("title") or s.contains("heading")
 
 
 static func _is_centered(node: HtmlNode) -> bool:

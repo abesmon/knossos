@@ -45,7 +45,12 @@ static func parse(html: String) -> HtmlNode:
 				if end == -1:
 					break
 				var close_name := html.substr(i + 2, end - (i + 2)).strip_edges().to_lower()
-				_close_tag(stack, close_name)
+				if close_name == "br":
+					# Кривой </br> по HTML-спеку эквивалентен <br> (частая ошибка вёрстки,
+					# напр. шаблонизаторы). br — void, на стеке его нет, иначе тег потерялся бы.
+					stack[-1].add_child(HtmlNode.new("br"))
+				else:
+					_close_tag(stack, close_name)
 				i = end + 1
 				continue
 			# Открывающий тег <name ...>
@@ -171,8 +176,10 @@ static func _is_space(c: String) -> bool:
 
 
 ## Схлопывает любые последовательности пробелов в один пробел, сохраняя по одному
-## граничному пробелу слева/справа (важно для склейки inline-текста). Возвращает ""
-## для строк, состоящих только из пробелов (отступы между блочными тегами).
+## граничному пробелу слева/справа. Чисто пробельный сегмент → ОДИН пробел (как в браузере:
+## перевод строки/отступы между inline-элементами схлопываются в пробел, `<a>A</a> <a>B</a>`
+## → «A B»). Между блоками этот пробел отбрасывается топологией (`_classify` пропускает
+## пробельные узлы; в абзаце же он сохраняется). Пустая строка → "".
 static func _collapse_ws(s: String) -> String:
 	var out := ""
 	var in_ws := false
@@ -187,7 +194,7 @@ static func _collapse_ws(s: String) -> String:
 			in_ws = false
 	if in_ws:
 		out += " "
-	if out == " " or out == "":
+	if out == "":
 		return ""
 	return out
 
