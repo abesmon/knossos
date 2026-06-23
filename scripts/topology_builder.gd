@@ -527,6 +527,11 @@ static func classify_href(href: String):
 		return null
 	if href.begins_with("#"):
 		return {"kind": "teleport", "target": href.substr(1)}
+	# Собственные схемы приложения (vrwebresource:// — бандл, vrweblocal:// — файл ОС) —
+	# это страницы VRWeb, а не намерение для ОС: открываем их внутренней навигацией, иначе
+	# OS.shell_open ушёл бы искать внешний обработчик и ничего бы не открыл.
+	if PageFetcher.is_local(href):
+		return {"kind": "navigate", "href": href}
 	var scheme := _scheme_of(href)
 	if scheme == "javascript":
 		return null

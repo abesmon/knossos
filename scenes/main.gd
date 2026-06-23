@@ -91,13 +91,16 @@ func _ready() -> void:
 	# фокусируемым — без этого ни grab_focus, ни клики по навбару не сработают. В режим
 	# перемещения пользователь войдёт сам кликом по 3D.
 	_player.capture_mouse(false)
-	# Если задана домашняя страница — грузим её при запуске (как ввод адреса в омнибоксе:
-	# абсолютный URL, без базы). Иначе ставим фокус в адресную строку, чтобы можно было
-	# печатать без лишнего клика.
-	var home := Settings.home_page.strip_edges()
-	if home != "":
-		_address.text = home
-		_navigate(home, "", true)
+	# Стартовый адрес: диплинк (приложение открыли по собственной схеме vrwebresource://… —
+	# ОС передала URL аргументом, см. Deeplink) имеет приоритет над домашней страницей.
+	# Оба грузятся как ввод в омнибоксе: абсолютный URL, без базы. Если ни того, ни другого —
+	# ставим фокус в адресную строку, чтобы можно было печатать без лишнего клика.
+	var start_url := Deeplink.launch_url()
+	if start_url == "":
+		start_url = Settings.home_page.strip_edges()
+	if start_url != "":
+		_address.text = start_url
+		_navigate(start_url, "", true)
 	else:
 		_address.grab_focus()
 
