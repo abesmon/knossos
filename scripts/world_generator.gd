@@ -316,6 +316,8 @@ func _measure_object(obj: Dictionary) -> Vector2:
 	var runs: Array = obj.get("content", {}).get("runs", [])
 	if type == "text" and not runs.is_empty() and (_runs_have_links(runs) or _obj_text(obj).length() > 200):
 		return Vector2(_rich_w_m, RichPanel.estimate_height_m(runs, _rich_font_px))
+	if type == "heading" and _runs_have_links(obj.get("content", {}).get("runs", [])):
+		return Vector2(_rich_w_m, RichPanel.estimate_height_m(runs, _heading_rich_px(obj)))
 	if type == "list" and (_list_has_links(obj) or _list_has_images(obj)):
 		return Vector2(_rich_w_m, RichPanel.estimate_height_m(_list_runs(obj), _rich_font_px))
 	if type == "table" and (_table_has_links(obj) or _table_has_images(obj)):
@@ -1466,6 +1468,11 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 
 	match obj.get("type", "text"):
 		"heading":
+			var hruns: Array = obj.get("content", {}).get("runs", [])
+			if _runs_have_links(hruns):
+				# Кликабельный заголовок (<h2><a>…</a>, «ENTER →»): RichPanel в кегле заголовка.
+				return _build_rich_panel(hruns, holder, local_pos, yaw, on_transition,
+					_px_to_m(_heading_css_px(obj)))
 			var level: int = int(obj.get("content", {}).get("level", 2))
 			var px: float = _base_px * float(HEADING_EM.get(level, 1.0))
 			return _build_panel(holder, local_pos, yaw, _obj_text(obj),
@@ -1538,9 +1545,11 @@ func _panel_height(text: String, glyph_m: float) -> float:
 	return clampf(lines * glyph_m * 1.5 + 0.4, 1.0, 3.0)
 
 
-func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> Node3D:
+## font_world_m < 0 -> кегль базового текста; иначе заданный (для кликабельных заголовков).
+func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: float,
+		on_transition: Callable, font_world_m: float = -1.0) -> Node3D:
 	var panel: RichPanel = RICH_PANEL_SCENE.instantiate()
-	panel.setup(runs, _px_to_m(_base_px))
+	panel.setup(runs, font_world_m if font_world_m > 0.0 else _px_to_m(_base_px))
 	holder.add_child(panel)
 	panel.rotation.y = yaw
 	# Центр панели на уровне глаз; высота капнута в RichPanel, поэтому низ не уходит в пол.
@@ -1549,6 +1558,17 @@ func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: flo
 	if on_transition.is_valid():
 		panel.link_activated.connect(on_transition)
 	return panel
+
+
+## CSS-кегль заголовка (px) по его уровню — для рендера/замера кликабельного заголовка.
+func _heading_css_px(obj: Dictionary) -> float:
+	var level: int = int(obj.get("content", {}).get("level", 2))
+	return _base_px * float(HEADING_EM.get(level, 1.0))
+
+
+## Кегль заголовка в пикселях вьюпорта RichPanel (для estimate_height_m).
+func _heading_rich_px(obj: Dictionary) -> int:
+	return max(8, int(round(_px_to_m(_heading_css_px(obj)) * RichPanel.PIXEL_PER_METER)))
 
 
 func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float,

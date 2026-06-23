@@ -107,6 +107,12 @@ func _initialize() -> void:
 		"<input type=\"checkbox\" aria-label=\"Инструменты\">" +
 		"<input type=\"checkbox\"><p>контент</p></body></html>")
 	_dump_case("NAVBAR (div.body-header span+3a -> меню, НЕ заголовок)", NAVBAR)
+	# Пустой ВИЗУАЛЬНЫЙ заголовок-ссылка (ries «ENTER →») -> разбирается в кликабельный text,
+	# а не висит пустой комнатой-заголовком. Явный <h1> в <header> остаётся заголовком.
+	_dump_case("BARE-VISUAL (styled <a> -> text+link, не heading)",
+		"<html><body><header><h1>Титул</h1></header>" +
+		"<p><a href=\"/home\" style=\"font-size:22px;font-weight:bold\"><span>ENTER →</span></a></p>" +
+		"</body></html>")
 	_dump_linebreaks()
 
 	# Geometry smoke: BLOCKS содержит code/quote/figure — проверяем, что рендер не падает.

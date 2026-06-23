@@ -237,7 +237,7 @@ func _classify(node: HtmlNode, stack: Array) -> void:
 	if PHRASING_TAGS.has(tag) or _is_pure_inline(node):
 		var rank := HeadingDetector.visual_rank(node, _base_px)
 		if rank > 0:
-			_open_heading(node, rank, stack)
+			_open_heading(node, rank, stack, true)   # визуальный заголовок (эвристика)
 		elif PHRASING_TAGS.has(tag):
 			_emit_inline(node, stack)
 		else:
@@ -272,14 +272,19 @@ func _pop_to(frame: Dictionary, stack: Array) -> void:
 
 ## Заголовок: закрывает заголовочные фреймы веса ≥ ранга В ПРЕДЕЛАХ текущего DOM-кластера
 ## (цикл стопится на не-heading фрейме), затем открывает новый заголовочный фрейм.
-func _open_heading(node: HtmlNode, rank: int, stack: Array) -> void:
+func _open_heading(node: HtmlNode, rank: int, stack: Array, visual: bool = false) -> void:
 	while stack.size() > 1 and stack[-1]["type"] == "heading" and int(stack[-1]["weight"]) >= rank:
 		_flush_runbuf(stack[-1])
 		stack.pop_back()
-	var title := _leaf_object(node, "heading", {
-		"text": node.collect_text(), "level": clampi(rank, 1, 6),
-	})
+	var content := {"text": node.collect_text(), "level": clampi(rank, 1, 6)}
+	# Заголовок может содержать ссылку (<h2><a>...</a></h2>, кликабельный «ENTER →»):
+	# сохраняем прогоны со ссылками, чтобы кликабельность не терялась (рендер сделает портал).
+	var runs := _build_runs(node)
+	if _has_link_run(runs):
+		content["runs"] = runs
+	var title := _leaf_object(node, "heading", content)
 	var frame := _new_frame("heading", node, rank, title, "")
+	frame["visual"] = visual   # визуальный (эвристика) vs явный <h1>..<h6> — влияет на демоутинг
 	_push_frame(frame, stack)
 	# Текст заголовка — его подпись; в детей не спускаемся (последующие сиблинги — наполнение).
 
@@ -413,6 +418,31 @@ func _is_room_frame(frame: Dictionary) -> bool:
 	return t == "root" or t == "semantic" or t == "heading"
 
 
+## Пустой заголовок-кластер: ни своих объектов/текста, ни подкластеров — только сам заголовок.
+## Как КОМНАТА он бессмысленен (комната нужна, лишь если есть контент или дочерние кластеры),
+## поэтому вливается в родителя (см. _form_objects: визуальный -> richtext, явный -> объект-heading).
+func _heading_is_bare(frame: Dictionary) -> bool:
+	if frame["type"] != "heading":
+		return false
+	for item in frame["items"]:
+		match item["k"]:
+			"object":
+				return false
+			"runs":
+				if _runs_have_content(item["runs"]):
+					return false
+			"frame":
+				return false   # любой подкластер -> заголовок что-то «возглавляет»
+	return true
+
+
+func _has_link_run(runs: Array) -> bool:
+	for r in runs:
+		if r.get("function", null) != null:
+			return true
+	return false
+
+
 ## Лёгкие кластеры не становятся комнатами — но их мету (якоря/css) нельзя терять:
 ## поднимаем её в ближайшую комнату-владельца.
 func _absorb_light_meta(frame: Dictionary) -> void:
@@ -432,7 +462,8 @@ func _materialize(frame: Dictionary) -> int:
 
 	var child_ids: Array = []
 	for item in frame["items"]:
-		if item["k"] == "frame" and _is_room_frame(item["frame"]):
+		if item["k"] == "frame" and _is_room_frame(item["frame"]) \
+				and not _heading_is_bare(item["frame"]):
 			child_ids.append(_materialize(item["frame"]))
 
 	# Проходная комната: пустой родитель (нет подписи/наполнения) c единственным ребёнком —
@@ -489,6 +520,19 @@ func _form_objects(frame: Dictionary) -> Array:
 				result.append(item["obj"])
 			"frame":
 				var ch: Dictionary = item["frame"]
+				if _heading_is_bare(ch):
+					# Пустой заголовок-кластер вливаем в родителя (своей комнаты не получает).
+					# Визуальный (эвристика часто ложна + может нести ссылку) -> richtext, сохраняя
+					# кликабельность («ENTER →»). Явный <h1>..<h6> -> остаётся объектом-heading.
+					_flush_merge(merge, result)
+					merge = []
+					if ch.get("visual", false):
+						var runs := _build_runs(ch["node"])
+						if _runs_have_content(runs):
+							result.append(_rich_text_object(ch["node"], runs))
+					else:
+						result.append(ch["title"])
+					continue
 				if _is_room_frame(ch):
 					continue             # дочерняя комната — не объект этого кластера
 				# Лёгкий подкластер (nav/группа ссылок) -> его объекты прямо здесь.
