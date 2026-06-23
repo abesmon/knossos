@@ -40,10 +40,12 @@ func _pump() -> void:
 
 func _start(url: String) -> void:
 	_active += 1
-	# Локальные картинки (vrweblocal/vrwebresource) читаем синхронно, без сети и пула
-	# HTTPRequest (см. docs/local-resources.md).
+	# Локальные картинки (vrweblocal/vrwebresource) читаем без сети и пула HTTPRequest
+	# (см. docs/local-resources.md). Но чтение+декод тяжёлые: на странице с кучей локальных
+	# картинок синхронная цепочка _deliver→_pump→_start повесила бы кадр. Выносим за кадр —
+	# тогда декодится не больше MAX_CONCURRENT картинок за кадр (слот занят, пока ждём).
 	if PageFetcher.is_local(url):
-		_deliver(url, _load_local(url))
+		_start_local(url)
 		return
 	var http := HTTPRequest.new()
 	http.use_threads = true
@@ -55,6 +57,17 @@ func _start(url: String) -> void:
 	var err := http.request(url, ["User-Agent: " + USER_AGENT])
 	if err != OK:
 		_on_done(url, http, HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray())
+
+
+## Локальный декод за кадр (см. _start). Слот _active занят, пока ждём, поэтому за кадр
+## декодится не больше MAX_CONCURRENT картинок; _deliver освободит слот и подтянет очередь.
+func _start_local(url: String) -> void:
+	if is_inside_tree():
+		await get_tree().process_frame
+		# Навигация снесла мир вместе с лоадером, пока ждали кадр — выходим.
+		if not is_instance_valid(self):
+			return
+	_deliver(url, _load_local(url))
 
 
 func _on_done(url: String, http: HTTPRequest, result: int, code: int,

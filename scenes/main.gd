@@ -17,6 +17,11 @@ const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 
 var _fetcher: PageFetcher
 var _player: Player
+# Активный генератор мира. Держим сильную ссылку, пока он достраивает геометрию порциями
+# по кадрам (WorldGenerator — RefCounted; без ссылки его корутина-достройка собралась бы GC
+# после _rebuild_world и не возобновилась). Перезапись при следующей навигации освобождает
+# старый — его корутина увидит снесённый контейнер и сама прекратится.
+var _world_gen: WorldGenerator = null
 var _status: Label
 var _cross: Label
 var _current_url: String = ""
@@ -343,6 +348,8 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 		var seed_value := int(hash(PageFetcher.seed_key(url)))
 		gen = WorldGenerator.generate(space, _world, seed_value, _activate_transition, base_url, image_loader)
 		_label_positions = gen.label_positions
+	# Держим генератор живым на время потоковой достройки (см. поле _world_gen). exclusive — null.
+	_world_gen = gen
 
 	# Спавн: приоритет у <VRWebSpawner>, затем спавн HTML-топологии «у первого объекта»,
 	# затем (exclusive без спавнера) дефолт у начала координат лицом к сцене.
@@ -361,8 +368,16 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 
 	# Регистрируем видео-плееры и привязываем экраны (после добавления всего в дерево).
 	# Сканируем весь мир: экраны бывают и из <vrweb>-тегов, и из обычного HTML-тега <video>
-	# (WorldGenerator строит из него такой же VrwebVideoScreen).
-	video_manager.scan(_world)
+	# (WorldGenerator строит из него такой же VrwebVideoScreen). Геометрия HTML теперь
+	# достраивается порциями по кадрам (тайм-слайс), поэтому HTML-экраны появляются не сразу —
+	# сканируем после сигнала build_finished. Маленькие страницы строятся синхронно (build_complete
+	# уже true) — тогда сканируем тут же. В exclusive-режиме (gen == null) геометрии HTML нет.
+	if gen != null and not gen.build_complete:
+		gen.build_finished.connect(func():
+			if is_instance_valid(video_manager):
+				video_manager.scan(_world))
+	else:
+		video_manager.scan(_world)
 
 	# Внешние ресурсы (<ExtResource path="<url>">) качаются и вставляются асинхронно —
 	# прогрессивная подгрузка, как у картинок <img>. Общая логика с дебаг-превью редактора

@@ -71,12 +71,20 @@ func _initialize() -> void:
 var _holder: Node3D
 var _gen
 var _frame := 0
+var _frame_after_build := 0
 
 
 func _process(_delta: float) -> bool:
 	_frame += 1
-	if _frame < 2:
+	# Геометрия теперь строится порциями по кадрам (тайм-слайс, см. WorldGenerator._stream_remaining):
+	# ждём завершения стриминга, а не фиксированные 2 кадра. +1 кадр после — на _ready узлов.
+	if not _gen.build_complete:
 		return false
+	if _frame_after_build == 0:
+		_frame_after_build = _frame
+	if _frame - _frame_after_build < 1:
+		return false
+	print("nodes built (after stream): ", _count_nodes(_holder))
 	var panels := get_nodes_in_group("rich_panel")
 	print("\n=== After frame: RichPanels (абзацы с inline-ссылками): ", panels.size(), " ===")
 	for rp in panels:

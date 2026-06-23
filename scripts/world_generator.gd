@@ -17,6 +17,11 @@ extends RefCounted
 ##   5. геометрия            -> полы/стены-с-проёмами/объекты/коридоры
 ## Случайность — только в цветах/атмосфере (_rng от seed); раскладка детерминирована.
 
+## Геометрия комнат строится не за один кадр, а порциями (тайм-слайс), чтобы тяжёлая
+## страница (сотни узлов) не вешала главный поток. Сигнал — когда весь мир достроен
+## (нужно main, чтобы просканировать видео-экраны после стриминга). См. _stream_remaining.
+signal build_finished
+
 const PORTAL_SCENE := preload("res://actors/portal/portal.tscn")
 const RICH_PANEL_SCENE := preload("res://actors/rich_panel/rich_panel.tscn")
 
@@ -131,6 +136,19 @@ var spawn_point := Vector3.ZERO
 var spawn_look_at := Vector3.ZERO      # точка, на которую игрок смотрит при спавне
 var has_spawn_look: bool = false       # валиден ли spawn_look_at
 var label_positions: Dictionary = {}   # anchorId -> Vector3
+var build_complete: bool = false       # весь мир достроен (стриминг по кадрам завершён)
+
+# --- Тайм-слайс билда (стриминг геометрии по кадрам) ---
+const BUILD_BUDGET_MS := 6.0           # бюджет создания узлов за кадр, мс (потом await кадра)
+var _container: Node3D                  # узел-контейнер всей геометрии под parent (см. _build)
+var _on_transition: Callable           # коллбэк переходов, для отложенной достройки комнат
+var _built: Dictionary = {}            # roomId -> true: комната уже построена
+
+# Шеринг ресурсов: тысячи стен/полов делят одинаковые BoxMesh/материалы/коллизии вместо
+# создания уникального ресурса на каждый бокс (экономит память и время при большой странице).
+var _box_mesh_cache: Dictionary = {}   # Vector3 -> BoxMesh
+var _box_shape_cache: Dictionary = {}  # Vector3 -> BoxShape3D
+var _mat_cache: Dictionary = {}        # Color -> StandardMaterial3D
 
 
 static func generate(space: Dictionary, parent: Node3D, seed_value: int, on_transition: Callable,
@@ -139,6 +157,10 @@ static func generate(space: Dictionary, parent: Node3D, seed_value: int, on_tran
 	g._base_url = base_url
 	g._image_loader = image_loader
 	g._build(space, parent, seed_value, on_transition)
+	# Достройку оставшихся комнат запускаем отдельной корутиной (fire-and-forget): её держит
+	# живой подписка на process_frame. Вложенный await внутри _build ломает возобновление,
+	# поэтому _build синхронный (раскладка + спавн готовы к возврату), а стриминг — здесь.
+	g._stream_remaining()
 	return g
 
 
@@ -172,12 +194,55 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 	for id in _rooms.keys():
 		for obj in _rooms[id]["objects"]:
 			_object_room[obj["id"]] = id
-		_build_room(id, parent, on_transition)  # фаза 5
-	_build_corridor_floors(parent)
-	_resolve_labels(space.get("labels", {}))
-	_build_atmosphere(parent, _root_id)
+	_resolve_labels(space.get("labels", {}))   # позиции якорей — из раскладки, не из узлов
 
+	# Вся геометрия живёт под собственным контейнером: при навигации main сносит детей мира,
+	# контейнер вместе с ними — и стриминг (_stream_remaining) видит, что он больше не в дереве,
+	# и бросает достройку, не подсыпая узлы старой страницы в уже новый мир.
+	_container = Node3D.new()
+	_container.name = "Generated"
+	parent.add_child(_container)
+	_on_transition = on_transition
+
+	# Синхронно (до первого кадра): свет/небо — чтобы мир был освещён, и комната спавна —
+	# чтобы spawn_point был готов к возврату из generate() и игроку было куда встать.
+	# Остальные комнаты достраиваются порциями по кадрам (см. _stream_remaining).
+	_build_atmosphere(_container, _root_id)     # фаза 5: атмосфера
+	var spawn_room_id: int = _object_room.get(_first_obj_id, _root_id)
+	if _rooms.has(spawn_room_id):
+		_build_room(spawn_room_id, _container, on_transition)
+		_built[spawn_room_id] = true
 	_compute_spawn()
+	# Остальные комнаты достраивает _stream_remaining (запускается из generate отдельной корутиной).
+
+
+## Достраивает оставшиеся комнаты и полы-коридоры порциями по кадрам: создаём узлы, пока
+## не выйдет бюджет кадра (BUILD_BUDGET_MS), затем ждём следующего кадра. Так тяжёлая
+## страница не вешает главный поток. По завершении — build_complete + сигнал build_finished
+## (main по нему сканирует видео-экраны). Если мир снесён навигацией (контейнер освобождён
+## через queue_free) — молча бросаем: новый мир уже строит свой генератор.
+func _stream_remaining() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var start := Time.get_ticks_msec()
+	for id in _rooms.keys():
+		if not is_instance_valid(_container):
+			return
+		if _built.has(id):
+			continue
+		_build_room(id, _container, _on_transition)
+		_built[id] = true
+		if Time.get_ticks_msec() - start >= BUILD_BUDGET_MS:
+			await tree.process_frame
+			# Навигация снесла мир (main сделал queue_free контейнера) — бросаем достройку:
+			# новый мир строит свой генератор, а узлы старой страницы тут уже не нужны.
+			if not is_instance_valid(_container):
+				return
+			start = Time.get_ticks_msec()
+	if not is_instance_valid(_container):
+		return
+	_build_corridor_floors(_container)
+	build_complete = true
+	build_finished.emit()
 
 
 func _build_parent_map() -> void:
@@ -1676,25 +1741,46 @@ func _godot_font(css_px: float) -> int:
 
 # --- Низкоуровневые помощники ---
 
+## Боксы (полы/стены) шарят BoxMesh/материал/коллизию через кэши: на тяжёлой странице это
+## тысячи узлов, но размеров и цветов среди них немного — ресурсы (Resource, RefCounted)
+## безопасно делить между MeshInstance3D, т.к. после создания мы их не мутируем.
 func _add_box(holder: Node3D, size: Vector3, local_pos: Vector3, color: Color, collide: bool) -> void:
 	var mesh := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	mesh.mesh = box
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mesh.material_override = mat
+	mesh.mesh = _shared_box_mesh(size)
+	mesh.material_override = _shared_material(color)
 	mesh.position = local_pos
 	holder.add_child(mesh)
 	if collide:
 		var body := StaticBody3D.new()
 		var shape := CollisionShape3D.new()
-		var box_shape := BoxShape3D.new()
-		box_shape.size = size
-		shape.shape = box_shape
+		shape.shape = _shared_box_shape(size)
 		body.add_child(shape)
 		body.position = local_pos
 		holder.add_child(body)
+
+
+func _shared_box_mesh(size: Vector3) -> BoxMesh:
+	if not _box_mesh_cache.has(size):
+		var box := BoxMesh.new()
+		box.size = size
+		_box_mesh_cache[size] = box
+	return _box_mesh_cache[size]
+
+
+func _shared_box_shape(size: Vector3) -> BoxShape3D:
+	if not _box_shape_cache.has(size):
+		var s := BoxShape3D.new()
+		s.size = size
+		_box_shape_cache[size] = s
+	return _box_shape_cache[size]
+
+
+func _shared_material(color: Color) -> StandardMaterial3D:
+	if not _mat_cache.has(color):
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		_mat_cache[color] = mat
+	return _mat_cache[color]
 
 
 func _room_color(room: Dictionary, is_connector: bool) -> Color:
