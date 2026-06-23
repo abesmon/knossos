@@ -517,7 +517,12 @@ func _collect_form_fields(node: HtmlNode, fields: Array) -> void:
 func _transition_for(anchor: HtmlNode):
 	if not anchor.has_attr("href"):
 		return null
-	var href := anchor.get_attr("href").strip_edges()
+	return classify_href(anchor.get_attr("href").strip_edges())
+
+
+## Классифицирует href в Transition (или null, если вести некуда). Едина для ссылок
+## страницы и кликабельных ссылок чата (см. main.gd _on_chat_meta_clicked).
+static func classify_href(href: String):
 	if href == "" or href == "#":
 		return null
 	if href.begins_with("#"):

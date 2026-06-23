@@ -146,6 +146,10 @@ func _set_ui_focusable(focusable: bool) -> void:
 	for c: Control in [_address, _go, _back_btn, _fwd_btn, _settings_btn, _chat_input]:
 		if c != null:
 			c.focus_mode = mode
+	# Логу чата хватает фокуса по клику (выделение + Ctrl/Cmd+C); в режиме перемещения
+	# фокус снимаем, чтобы клавиатура его не доставала (как и прочий UI выше).
+	if _chat_log != null:
+		_chat_log.focus_mode = Control.FOCUS_CLICK if focusable else Control.FOCUS_NONE
 
 
 func _navigate(url: String, base: String, push_history: bool) -> void:
@@ -534,7 +538,13 @@ func _build_chat_ui(ui: Control) -> void:
 	_chat_log.scroll_active = true
 	_chat_log.scroll_following = true
 	_chat_log.custom_minimum_size = Vector2(400, 170)
-	_chat_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Текст можно выделять мышью и копировать (Ctrl/Cmd+C). Для этого лог должен принимать
+	# события мыши (не IGNORE) — заодно это включает клики по ссылкам ниже.
+	_chat_log.selection_enabled = true
+	# Ссылки в сообщениях ([url]…[/url], см. _linkify) подчёркиваем и делаем кликабельными;
+	# meta_clicked отдаёт href в _on_chat_meta_clicked для перехода/внешнего открытия.
+	_chat_log.meta_underlined = true
+	_chat_log.meta_clicked.connect(_on_chat_meta_clicked)
 	_chat_root.add_child(_chat_log)
 
 	_chat_input = LineEdit.new()
@@ -600,12 +610,76 @@ func _render_chat() -> void:
 		if e.get("kind", "") == "system":
 			_chat_log.append_text("[i][color=#9aa0a6]— %s —[/color][/i]\n" % _esc_bb(e.get("text", "")))
 		else:
-			_chat_log.append_text("[b]%s[/b]: %s\n" % [_esc_bb(e.get("nick", "")), _esc_bb(e.get("text", ""))])
+			_chat_log.append_text("[b]%s[/b]: %s\n" % [_esc_bb(e.get("nick", "")), _linkify(e.get("text", ""))])
 
 
 ## Экранирует "[" в пользовательском тексте, чтобы он не воспринимался как BBCode-тег.
 func _esc_bb(s: String) -> String:
 	return s.replace("[", "[lb]")
+
+
+# URL в тексте сообщения: схема (http(s), mailto:, tel:, кастомные app-схемы, deeplink
+# scheme://…) либо www.-домен, до первого пробела. Хвостовая пунктуация (.,!? и скобки)
+# отрезается отдельно в _linkify, чтобы не утащить её в адрес.
+static var _url_re: RegEx = RegEx.create_from_string("(?i)\\b(?:[a-z][a-z0-9+.\\-]*:(?://)?|www\\.)[^\\s]+")
+
+
+## Оборачивает ссылки в тексте в кликабельный [url=…], остальное экранирует _esc_bb.
+## meta каждого [url] — исходный адрес; по нему _on_chat_meta_clicked решает, что делать.
+func _linkify(text: String) -> String:
+	var out := ""
+	var last := 0
+	for m: RegExMatch in _url_re.search_all(text):
+		out += _esc_bb(text.substr(last, m.get_start() - last))
+		var url := m.get_string()
+		# Отрезаем хвостовую пунктуацию: "(см. example.com)." не должен включать ")." в адрес.
+		var trail := ""
+		while url.length() > 0 and url[url.length() - 1] in ".,;:!?)»\"'":
+			trail = url[url.length() - 1] + trail
+			url = url.substr(0, url.length() - 1)
+		if _looks_like_link(url):
+			out += "[url=%s][color=#6cb6ff]%s[/color][/url]" % [url, _esc_bb(url)]
+			out += _esc_bb(trail)
+		else:
+			# Ложное срабатывание (напр. "слово:слово") — оставляем как обычный текст.
+			out += _esc_bb(m.get_string())
+		last = m.get_end()
+	out += _esc_bb(text.substr(last))
+	return out
+
+
+## Отсеивает ложные «ссылки» (двоеточие в обычной фразе): настоящий адрес — это www.,
+## схема с "//" (deeplink/веб), известная безслэшевая схема (mailto/tel/…) или схема,
+## за которой идёт путь/домен с "/" или ".".
+func _looks_like_link(s: String) -> bool:
+	if s.to_lower().begins_with("www."):
+		return true
+	var colon := s.find(":")
+	if colon <= 0:
+		return false
+	var rest := s.substr(colon + 1)
+	if rest.begins_with("//"):
+		return true
+	if s.substr(0, colon).to_lower() in ["mailto", "tel", "sms", "magnet", "geo", "maps"]:
+		return true
+	return rest.contains("/") or rest.contains(".")
+
+
+## Клик по ссылке в чате: www.→https://, далее общая классификация (навигация VRWeb,
+## телепорт к якорю или внешнее намерение для ОС) — та же, что у ссылок страницы.
+func _on_chat_meta_clicked(meta: Variant) -> void:
+	var url := str(meta).strip_edges()
+	if url.to_lower().begins_with("www."):
+		url = "https://" + url
+	var transition: Variant = TopologyBuilder.classify_href(url)
+	if transition == null:
+		return
+	if transition.get("kind", "") == "navigate":
+		# Ссылка из чата — абсолютный адрес (как омнибокс): база пустая, мышь обратно в игру.
+		_navigate(transition["href"], "", true)
+		_player.capture_mouse(true)
+	else:
+		_activate_transition(transition)
 
 
 ## Будит чат: полная непрозрачность и (только в режиме перемещения) перезапуск 30-сек таймера,
