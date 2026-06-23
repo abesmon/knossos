@@ -23,7 +23,8 @@ extends RefCounted
 ##   "rooms":  { id: Room },      # плоский словарь всех комнат/соединителей
 ##   "root":   id,                # корневое пространство
 ##   "labels": { anchorId: id },  # цели якорей #id -> комната/объект
-##   "typography": { base_px }    # базовый кегль текста (масштаб геометрии)
+##   "typography": { base_px },   # базовый кегль текста (масштаб геометрии)
+##   "document": { bg?, bg_image?, fg? }  # визуальный паспорт <body> -> небо/земля/палитра
 ## }
 ## Room   = { id, kind:"room"|"connector", objects:[Object], children:[id], hints:{...} }
 ## Object = { id, type, function:Transition|null, content:{...} }
@@ -98,6 +99,7 @@ func _build(root: HtmlNode) -> Dictionary:
 	var artifact := {
 		"rooms": _rooms, "root": root_id, "labels": _labels,
 		"typography": {"base_px": _base_px},
+		"document": _document_style(root, body),   # фон/цвет документа -> небо/земля/палитра (фаза F)
 	}
 	if _debug:
 		artifact["sources"] = _sources
@@ -896,13 +898,165 @@ func _css_hints(node: HtmlNode) -> Dictionary:
 	var style := node.get_attr("style").to_lower()
 	var bg := _extract_css_value(style, "background-color")
 	if bg == "":
-		bg = _extract_css_value(style, "background")
+		bg = _css_color_token(_extract_css_value(style, "background"))
 	if bg != "":
 		css["bg"] = bg
 	if node.has_attr("bgcolor"):
 		css["bg"] = node.get_attr("bgcolor")
+	var fg := _extract_css_value(style, "color")
+	if fg != "":
+		css["fg"] = fg
 	if style.contains("border"):
 		css["border"] = true
+	return css
+
+
+## Визуальный «паспорт» документа для геометрии: фон-картинка, фон-цвет и цвет текста
+## <body>. Из них фаза F строит небо (картинка -> панорама, иначе фон-цвет -> база неба),
+## землю (цвет текста, иначе очень тёмный фон) и палитру комнат (см. world_generator).
+##
+## Каскада/специфичности у нас нет (внешний CSS не резолвится, см. html-to-3d-topology.md
+## §10–§11), поэтому источники берём по нарастанию «явности»: правила body/html/:root из
+## встроенных <style> -> инлайн-style самого <body> -> презентационные атрибуты
+## (bgcolor/text). Каждый следующий перекрывает предыдущий по найденным ключам.
+func _document_style(root: HtmlNode, body: HtmlNode) -> Dictionary:
+	var doc := _doc_style_from_stylesheet(_collect_stylesheet_css(root))
+	if body != null:
+		var style := body.get_attr("style").to_lower()
+		_merge_decls(doc, style)
+		if body.has_attr("bgcolor"):
+			doc["bg"] = body.get_attr("bgcolor").to_lower()
+		if body.has_attr("text"):
+			doc["fg"] = body.get_attr("text").to_lower()
+	return doc
+
+
+## Склеивает текст всех <style> страницы (порядок документа = порядок каскада).
+func _collect_stylesheet_css(root: HtmlNode) -> String:
+	var parts: PackedStringArray = []
+	var stack: Array[HtmlNode] = [root]
+	while not stack.is_empty():
+		var n: HtmlNode = stack.pop_back()
+		if n.tag == "style":
+			parts.append(n.collect_text())
+		for c in n.children:
+			stack.append(c)
+	return " ".join(parts)
+
+
+## Вытаскивает фон/цвет документа из таблицы стилей: правила, чей селектор целит в
+## body/html/:root. Лёгкий экстрактор, НЕ движок CSS — без специфичности и @-правил
+## (вложенные @media/@supports игнорируются), правила берутся по порядку (last-wins).
+func _doc_style_from_stylesheet(css: String) -> Dictionary:
+	var out := {}
+	css = _strip_css_comments(css).to_lower()
+	var i := 0
+	while true:
+		var brace := css.find("{", i)
+		if brace == -1:
+			break
+		var close := css.find("}", brace)
+		if close == -1:
+			break
+		var sel := css.substr(i, brace - i).strip_edges()
+		if _selector_targets_document(sel):
+			_merge_decls(out, css.substr(brace + 1, close - brace - 1))
+		i = close + 1
+	return out
+
+
+## Целит ли селектор в корень документа: любая из групп (через запятую) равна
+## body / html / :root (без вложенных комбинаторов — берём только простые корневые правила).
+func _selector_targets_document(sel: String) -> bool:
+	for part in sel.split(","):
+		match part.strip_edges():
+			"body", "html", ":root":
+				return true
+	return false
+
+
+## Разбирает блок объявлений «prop:value; …» и кладёт в out фон/картинку/цвет (last-wins).
+func _merge_decls(out: Dictionary, decls: String) -> void:
+	var bg := _extract_css_value(decls, "background-color")
+	if bg != "":
+		out["bg"] = bg
+	var bg_img := _extract_css_url(_extract_css_value(decls, "background-image"))
+	if bg_img != "":
+		out["bg_image"] = bg_img
+	# Шорткат background: и цвет, и картинка в одном свойстве.
+	var bg_short := _extract_css_value(decls, "background")
+	if bg_short != "":
+		var short_img := _extract_css_url(bg_short)
+		if short_img != "":
+			out["bg_image"] = short_img
+		var short_col := _css_color_token(bg_short)
+		if short_col != "":
+			out["bg"] = short_col
+	var fg := _extract_css_value(decls, "color")
+	if fg != "":
+		out["fg"] = fg
+
+
+## url(...) -> очищенный путь; "" если url() нет. Снимает кавычки и пробелы.
+func _extract_css_url(value: String) -> String:
+	var idx := value.find("url(")
+	if idx == -1:
+		return ""
+	var start := idx + 4
+	var end := value.find(")", start)
+	if end == -1:
+		return ""
+	var url := value.substr(start, end - start).strip_edges()
+	if url.length() >= 2 and (url[0] == "\"" or url[0] == "'"):
+		url = url.substr(1, url.length() - 2)
+	return url.strip_edges()
+
+
+## Первый токен значения, похожий на цвет (#hex / rgb()/ имя). Нужен, чтобы из шортката
+## `background: #fff url(x) no-repeat` достать именно цвет. "" — если цвета нет.
+func _css_color_token(value: String) -> String:
+	value = value.strip_edges()
+	if value == "":
+		return ""
+	# rgb()/rgba()/hsl() — берём как есть до закрывающей скобки.
+	for fn in ["rgba(", "rgb(", "hsla(", "hsl("]:
+		var fi := value.find(fn)
+		if fi != -1:
+			var fe := value.find(")", fi)
+			if fe != -1:
+				return value.substr(fi, fe - fi + 1)
+	for tok in value.split(" ", false):
+		tok = tok.strip_edges()
+		if tok.begins_with("#"):
+			return tok
+		if tok != "" and not tok.begins_with("url(") and CSS_COLOR_NAMES.has(tok):
+			return tok
+	return ""
+
+
+## Имена CSS-цветов, которые встречаются на практике как фон/цвет документа. Полную
+## таблицу X11 не тащим — геометрия всё равно валидирует через Color.from_string.
+const CSS_COLOR_NAMES := {
+	"black": true, "white": true, "red": true, "green": true, "blue": true,
+	"yellow": true, "orange": true, "purple": true, "gray": true, "grey": true,
+	"silver": true, "maroon": true, "olive": true, "lime": true, "aqua": true,
+	"teal": true, "navy": true, "fuchsia": true, "pink": true, "brown": true,
+	"cyan": true, "magenta": true, "gold": true, "beige": true, "ivory": true,
+	"indigo": true, "violet": true, "transparent": false,
+}
+
+
+## Удаляет /* … */ комментарии из CSS перед разбором.
+func _strip_css_comments(css: String) -> String:
+	while true:
+		var open := css.find("/*")
+		if open == -1:
+			break
+		var close := css.find("*/", open + 2)
+		if close == -1:
+			css = css.substr(0, open)
+			break
+		css = css.substr(0, open) + css.substr(close + 2)
 	return css
 
 
@@ -979,15 +1133,29 @@ func _length_px(value: String) -> float:
 	return -1.0
 
 
+## Значение свойства из блока объявлений. Свойство ищется на границе (начало / ';' / '{' /
+## пробел слева, опц. пробелы и ':' справа) — иначе `color` ловился бы внутри
+## `background-color`, а `background` — внутри `background-image`. Возвращает значение до ';'.
 func _extract_css_value(style: String, prop: String) -> String:
-	var idx := style.find(prop + ":")
-	if idx == -1:
-		return ""
-	var start := idx + prop.length() + 1
-	var end := style.find(";", start)
-	if end == -1:
-		end = style.length()
-	return style.substr(start, end - start).strip_edges()
+	var from := 0
+	while true:
+		var idx := style.find(prop, from)
+		if idx == -1:
+			return ""
+		var left_ok := idx == 0
+		if not left_ok:
+			var lc := style[idx - 1]
+			left_ok = lc == ";" or lc == "{" or lc == " " or lc == "\t" or lc == "\n"
+		var j := idx + prop.length()
+		while j < style.length() and (style[j] == " " or style[j] == "\t" or style[j] == "\n"):
+			j += 1
+		if left_ok and j < style.length() and style[j] == ":":
+			var end := style.find(";", j + 1)
+			if end == -1:
+				end = style.length()
+			return style.substr(j + 1, end - j - 1).strip_edges()
+		from = idx + prop.length()
+	return ""
 
 
 ## Элемент невидим «для глаза» — выкидываем на фазе линеаризации.

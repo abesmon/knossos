@@ -96,6 +96,13 @@ var _m_per_px := M_PER_BASE_LINE / 16.0
 var _rich_w_m := 2.375
 var _rich_font_px := 24
 
+# Визуальный паспорт документа (artifact["document"], см. topology_builder): из них небо,
+# земля и палитра комнат берут цвета страницы. Базовый цвет — фон <body> (или средний фон
+# страницы); _doc_has_base = был ли вообще цвет (иначе тон уходит к сиду URL).
+var _doc_base_color := Color(0.5, 0.5, 0.6)  # база неба/палитры (фон документа)
+var _doc_has_base := false                   # нашёлся ли цвет фона (иначе тон от сида)
+var _doc_fg                                  # Color|null: цвет текста <body> (земля, акценты)
+
 var _dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
 # Замеры/раскладка по фазам.
@@ -1625,21 +1632,17 @@ func _table_has_images(obj: Dictionary) -> bool:
 # --- Атмосфера (свет + небо), процедурно из данных страницы ---
 
 func _build_atmosphere(parent: Node3D, root_id: int) -> void:
-	var palette := _collect_bg_colors()
+	_resolve_document_palette()
 
 	var base_hue: float
 	var base_sat: float
-	if palette.is_empty():
+	if _doc_has_base:
+		base_hue = _doc_base_color.h
+		base_sat = clampf(_doc_base_color.s + 0.1, 0.2, 0.7)
+	else:
 		_rng.seed = _seed
 		base_hue = _rng.randf()
 		base_sat = 0.35
-	else:
-		var avg := Color(0, 0, 0)
-		for c in palette:
-			avg += c
-		avg /= float(palette.size())
-		base_hue = avg.h
-		base_sat = clampf(avg.s + 0.1, 0.2, 0.7)
 
 	var weight := float(_rooms[root_id]["hints"].get("weight", 0))
 	var richness := clampf(weight / 30.0, 0.0, 1.0)
@@ -1652,9 +1655,22 @@ func _build_atmosphere(parent: Node3D, root_id: int) -> void:
 	var sun_color := Color.from_hsv(lerpf(base_hue, 0.07, warmth * 0.8), 0.35 + warmth * 0.3, 1.0)
 
 	var sky := ProceduralSkyMaterial.new()
-	sky.sky_top_color = Color.from_hsv(base_hue, base_sat, 0.55)
-	sky.sky_horizon_color = Color.from_hsv(lerpf(base_hue, 0.07, warmth), base_sat * 0.6, lerpf(0.95, 0.7, warmth))
-	sky.ground_bottom_color = Color.from_hsv(base_hue, base_sat * 0.5, 0.12)
+	# Небо берёт цвет фона документа как есть (тёмный фон -> тёмное небо), горизонт чуть
+	# теплеет к закату. Без цвета — процедурная палитра от тона/сида (как раньше).
+	if _doc_has_base:
+		sky.sky_top_color = _doc_base_color
+		var warm := Color.from_hsv(0.07, 0.3, lerpf(0.95, 0.7, warmth))
+		sky.sky_horizon_color = _doc_base_color.lerp(warm, 0.15 + 0.35 * warmth)
+	else:
+		sky.sky_top_color = Color.from_hsv(base_hue, base_sat, 0.55)
+		sky.sky_horizon_color = Color.from_hsv(lerpf(base_hue, 0.07, warmth), base_sat * 0.6, lerpf(0.95, 0.7, warmth))
+	# Земля: цвет текста <body>, иначе очень тёмный фон документа (см. запрос на визуализацию).
+	if _doc_fg != null:
+		sky.ground_bottom_color = _doc_fg
+	elif _doc_has_base:
+		sky.ground_bottom_color = _doc_base_color.darkened(0.85)
+	else:
+		sky.ground_bottom_color = Color.from_hsv(base_hue, base_sat * 0.5, 0.12)
 	sky.ground_horizon_color = sky.sky_horizon_color.darkened(0.3)
 	sky.sun_angle_max = 12.0
 
@@ -1672,6 +1688,11 @@ func _build_atmosphere(parent: Node3D, root_id: int) -> void:
 	we.environment = env
 	parent.add_child(we)
 
+	# Фон-картинка <body> -> небо-панорама (асинхронно: до прихода текстуры висит цветное небо).
+	var bg_image := str((_space.get("document", {}) as Dictionary).get("bg_image", ""))
+	if bg_image != "" and _image_loader != null:
+		_apply_sky_image(env, bg_image)
+
 	var sun := DirectionalLight3D.new()
 	sun.name = "Sun"
 	sun.rotation = Vector3(-elevation, azimuth, 0.0)
@@ -1679,6 +1700,40 @@ func _build_atmosphere(parent: Node3D, root_id: int) -> void:
 	sun.light_energy = lerpf(0.7, 1.3, sin(elevation))
 	sun.shadow_enabled = true
 	parent.add_child(sun)
+
+
+## Заполняет _doc_base_color/_doc_has_base/_doc_fg из паспорта документа: фон <body>
+## (или, если его нет, средний CSS-фон комнат страницы) -> база неба/палитры; цвет текста
+## <body> -> земля/акценты. Зовётся первой в фазе атмосферы — до раскраски комнат.
+func _resolve_document_palette() -> void:
+	var doc: Dictionary = _space.get("document", {})
+	var bg = _parse_css_color(str(doc.get("bg", "")))
+	if bg == null:
+		var palette := _collect_bg_colors()
+		if not palette.is_empty():
+			var avg := Color(0, 0, 0)
+			for c in palette:
+				avg += c
+			bg = avg / float(palette.size())
+	if bg != null:
+		_doc_base_color = bg
+		_doc_has_base = true
+	_doc_fg = _parse_css_color(str(doc.get("fg", "")))
+
+
+## Подгружает фон-картинку документа и подменяет небо панорамой (равнопрямоугольной
+## текстурой). Асинхронно через image_loader; если мир уже снесён навигацией — молча выходим.
+func _apply_sky_image(env: Environment, src: String) -> void:
+	var url := PageFetcher.resolve_url(src, _base_url)
+	_image_loader.request_image(url, func(tex: Texture2D):
+		if tex == null or not is_instance_valid(_container) or not is_instance_valid(env):
+			return
+		var pano := PanoramaSkyMaterial.new()
+		pano.panorama = tex
+		var sky := Sky.new()
+		sky.sky_material = pano
+		env.sky = sky
+	)
 
 
 func _collect_bg_colors() -> Array:
@@ -1822,22 +1877,60 @@ func _shared_material(color: Color) -> StandardMaterial3D:
 
 
 func _room_color(room: Dictionary, is_connector: bool) -> Color:
+	# Свой CSS-фон контейнера — высший приоритет (стена/карточка автора).
 	var css: Dictionary = room["hints"].get("css", {})
 	if css.has("bg"):
 		var c = _parse_css_color(css["bg"])
 		if c != null:
 			return c
+	# Иначе палитра комнат тянется от тона документа (фон <body>), а не от случайного цвета,
+	# чтобы стены/полы перекликались с цветами страницы. Без цвета документа — старый рандом.
 	if is_connector:
+		if _doc_has_base:
+			return _doc_base_color.darkened(0.4)
 		return Color(0.32, 0.34, 0.4)
 	_rng.seed = _seed + room["id"] * 2654435761
+	if _doc_has_base:
+		var h := fposmod(_doc_base_color.h + (_rng.randf() - 0.5) * 0.1, 1.0)
+		var s := clampf(_doc_base_color.s * 0.7 + 0.05, 0.05, 0.6)
+		var v := clampf(lerpf(0.55, 0.8, _rng.randf()), 0.2, 0.85)
+		return Color.from_hsv(h, s, v)
 	return Color.from_hsv(_rng.randf(), 0.28, 0.7)
 
 
+## CSS-цвет -> Color, или null если не распознан. Поддержка: #hex, имена (Color.from_string),
+## rgb()/rgba() (alpha игнорируем — миру нужен непрозрачный цвет).
 func _parse_css_color(value: String):
 	value = value.strip_edges().to_lower()
-	if Color.html_is_valid(value):
-		return Color.html(value)
-	return null
+	if value == "" or value == "transparent":
+		return null
+	if value.begins_with("rgb"):
+		return _parse_rgb(value)
+	# from_string принимает и #hex, и именованные цвета; sentinel ловит непарсимое.
+	var sentinel := Color(-1.0, -1.0, -1.0, -1.0)
+	var c := Color.from_string(value, sentinel)
+	if c == sentinel:
+		return null
+	return c
+
+
+## rgb(r,g,b) / rgba(r,g,b,a): 0..255 или проценты. Возвращает Color или null.
+func _parse_rgb(value: String):
+	var open := value.find("(")
+	var close := value.find(")", open)
+	if open == -1 or close == -1:
+		return null
+	var parts := value.substr(open + 1, close - open - 1).split(",", false)
+	if parts.size() < 3:
+		return null
+	var ch: Array[float] = []
+	for k in 3:
+		var t := parts[k].strip_edges()
+		if t.ends_with("%"):
+			ch.append(clampf(t.substr(0, t.length() - 1).to_float() / 100.0, 0.0, 1.0))
+		else:
+			ch.append(clampf(t.to_float() / 255.0, 0.0, 1.0))
+	return Color(ch[0], ch[1], ch[2])
 
 
 func _obj_text(obj: Dictionary) -> String:

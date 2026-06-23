@@ -42,6 +42,7 @@ Space {
   rooms: Room[]
   labels: { [anchorId]: roomRef | objectRef }   // цели якорей #id
   typography: { base_px }         // базовый кегль текста страницы (см. §13)
+  document: { bg?, bg_image?, fg? } // визуальный паспорт <body> -> небо/земля/палитра (world-visualization.md)
 }
 
 Room {
