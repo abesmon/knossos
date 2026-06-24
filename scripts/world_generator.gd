@@ -1233,6 +1233,13 @@ func _apply_sky_image(env: Environment, src: String) -> void:
 		pano.panorama = tex
 		var sky := Sky.new()
 		sky.sky_material = pano
+		# Небо завязано на ambient/отражения (env.ambient_light_source = SKY), поэтому смена
+		# sky_material заставляет рендер пересобрать radiance-кубмапу. В gl_compatibility это
+		# идёт синхронно на главном потоке; INCREMENTAL размазывает сборку по кадрам, меньший
+		# radiance_size удешевляет её — чтобы подмена скайбокса не давала просадки кадра на
+		# слабом GPU. Качество неба-фона не страдает (фильтрация нужна только ambient/отражениям).
+		sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
+		sky.radiance_size = Sky.RADIANCE_SIZE_128
 		env.sky = sky
 	)
 

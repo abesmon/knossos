@@ -21,11 +21,20 @@
 ## Как это устроено
 
 ```
-HTTP/FileAccess → байты GIF → ImageLoader._decode (hint=="gif")
-    → ImageLoader._decode_gif → GifDecoder.decode(bytes) → Array[{image, delay}]
-        1 кадр  → ImageTexture            (как обычная статичная картинка)
-        N кадров → AnimatedTexture          (Godot проигрывает сам)
+HTTP/FileAccess → байты GIF → ImageLoader._finish (_is_gif по сигнатуре "GIF")
+    → ImageLoader._deliver_gif_async
+        [фоновый поток] _gif_prepare → GifDecoder.decode(bytes) + ресайз → Array[{image, delay}]
+        [главный поток] _gif_build:
+            1 кадр  → ImageTexture            (как обычная статичная картинка)
+            N кадров → AnimatedTexture          (Godot проигрывает сам)
 ```
+
+**Декод GIF идёт в фоновом потоке** (`WorkerThreadPool`), иначе самописный LZW-декод вешает
+главный поток: реальная гифка 480×270×180 кадров декодится ~9 с — на главном потоке это
+замораживало приложение на все 9 с (ввод не отвечал). Работа с `Image` потокобезопасна, на
+потоке делаем только декод+ресайз; создание текстур (`RenderingServer`) — уже на главном.
+Слот загрузки (`_active`) занят на всё время декода, так что параллельно декодится не больше
+`MAX_CONCURRENT` картинок. См. docs/performance-streaming.md.
 
 `AnimatedTexture` наследует `Texture2D`, поэтому **без единой правки потребителей**
 (`ImagePanel._on_texture`, `vrweb_ext_injector`) встаёт в `albedo_texture` и крутится сам.
@@ -55,13 +64,17 @@ HTTP/FileAccess → байты GIF → ImageLoader._decode (hint=="gif")
 Каждый выходной `Image` — уже самодостаточный полный кадр (снимок холста), его можно отдать
 в текстуру как есть. Без этой композиции «оптимизированные» гифки превращаются в кашу.
 
-### `ImageLoader._decode_gif`
+### `ImageLoader._deliver_gif_async` / `_gif_prepare` / `_gif_build`
 
-- 1 кадр → `ImageTexture` (статичный GIF дёшев, как обычная картинка).
-- N кадров → `AnimatedTexture`: `frames`, по кадру `set_frame_texture` + `set_frame_duration`.
-- Кадры ужимаются до **512 px** по большей стороне (анимация × N кадров — это память,
-  поэтому жёстче обычного потолка 1024 для статичных).
-- `AnimatedTexture` держит максимум **256 кадров** — длинные гифки подрезаются.
+- `_deliver_gif_async` — оркестратор: кидает `_gif_prepare` в `WorkerThreadPool`, ждёт его
+  по кадрам (`await get_tree().process_frame`, не блокируя главный поток), затем `_gif_build`
+  и обычный `_deliver`. Навигация снесла лоадер за время декода → дожидаемся задачу (чтобы не
+  утёк поток) и молча выходим.
+- `_gif_prepare` **[фоновый поток]** — `GifDecoder.decode` + ресайз кадров до **512 px** по
+  большей стороне (анимация × N кадров — это память, жёстче обычного потолка 1024 для
+  статичных). Подрезает до **256 кадров** (потолок `AnimatedTexture`). Только Image-операции.
+- `_gif_build` **[главный поток]** — 1 кадр → `ImageTexture`; N → `AnimatedTexture`
+  (`set_frame_texture` + `set_frame_duration`). Только тут трогаем `RenderingServer`.
 - Пустой/битый поток → `null`, картинка получает заглушку (как и для других форматов).
 
 ## Ограничения
@@ -85,5 +98,7 @@ HTTP/FileAccess → байты GIF → ImageLoader._decode (hint=="gif")
 | `GifDecoder._lzw_decode()` | LZW-распаковка данных кадра в палитровые индексы |
 | `GifDecoder._blit()` / `_clear_rect()` | composition кадра на холст, disposal 2 |
 | `GifDecoder._interlaced_row()` | маппинг строк при чересстрочности |
-| `ImageLoader._decode()` (ветка `gif`) | точка входа: hint==gif → `_decode_gif` |
-| `ImageLoader._decode_gif()` | сборка `ImageTexture` / `AnimatedTexture` из кадров |
+| `ImageLoader._is_gif()` / `_finish()` | распознаёт GIF по сигнатуре, уводит в async-путь |
+| `ImageLoader._deliver_gif_async()` | оркестрация: фоновый декод (WorkerThreadPool) → сборка → `_deliver` |
+| `ImageLoader._gif_prepare()` [поток] | `GifDecoder.decode` + ресайз кадров (потокобезопасно) |
+| `ImageLoader._gif_build()` [главный] | сборка `ImageTexture` / `AnimatedTexture` из кадров |

@@ -11,6 +11,13 @@ extends Node
 
 const MAX_CONCURRENT := 6
 const USER_AGENT := "VRWeb/0.1 (Godot; +knossos)"
+# Размер чанка чтения тела HTTPRequest. Дефолтные 64 КБ при use_threads дают массу итераций
+# потока и режут пропускную способность в разы: при параллельной загрузке нескольких крупных
+# картинок (фон-панорама + спрайты) скачивание 2–3 МБ тянулось ~11 с вместо ~3 с, и небо-
+# панорама (последний крупный ресурс) подменялась с большой задержкой — выглядело как
+# «залипание перед сменой скайбокса». 1 МБ упирает скачивание в скорость сети.
+# См. docs/performance-streaming.md.
+const DOWNLOAD_CHUNK_SIZE := 1 << 20
 
 var _cache: Dictionary = {}     # url -> Texture2D (null = не удалось)
 var _waiters: Dictionary = {}   # url -> Array[Callable], ждут текстуру
@@ -50,6 +57,7 @@ func _start(url: String) -> void:
 	var http := HTTPRequest.new()
 	http.use_threads = true
 	http.accept_gzip = true
+	http.download_chunk_size = DOWNLOAD_CHUNK_SIZE
 	add_child(http)
 	http.request_completed.connect(
 		func(result, code, headers, body): _on_done(url, http, result, code, headers, body)
@@ -61,13 +69,26 @@ func _start(url: String) -> void:
 
 ## Локальный декод за кадр (см. _start). Слот _active занят, пока ждём, поэтому за кадр
 ## декодится не больше MAX_CONCURRENT картинок; _deliver освободит слот и подтянет очередь.
+## Бандл-ресурс (vrwebresource://) в билде лежит импортированным (.ctex), сырых байтов по
+## res://-пути нет — берём готовую текстуру через ResourceLoader. Файл ОС (vrweblocal://) или
+## неимпортированный файл читаем сырыми байтами и декодируем сами (GIF — в фоновом потоке).
 func _start_local(url: String) -> void:
 	if is_inside_tree():
 		await get_tree().process_frame
 		# Навигация снесла мир вместе с лоадером, пока ждали кадр — выходим.
 		if not is_instance_valid(self):
 			return
-	_deliver(url, _load_local(url))
+	var path := PageFetcher.to_file_path(url)
+	if path == "":
+		_deliver(url, null)
+		return
+	if PageFetcher.is_bundle_resource(url) and ResourceLoader.exists(path):
+		_deliver(url, ResourceLoader.load(path) as Texture2D)
+		return
+	if not FileAccess.file_exists(path):
+		_deliver(url, null)
+		return
+	_finish(url, FileAccess.get_file_as_bytes(path), PackedStringArray())
 
 
 func _on_done(url: String, http: HTTPRequest, result: int, code: int,
@@ -77,27 +98,23 @@ func _on_done(url: String, http: HTTPRequest, result: int, code: int,
 	_finish(url, body if ok else PackedByteArray(), headers)
 
 
-## Локальная картинка -> текстура. Бандл-ресурс (vrwebresource://) в билде лежит
-## импортированным (.ctex), сырых байтов по res://-пути нет — берём готовую текстуру через
-## ResourceLoader (он следует import-ремапу). Файл ОС (vrweblocal://) или неимпортированный
-## файл читаем сырыми байтами через FileAccess и декодируем сами.
-func _load_local(url: String) -> Texture2D:
-	var path := PageFetcher.to_file_path(url)
-	if path == "":
-		return null
-	if PageFetcher.is_bundle_resource(url) and ResourceLoader.exists(path):
-		return ResourceLoader.load(path) as Texture2D
-	if FileAccess.file_exists(path):
-		return _decode(url, FileAccess.get_file_as_bytes(path), PackedStringArray())
-	return null
-
-
-## Хвост сетевой загрузки: декодирует байты (пустые -> заглушка) и отдаёт текстуру дальше.
+## Декодирует байты и отдаёт текстуру дальше. GIF (распознаём по сигнатуре) уносим в фоновый
+## поток — его самописный LZW-декод тяжёлый (сотни кадров -> секунды) и на главном потоке
+## морозит приложение; _deliver_gif_async сам позовёт _deliver по готовности. Прочее декодим
+## синхронно (быстро) прямо здесь.
 func _finish(url: String, body: PackedByteArray, headers: PackedStringArray) -> void:
-	var tex: Texture2D = null
-	if not body.is_empty():
-		tex = _decode(url, body, headers)
-	_deliver(url, tex)
+	if body.is_empty():
+		_deliver(url, null)
+		return
+	if _is_gif(body):
+		_deliver_gif_async(url, body)
+		return
+	_deliver(url, _decode(url, body, headers))
+
+
+## true, если байты начинаются с сигнатуры GIF ("GIF87a"/"GIF89a" -> первые три "GIF").
+static func _is_gif(body: PackedByteArray) -> bool:
+	return body.size() >= 3 and body[0] == 0x47 and body[1] == 0x49 and body[2] == 0x46
 
 
 ## Кэширует готовую текстуру, будит ожидающих и подкручивает очередь. Освобождает один
@@ -133,10 +150,6 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 		if _jpeg_unsupported(body):
 			return null
 		err = img.load_jpg_from_buffer(body)
-	elif hint.contains("gif"):
-		# В Godot нет встроенного декодера GIF — декодируем сами и для многокадровых
-		# отдаём самопроигрывающийся AnimatedTexture. См. docs/gif-support.md.
-		return _decode_gif(body)
 	elif hint.contains("webp"):
 		err = img.load_webp_from_buffer(body)
 	elif hint.contains("svg") and img.has_method("load_svg_from_buffer"):
@@ -156,14 +169,31 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 	return ImageTexture.create_from_image(img)
 
 
-## Декодирует GIF в текстуру. Один кадр -> обычный ImageTexture (дёшево, как статичная
-## картинка). Несколько -> AnimatedTexture, который Godot проигрывает сам и который, будучи
-## Texture2D, без правок встаёт в albedo_texture у потребителей. См. docs/gif-support.md.
-## Кадры ужимаем сильнее обычного (анимация * N кадров — это память).
-func _decode_gif(body: PackedByteArray) -> Texture2D:
+## Декод GIF без фриза: тяжёлую часть (самописный LZW-декод + ресайз кадров, потокобезопасная
+## работа с Image) уносим в WorkerThreadPool, а на главном потоке держим только сборку текстур
+## (RenderingServer). Слот _active занят на всё время, поэтому параллельно декодится не больше
+## MAX_CONCURRENT картинок; по готовности — обычный _deliver. Навигация снесла лоадер, пока
+## ждали поток -> молча выходим (дождавшись задачу, чтобы не утёк поток). См. docs/gif-support.md.
+func _deliver_gif_async(url: String, body: PackedByteArray) -> void:
+	var holder: Array = []  # потокобезопасно: поток дописывает, главный читает после ожидания
+	var task := WorkerThreadPool.add_task(func(): holder.append(_gif_prepare(body)))
+	while not WorkerThreadPool.is_task_completed(task):
+		await get_tree().process_frame
+		if not is_instance_valid(self):
+			WorkerThreadPool.wait_for_task_completion(task)
+			return
+	WorkerThreadPool.wait_for_task_completion(task)
+	var prep: Array = holder[0] if not holder.is_empty() else []
+	_deliver(url, _gif_build(prep))
+
+
+## [Фоновый поток] GIF-байты -> массив подготовленных кадров [{image: Image, delay: float}],
+## уже ужатых (анимация * N кадров — это память, режем сильнее статики до 512). Только Image-
+## операции, без RenderingServer — безопасно вне главного потока. См. _deliver_gif_async.
+static func _gif_prepare(body: PackedByteArray) -> Array:
 	var frames := GifDecoder.decode(body)
 	if frames.is_empty():
-		return null
+		return []
 
 	var first: Image = frames[0]["image"]
 	var w := first.get_width()
@@ -175,23 +205,35 @@ func _decode_gif(body: PackedByteArray) -> Texture2D:
 	var dst_w := maxi(1, int(w * scale))
 	var dst_h := maxi(1, int(h * scale))
 
-	if frames.size() == 1:
-		if scale < 1.0:
-			first.resize(dst_w, dst_h, Image.INTERPOLATE_BILINEAR)
-		first.generate_mipmaps()
-		return ImageTexture.create_from_image(first)
-
-	# AnimatedTexture держит максимум 256 кадров — длинные гифки подрезаем.
-	var count := mini(frames.size(), 256)
-	var anim := AnimatedTexture.new()
-	anim.frames = count
-	anim.one_shot = false
+	# AnimatedTexture держит максимум 256 кадров — длинные гифки подрезаем (один кадр оставляем
+	# как есть). Ресайз и mipmap'ы (для статики) — здесь, на потоке.
+	var count := 1 if frames.size() == 1 else mini(frames.size(), 256)
+	var out: Array = []
 	for i in range(count):
 		var fimg: Image = frames[i]["image"]
 		if scale < 1.0:
 			fimg.resize(dst_w, dst_h, Image.INTERPOLATE_BILINEAR)
-		anim.set_frame_texture(i, ImageTexture.create_from_image(fimg))
-		anim.set_frame_duration(i, frames[i]["delay"])
+		if frames.size() == 1:
+			fimg.generate_mipmaps()
+		out.append({"image": fimg, "delay": float(frames[i]["delay"])})
+	return out
+
+
+## [Главный поток] Подготовленные кадры -> текстура. Один кадр -> обычный ImageTexture (дёшево,
+## как статичная картинка). Несколько -> самопроигрывающийся AnimatedTexture, который, будучи
+## Texture2D, без правок встаёт в albedo_texture у потребителей. См. _deliver_gif_async.
+func _gif_build(prep: Array) -> Texture2D:
+	if prep.is_empty():
+		return null
+	if prep.size() == 1:
+		return ImageTexture.create_from_image(prep[0]["image"])
+
+	var anim := AnimatedTexture.new()
+	anim.frames = prep.size()
+	anim.one_shot = false
+	for i in range(prep.size()):
+		anim.set_frame_texture(i, ImageTexture.create_from_image(prep[i]["image"]))
+		anim.set_frame_duration(i, prep[i]["delay"])
 	return anim
 
 
