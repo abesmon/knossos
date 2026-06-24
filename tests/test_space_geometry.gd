@@ -116,7 +116,70 @@ func _check_case(name: String) -> void:
 	_expect(name, "входы у комнат (вне unrouted)", no_entrance.size() <= unrouted,
 		"без входа: %s, unrouted=%d" % [str(no_entrance), unrouted])
 
-	# 4. Спавн над клеткой пола.
+	# 4. У коридоров есть стены на открытых краях (не к комнате/коридору), и проходы в комнаты
+	#    остаются открытыми (на клетку-комнату стену коридор не ставит).
+	var expected_walls := 0
+	for cell in _gen._corr_cells:
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var nb: Vector2i = cell + d
+			if not _gen._corr_cells.has(nb) and not _gen._room_occ.has(nb):
+				expected_walls += 1
+	var corr_bodies := 0
+	for child in _holder.get_child(0).get_children():
+		if str(child.name).begins_with("Room_") or not (child is Node3D):
+			continue
+		corr_bodies += _count_bodies(child)
+	# corr_bodies = пол (1) + стены на каждую коридорную клетку.
+	var corr_walls: int = corr_bodies - int(_gen._corr_cells.size())
+	_expect(name, "стены у дорожек", corr_walls == expected_walls,
+		"стен=%d ожидалось=%d" % [corr_walls, expected_walls])
+
+	# 4b. Слоты объектов вдоль дорожек: внутри футпринта, без дублей, есть для комнат с объектами.
+	var bad_slots := 0
+	var empty_with_objs := 0
+	for id in rooms:
+		if rooms[id].get("objects", []).is_empty():
+			continue
+		var slots: Array = _gen._object_slots(id)
+		if slots.is_empty():
+			slots = _gen._fallback_slots(id)
+		var seen := {}
+		for s in slots:
+			var sc: Vector2i = s["cell"]
+			if not owner.has(sc) or seen.has(sc):
+				bad_slots += 1
+			seen[sc] = true
+		if slots.is_empty():
+			empty_with_objs += 1
+	_expect(name, "слоты в футпринте, без дублей", bad_slots == 0, "плохих слотов: %d" % bad_slots)
+	_expect(name, "слоты есть у комнат с объектами", empty_with_objs == 0,
+		"комнат без слотов: %d" % empty_with_objs)
+
+	# 4c. Объекты не перекрывают проходы: ни один слот не стоит на клетке-двери и не притянут
+	#     к ребру-двери.
+	var blocking := 0
+	for id in rooms:
+		var dcells: Dictionary = _gen._door_cells.get(id, {})
+		var dedges: Dictionary = _gen._door_edges.get(id, {})
+		var slots: Array = _gen._object_slots(id)
+		if slots.is_empty():
+			slots = _gen._fallback_slots(id)
+		for s in slots:
+			var sc: Vector2i = s["cell"]
+			var pull: Vector2i = s["pull"]
+			if dcells.has(sc):
+				blocking += 1
+				continue
+			# Стена со стороны притяжения (и ±1 клетка вдоль неё) не должна нести двери —
+			# иначе объект встанет в проёме или нависнет над ним.
+			var along := Vector2i(pull.y, -pull.x)
+			for k in [-1, 0, 1]:
+				var wc: Vector2i = sc + along * k
+				if dedges.has("%d,%d:%d,%d" % [wc.x, wc.y, pull.x, pull.y]):
+					blocking += 1
+	_expect(name, "объекты не перекрывают проходы", blocking == 0, "перекрытий: %d" % blocking)
+
+	# 5. Спавн над клеткой пола.
 	var sp: Vector3 = _gen.spawn_point
 	var cell := Vector2i(int(floor((sp.x - _gen._shift.x) / WorldGenerator.GRID)),
 		int(floor((sp.z - _gen._shift.z) / WorldGenerator.GRID)))

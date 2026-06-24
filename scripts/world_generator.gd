@@ -34,10 +34,10 @@ const GRID := 3.0               # размер клетки сетки SpaceLayo
 const WALL_HEIGHT := 3.2        # минимальная высота стен, м
 const WALL_THICK := 0.15        # тонкая стена, сдвинутая внутрь комнаты на полтолщины (см. _add_wall_run): у вплотную стоящих комнат стены стыкуются грань-в-грань, без z-fight
 
-# --- Расстановка объектов по стенам ---
-const OBJECT_INSET := 1.2       # отступ объекта от своей стены внутрь комнаты, м
-const CORNER_MARGIN := 1.0      # отступ крайних объектов от углов вдоль стены, м
-const OBJECT_GAP := 0.6         # зазор между соседними панелями вдоль стены, м
+# --- Расстановка объектов вдоль дорожек ---
+const OBJECT_GAP := 0.6         # зазор между объектами в стопке (друг над другом), м
+const PULL_INSET := 0.3         # на сколько центр притянутого объекта отстоит от края клетки, м
+                                # (объект прижат к краю/стене и смотрит на центр клетки = на дорогу)
 const HEAD_CLEARANCE := 0.8     # запас над самым высоким объектом до верха стены, м
 const EYE_LEVEL := 1.6          # высота центра текстовых/картиночных панелей, м (= высота камеры игрока)
 const PANEL_FLOOR_GAP := 0.3    # минимальный зазор от низа высокой панели до пола, м
@@ -88,7 +88,9 @@ var _object_room: Dictionary = {} # objectId -> roomId
 var _layout: Dictionary = {}      # сырой результат SpaceLayout.build
 var _foot: Dictionary = {}        # roomId -> { Vector2i (абс. клетка) -> true }: футпринт-множество
 var _foot_cells: Dictionary = {}  # roomId -> Array[Vector2i] (абс): для построения полов
+var _room_occ: Dictionary = {}    # Vector2i (абс) -> true: все клетки, занятые комнатами
 var _door_edges: Dictionary = {}  # roomId -> { edge_key -> true }: рёбра-двери (проёмы в стенах)
+var _door_cells: Dictionary = {}  # roomId -> { Vector2i -> true }: клетки-двери (держим их и проходы свободными от объектов)
 var _corr_cells: Dictionary = {}  # Vector2i (абс) -> true: клетки полов-коридоров
 var _room_entrance: Dictionary = {} # roomId -> {cell:Vector2i, dir:Vector2i}: проём-вход от родителя
 var _positions: Dictionary = {}   # roomId -> Vector3 (центр футпринта в мире)
@@ -379,9 +381,11 @@ func _consume_layout() -> void:
 			var a: Vector2i = c + pos
 			cell_set[a] = true
 			cell_arr.append(a)
+			_room_occ[a] = true
 		_foot[id] = cell_set
 		_foot_cells[id] = cell_arr
 		_door_edges[id] = {}
+		_door_cells[id] = {}
 
 	# Двери и полы-коридоры из связей родитель→ребёнок. Путь связи: [клетка_родителя, ...,
 	# клетка_ребёнка]; концы лежат в комнатах (там проёмы-двери), середина — свободные клетки
@@ -395,10 +399,12 @@ func _consume_layout() -> void:
 		var d_from: Vector2i = path[1] - path[0]
 		if _door_edges.has(f) and _is_unit(d_from):
 			_door_edges[f][_edge_key(path[0], d_from)] = true
+			_door_cells[f][path[0]] = true
 		var last: int = path.size() - 1
 		var d_to: Vector2i = path[last - 1] - path[last]
 		if _door_edges.has(t) and _is_unit(d_to):
 			_door_edges[t][_edge_key(path[last], d_to)] = true
+			_door_cells[t][path[last]] = true
 			_room_entrance[t] = {"cell": path[last], "dir": d_to}
 		for i in range(1, last):
 			_corr_cells[path[i]] = true
@@ -499,14 +505,14 @@ func _build_room(id: int, parent: Node3D, on_transition: Callable) -> void:
 	# заголовок остаётся настенной табличкой, как обычный объект.
 	var title_obj = _room_title_object(id)
 	var titled: bool = title_obj != null and _build_room_title(holder, id, title_obj)
-	_place_objects(room, holder, on_transition, runs, title_obj if titled else null)
+	_place_objects(room, holder, on_transition, id, title_obj if titled else null)
 
 
 ## Стены комнаты как набор прямых ПРОБЕГОВ по периметру футпринта. Граничное ребро — это
 ## грань клетки футпринта, у которой снаружи нет клетки той же комнаты. Рёбра-двери (там, где
 ## связь пробивает стену) исключаются — на их месте проём. Смежные коллинеарные граничные
-## рёбра склеиваются в один пробег (одна длинная стена и площадка под расстановку объектов).
-## Возвращает список пробегов {key, kind, wall_fixed, inner, along_lo, along_hi, yaw, flip, order}.
+## рёбра склеиваются в один пробег (одна длинная стена). Возвращает список пробегов
+## {kind, wall_fixed, along_lo, along_hi} (объекты теперь стоят вдоль дорожек, а не по стенам).
 func _wall_runs(id: int) -> Array:
 	var foot: Dictionary = _foot[id]
 	var doors: Dictionary = _door_edges.get(id, {})
@@ -547,47 +553,23 @@ func _wall_runs(id: int) -> Array:
 ## клеток вдоль стены. Стена сдвинута внутрь комнаты на полтолщины (внешняя грань на границе
 ## клетки) — у вплотную стоящих комнат стены стыкуются грань-в-грань, без дырок и z-fight.
 func _make_run(key: String, fixed: int, a: int, b: int) -> Dictionary:
-	var run := {"key": key, "flip": false}
 	match key:
 		"px":
 			var outer_x := _cell_world(fixed + 1, 0).x
-			run["kind"] = "x"
-			run["wall_fixed"] = outer_x - WALL_THICK * 0.5
-			run["inner"] = outer_x - OBJECT_INSET
-			run["along_lo"] = _cell_world(0, a).z
-			run["along_hi"] = _cell_world(0, b + 1).z
-			run["yaw"] = -PI * 0.5
-			run["order"] = 1
+			return {"kind": "x", "wall_fixed": outer_x - WALL_THICK * 0.5,
+				"along_lo": _cell_world(0, a).z, "along_hi": _cell_world(0, b + 1).z}
 		"nx":
 			var ox := _cell_world(fixed, 0).x
-			run["kind"] = "x"
-			run["wall_fixed"] = ox + WALL_THICK * 0.5
-			run["inner"] = ox + OBJECT_INSET
-			run["along_lo"] = _cell_world(0, a).z
-			run["along_hi"] = _cell_world(0, b + 1).z
-			run["yaw"] = PI * 0.5
-			run["flip"] = true
-			run["order"] = 3
+			return {"kind": "x", "wall_fixed": ox + WALL_THICK * 0.5,
+				"along_lo": _cell_world(0, a).z, "along_hi": _cell_world(0, b + 1).z}
 		"pz":
 			var outer_z := _cell_world(0, fixed + 1).z
-			run["kind"] = "z"
-			run["wall_fixed"] = outer_z - WALL_THICK * 0.5
-			run["inner"] = outer_z - OBJECT_INSET
-			run["along_lo"] = _cell_world(a, 0).x
-			run["along_hi"] = _cell_world(b + 1, 0).x
-			run["yaw"] = PI
-			run["flip"] = true
-			run["order"] = 2
+			return {"kind": "z", "wall_fixed": outer_z - WALL_THICK * 0.5,
+				"along_lo": _cell_world(a, 0).x, "along_hi": _cell_world(b + 1, 0).x}
 		_:  # nz
 			var oz := _cell_world(0, fixed).z
-			run["kind"] = "z"
-			run["wall_fixed"] = oz + WALL_THICK * 0.5
-			run["inner"] = oz + OBJECT_INSET
-			run["along_lo"] = _cell_world(a, 0).x
-			run["along_hi"] = _cell_world(b + 1, 0).x
-			run["yaw"] = 0.0
-			run["order"] = 0
-	return run
+			return {"kind": "z", "wall_fixed": oz + WALL_THICK * 0.5,
+				"along_lo": _cell_world(a, 0).x, "along_hi": _cell_world(b + 1, 0).x}
 
 
 func _add_wall_run(holder: Node3D, r: Dictionary, h: float, color: Color) -> void:
@@ -603,77 +585,195 @@ func _add_wall_run(holder: Node3D, r: Dictionary, h: float, color: Color) -> voi
 		_add_box(holder, Vector3(length, h, WALL_THICK), Vector3(center, h * 0.5, r["wall_fixed"]), color, true)
 
 
-## Расставляет объекты по стенам в порядке чтения: пробеги стен обходятся по часовой стрелке
-## (order: север nz → восток px → юг pz → запад nx), внутри пробега — слева направо для
-## зрителя в комнате (у flip-стен «лево» — высокий конец координаты). Курсор двигается на
-## ширину объекта + зазор; не влез в остаток пробега — переходим к следующему.
-func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, runs: Array, skip_obj = null) -> void:
-	var objs: Array = room["objects"]
-	if objs.is_empty():
-		return
-	var ordered: Array = runs.duplicate()
-	ordered.sort_custom(func(p, q):
-		if p["order"] != q["order"]:
-			return p["order"] < q["order"]
-		return p["along_lo"] < q["along_lo"])
-
-	var spans: Array = []
-	for r in ordered:
-		var lo: float = r["along_lo"] + CORNER_MARGIN
-		var hi: float = r["along_hi"] - CORNER_MARGIN
-		if hi - lo < 0.6:
-			continue
-		spans.append({"r": r, "base_t": (hi if r["flip"] else lo),
-			"sign_u": (-1.0 if r["flip"] else 1.0), "length": hi - lo, "cursor": 0.0})
-	if spans.is_empty():
-		return
-
-	var si := 0
-	for obj in objs:
-		# Заголовок, ушедший вывеской над входом, на стене не дублируем.
+## Расставляет объекты ВДОЛЬ ВНУТРЕННИХ ДОРОЖЕК комнаты (маршруты `routes` из SpaceLayout),
+## лицом к дорожке, от входа (проёма от родителя) по часовой стрелке. Слоты считаются заранее
+## (`_object_slots`): для каждой клетки дорожки — клетка ПО ЛЕВУЮ РУКУ (рядом, не на дорожке),
+## а если она занята/недоступна — сама клетка дорожки. Объекты раскидываются по N слотам;
+## если объектов больше слотов — лишние ставятся СТОПКОЙ (друг над другом) в передних слотах:
+## слот i получает `base+(1 если i<rem)` объектов, base=M/N, rem=M%N (первый объект группы — сверху).
+func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, id: int, skip_obj = null) -> void:
+	var objs: Array = []
+	for obj in room["objects"]:
+		# Заголовок, ушедший вывеской над входом, среди объектов не дублируем.
 		if skip_obj != null and obj["id"] == skip_obj["id"]:
 			continue
-		var w: float = _object_size[obj["id"]].x
-		while si < spans.size() and spans[si]["cursor"] + w > spans[si]["length"] + 0.001:
-			si += 1
-		if si >= spans.size():
-			si = spans.size() - 1
-		var span: Dictionary = spans[si]
-		var u: float = span["cursor"] + w * 0.5
-		span["cursor"] = span["cursor"] + w + OBJECT_GAP
-		var local_pos := _span_pos(span["r"], span["base_t"] + span["sign_u"] * u)
+		objs.append(obj)
+	if objs.is_empty():
+		return
+
+	var slots := _object_slots(id)
+	if slots.is_empty():
+		slots = _fallback_slots(id)
+	if slots.is_empty():
+		return
+
+	var n := slots.size()
+	var m := objs.size()
+	@warning_ignore("integer_division")
+	var base: int = m / n
+	var rem: int = m % n
+	var oi := 0
+	for i in n:
+		var count: int = base + (1 if i < rem else 0)
+		if count == 0:
+			continue
+		_place_stack(objs.slice(oi, oi + count), slots[i], holder, on_transition)
+		oi += count
+
+
+## Ставит группу объ­ектов в один слот: один объект — на уровне глаз (как обычно), несколько —
+## СТОПКОЙ снизу вверх (первый в группе — самый верхний). Объект ПРИТЯНУТ к краю клетки в сторону
+## `pull` (к стене/прочь от дороги) и смотрит на центр клетки = на дорогу (yaw из face = -pull).
+## Подъём по Y задаётся через y координаты local_pos — сами панели поднимают геометрию от своего
+## узла, поэтому стопка растёт вверх от уровня глаз без правок классов панелей.
+func _place_stack(group: Array, slot: Dictionary, holder: Node3D, on_transition: Callable) -> void:
+	var cell: Vector2i = slot["cell"]
+	var pull: Vector2i = slot["pull"]
+	var face := -pull
+	var yaw := atan2(float(face.x), float(face.y))
+	var pull_off := Vector3(pull.x, 0.0, pull.y) * (GRID * 0.5 - PULL_INSET)
+	var base_world := _cell_world(cell.x + 0.5, cell.y + 0.5) + pull_off
+
+	if group.size() == 1:
+		var obj: Dictionary = group[0]
 		if obj["id"] == _first_obj_id:
-			_record_spawn(span["r"], local_pos, span["length"])
-		_build_object(obj, holder, local_pos, span["r"]["yaw"], on_transition)
+			_record_spawn(base_world, face)
+		_build_object(obj, holder, base_world, yaw, on_transition)
+		return
+
+	# Снизу вверх: последний объект группы — низ (на уровне глаз), первый — верх.
+	var y := 0.0
+	var prev_half := 0.0
+	for k in group.size():
+		var obj: Dictionary = group[group.size() - 1 - k]
+		var oh: float = _object_size.get(obj["id"], Vector2(PANEL_WIDTH_M, 1.0)).y
+		if k > 0:
+			y += prev_half + oh * 0.5 + OBJECT_GAP
+		prev_half = oh * 0.5
+		if obj["id"] == _first_obj_id:
+			_record_spawn(base_world + Vector3(0, y, 0), face)
+		_build_object(obj, holder, base_world + Vector3(0, y, 0), yaw, on_transition)
 
 
-## Мировая точка на внутренней грани стены пробега r по координате t вдоль стены (y=0).
-func _span_pos(r: Dictionary, t: float) -> Vector3:
-	if r["kind"] == "x":
-		return Vector3(r["inner"], 0.0, t)
-	return Vector3(t, 0.0, r["inner"])
+## Слоты под объекты вдоль дорожек комнаты. Обходим маршруты `routes` (от входа, по часовой
+## стрелке); для каждой клетки дорожки смотрим ПО ЛЕВУЮ РУКУ относительно направления движения.
+## Объект всегда притянут к краю клетки в сторону `left` (прочь от дороги / к стене) и смотрит
+## назад на дорогу. Выбор клетки:
+##  - клетка слева в комнате, не на дорожке и свободна — ставим объект В НЕЁ, притянув к её
+##    дальнему краю (рядом с дорогой, но через клетку — «по левую руку»);
+##  - иначе — на саму клетку дорожки, притянув к её левому краю (там обычно стена ⇒ «висит на
+##    стене, смотрит на дорогу», не загораживая центр дороги).
+## Каждая клетка — под слот не больше раза. Слот несёт клетку и направление притяжения `pull`.
+func _object_slots(id: int) -> Array:
+	var rd: Dictionary = _layout.get("rooms", {}).get(id, {})
+	var routes: Array = rd.get("routes", [])
+	if routes.is_empty():
+		return []
+	var foot: Dictionary = _foot[id]
+	var door_cells: Dictionary = _door_cells.get(id, {})
+	var path_set := {}
+	for path in routes:
+		for c in path:
+			path_set[c] = true
+
+	var used := {}
+	var slots: Array = []
+	for path in _order_routes_clockwise(routes):
+		for i in path.size():
+			var c: Vector2i = path[i]
+			var d := _walk_dir(path, i)
+			var left := Vector2i(d.y, -d.x)   # по левую руку относительно направления движения
+			var cand: Vector2i = c + left
+			# Объект НИКОГДА не должен перекрывать проход: не ставим его на клетку-дверь и не
+			# притягиваем к стене у двери (даже широкая панель не нависает над проёмом, см. _wall_clear).
+			if (foot.has(cand) and not path_set.has(cand) and not used.has(cand)
+					and not door_cells.has(cand) and _wall_clear(id, cand, left)):
+				used[cand] = true
+				slots.append({"cell": cand, "pull": left})   # в клетке слева, притянут к её дальнему краю
+			elif not used.has(c) and not door_cells.has(c) and _wall_clear(id, c, left):
+				used[c] = true
+				slots.append({"cell": c, "pull": left})       # на дорожке, притянут к левой стене
+	return slots
 
 
-## Запоминает геометрию первого объекта для спавна: его мир-позицию, направление внутрь
-## комнаты от его стены и потолок отступа (чтобы спавн не вылез за противоположную стену).
-func _record_spawn(r: Dictionary, world_pos: Vector3, span_len: float) -> void:
+## Свободна ли стена (сторона `pull` клетки `cell`) от дверей — у самой клетки и у соседних вдоль
+## стены (±1): тогда даже широкая панель (до ~2 клеток в обе стороны) не нависнет над проёмом.
+func _wall_clear(id: int, cell: Vector2i, pull: Vector2i) -> bool:
+	var doors: Dictionary = _door_edges.get(id, {})
+	var along := Vector2i(pull.y, -pull.x)   # вдоль стены (перпендикулярно притяжению)
+	for k in [-1, 0, 1]:
+		if doors.has(_edge_key(cell + along * k, pull)):
+			return false
+	return true
+
+
+## Направление движения вдоль пути в клетке i (к следующей; для последней — от предыдущей).
+func _walk_dir(path: Array, i: int) -> Vector2i:
+	if i + 1 < path.size():
+		return path[i + 1] - path[i]
+	if i > 0:
+		return path[i] - path[i - 1]
+	return Vector2i(0, 1)
+
+
+## Маршруты в порядке обхода по часовой стрелке — по углу первого шага (север -Z = 0, далее по часовой).
+func _order_routes_clockwise(routes: Array) -> Array:
+	var arr: Array = routes.duplicate()
+	arr.sort_custom(func(a, b): return _route_angle(a) < _route_angle(b))
+	return arr
+
+
+func _route_angle(path: Array) -> float:
+	if path.size() < 2:
+		return 0.0
+	var d: Vector2i = path[1] - path[0]
+	return fposmod(atan2(float(d.x), -float(d.y)), TAU)
+
+
+## Запасные слоты, если у комнаты нет маршрутов: по клеткам футпринта (кроме клеток-дверей),
+## притянуты к внешнему краю (прочь от центра) и лицом к центру; притяжение к ребру-двери не
+## допускается (объект не должен перекрывать проход).
+func _fallback_slots(id: int) -> Array:
+	var center := Vector2.ZERO
+	var cells: Array = _foot_cells[id]
+	for c in cells:
+		center += Vector2(c)
+	if cells.is_empty():
+		return []
+	center /= float(cells.size())
+	var door_cells: Dictionary = _door_cells.get(id, {})
+	var slots: Array = []
+	for c in cells:
+		if door_cells.has(c):
+			continue
+		slots.append({"cell": c, "pull": _pick_pull(id, c, _dominant_dir(Vector2(c) - center))})
+	return slots
+
+
+## Подбирает направление притяжения для клетки: предпочтительное `prefer`, иначе поворот, лишь бы
+## стена со стороны притяжения была свободна от дверей (объект не перекрывает проход и не нависает
+## над ним). Порядок: prefer, его лево, право, назад.
+func _pick_pull(id: int, cell: Vector2i, prefer: Vector2i) -> Vector2i:
+	for p in [prefer, Vector2i(prefer.y, -prefer.x), Vector2i(-prefer.y, prefer.x), -prefer]:
+		if _wall_clear(id, cell, p):
+			return p
+	return prefer
+
+
+## Доминантное единичное направление к delta (большая ось); по умолчанию +Z.
+func _dominant_dir(delta: Vector2) -> Vector2i:
+	if absf(delta.x) >= absf(delta.y):
+		return Vector2i(signi(int(signf(delta.x))), 0) if delta.x != 0.0 else Vector2i(0, 1)
+	return Vector2i(0, signi(int(signf(delta.y))))
+
+
+## Запоминает первый объект для спавна: его мир-позицию и направление, в которое он смотрит
+## (там встаёт игрок и смотрит на объект).
+func _record_spawn(world_pos: Vector3, face: Vector2i) -> void:
 	_spawn_obj_world = world_pos
-	_spawn_inward = _wall_inward(r["key"])
-	_spawn_max_d = maxf(1.4, span_len - OBJECT_INSET)
+	_spawn_inward = Vector3(face.x, 0.0, face.y)
+	_spawn_max_d = 3.0
 	_has_spawn_obj = true
-
-
-## Направление от стороны key внутрь комнаты (противоположно наружной нормали стены).
-func _wall_inward(key: String) -> Vector3:
-	match key:
-		"px":
-			return Vector3(-1, 0, 0)
-		"nx":
-			return Vector3(1, 0, 0)
-		"pz":
-			return Vector3(0, 0, -1)
-		_:  # nz
-			return Vector3(0, 0, 1)
 
 
 ## Объект-заголовок секции = первый объект комнаты типа "heading" (см. TopologyBuilder:
@@ -774,13 +874,34 @@ func _record_title_spawn(door_world: Vector3, inward: Vector3, reach: float) -> 
 	_spawn_done = true
 
 
-## Полы коридоров — по одному GRID-квадрату на коридорную клетку.
+## Полы и стены коридоров — по одному GRID-квадрату на коридорную клетку. Стена ставится на
+## ту сторону клетки, где НЕТ ни другой коридорной клетки (улица продолжается), ни комнаты
+## (там стена/дверь самой комнаты) — то есть на открытый край дорожки. Так дорожки больше не
+## висят без стен, а проходы в комнаты (через дверь-клетку комнаты) остаются открытыми.
 func _build_corridor_floors(parent: Node3D) -> void:
+	var floor_color := Color(0.3, 0.3, 0.33)
+	var wall_color := floor_color.lightened(0.1)
 	for cell in _corr_cells.keys():
 		var holder := Node3D.new()
 		holder.position = _cell_world(cell.x + 0.5, cell.y + 0.5)
 		parent.add_child(holder)
-		_add_box(holder, Vector3(GRID, 0.4, GRID), Vector3(0, -0.2, 0), Color(0.3, 0.3, 0.33), true)
+		_add_box(holder, Vector3(GRID, 0.4, GRID), Vector3(0, -0.2, 0), floor_color, true)
+		for d in _dirs:
+			var nb: Vector2i = cell + d
+			if _corr_cells.has(nb) or _room_occ.has(nb):
+				continue   # дорожка продолжается / у комнаты своя стена с дверью — стену не ставим
+			_add_corr_wall(holder, d, wall_color)
+
+
+## Стена коридора на стороне d клетки (holder в центре клетки). Сдвинута внутрь на полтолщины:
+## внешняя грань ложится на границу клетки, как у стен комнат.
+func _add_corr_wall(holder: Node3D, d: Vector2i, color: Color) -> void:
+	var half := GRID * 0.5
+	var off := half - WALL_THICK * 0.5
+	if d.x != 0:
+		_add_box(holder, Vector3(WALL_THICK, WALL_HEIGHT, GRID), Vector3(d.x * off, WALL_HEIGHT * 0.5, 0), color, true)
+	else:
+		_add_box(holder, Vector3(GRID, WALL_HEIGHT, WALL_THICK), Vector3(0, WALL_HEIGHT * 0.5, d.y * off), color, true)
 
 
 # --- Объекты комнаты ---
