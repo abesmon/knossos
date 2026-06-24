@@ -1,21 +1,20 @@
 class_name WorldGenerator
 extends RefCounted
 
-## Фаза геометрии (F) из docs/html-to-3d-topology.md. Потребляет ТОЛЬКО артефакт
-## топологии (Dictionary) + seed и сочиняет конкретное навигируемое пространство.
+## Фаза геометрии (F) из docs/html-to-3d-topology.md. Превращает раскладку ЕДИНОГО генератора
+## пространства (SpaceLayout) в реальное навигируемое 3D-пространство, по которому ходит игрок.
 ##
-## Раскладка v3 — «кварталы на сетке». Вся геометрия живёт в целочисленных клетках сетки
-## GRID, поэтому КАЖДАЯ стена ложится на линию сетки (единое выравнивание). Поддеревья
-## пакуются прямоугольниками с «улицами»-зазорами между блоками (кластеризация + компактность);
-## коридоры маршрутизируются ортогонально по улицам, не заходя в комнаты и не пересекаясь.
+## Раскладку (формы комнат из пентамино, их позиции на сетке клеток и коридоры-дорожки)
+## целиком считает SpaceLayout — тот же генератор, что кормит отладочный вид сверху
+## (scenes/geometry_top_view.gd). WorldGenerator его НЕ дублирует: он только строит геометрию
+## из готовых клеточных футпринтов.
 ##
 ## Фазы:
 ##   1. замер объектов     -> футпринт каждой настенной панели (_object_size)
-##   2. размер комнаты      -> сторона под объекты, снапнутая к клеткам (_room_cells/_room_size)
-##   3. упаковка блоками     -> комнаты на единой сетке, кластерами (_room_cell, _positions)
-##   4. роутинг коридоров    -> ортогональные пути по улицам, проёмы в стенах (_room_openings)
-##   5. геометрия            -> полы/стены-с-проёмами/объекты/коридоры
-## Случайность — только в цветах/атмосфере (_rng от seed); раскладка детерминирована.
+##   2. раскладка           -> SpaceLayout: клетки комнат, двери, коридоры (_consume_layout)
+##   3. геометрия           -> полы по клеткам, стены по периметру футпринта с проёмами-дверьми,
+##                             полы-коридоры, объекты по стенам (_build_room)
+## Случайность — только в цветах/атмосфере (_rng от seed); раскладка детерминирована (seed → SpaceLayout).
 
 ## Геометрия комнат строится не за один кадр, а порциями (тайм-слайс), чтобы тяжёлая
 ## страница (сотни узлов) не вешала главный поток. Сигнал — когда весь мир достроен
@@ -31,40 +30,15 @@ const RICH_PANEL_SCENE := preload("res://actors/rich_panel/rich_panel.tscn")
 const DEBUG_META := "vrweb_debug"
 
 # --- Сетка ---
-const GRID := 3.0               # размер клетки сетки = ширина коридора/проёма, м
-const STREET_CELLS := 1         # зазор-улица между комнатами (≥ ширины коридора), клеток
-const ROOM_MIN_CELLS := 2       # минимальная сторона комнаты, клеток
-const CORR := -1                # маркер коридорной клетки в _occ (id комнат ≥ 0)
-
-# --- Пружинная утряска раскладки (force-directed) ---
-const RELAX_ITERS := 320        # потолок итераций утряски
-const RELAX_MAX_STEP := GRID    # максимум сдвига узла за итерацию, м
-const RELAX_EPS := 0.01         # порог «утряслось» (макс. сдвиг за итерацию), м
-const SPRING_MIN := 0.05        # сила пружины у корня (ближе к корню — слабее)
-const SPRING_MAX := 0.22        # сила пружины у листьев (листья тянет сильнее всего)
-const GRID_PULL := 0.06         # сила притяжения комнаты к линиям сетки
-const COLLIDE_K := 0.6          # сила расталкивания пересекающихся кругов
-const RELAX_GAP := GRID * 0.75  # зазор-улица, заложенный в радиус круга комнаты, м
-const PLACE_MAX_RADIUS := 256   # потолок спирального поиска свободной клетки при снапе
-
-# --- Гравитация раскладки (безразмерная карта по сиду, проецируется на bbox) ---
-# Дополнительная мягкая сила: по сиду выбирается маленькая «карта гравитации» (палитра),
-# безразмерно проецируется на оценённый размах раскладки и тянет комнаты к высоким своим
-# значениям (gradient ascent по билинейно-интерполированному полю). Слабее пружин и притяжения
-# к сетке; жёсткий снэп (_snap_to_cells) всё равно последнее слово ⇒ сетка/непересечение целы.
-const GRAVITY_K := 0.9          # сила притяжения к высоким значениям карты (мягче пружин/сетки)
-const GRAVITY_COVER := 1.6      # над-покрытие: во сколько зона проекции шире оценённого размаха
-
+const GRID := 3.0               # размер клетки сетки SpaceLayout в метрах = ширина коридора/проёма
 const WALL_HEIGHT := 3.2        # минимальная высота стен, м
-const WALL_THICK := 0.15        # тонкая стена, сдвинутая внутрь комнаты на полтолщины (см. _add_wall_seg): у вплотную стоящих комнат стены стыкуются грань-в-грань, без z-fight
-const ROUTE_EXPAND := 16        # запас области поиска коридора вокруг пары комнат, клеток
+const WALL_THICK := 0.15        # тонкая стена, сдвинутая внутрь комнаты на полтолщины (см. _add_wall_run): у вплотную стоящих комнат стены стыкуются грань-в-грань, без z-fight
 
 # --- Расстановка объектов по стенам ---
 const OBJECT_INSET := 1.2       # отступ объекта от своей стены внутрь комнаты, м
 const CORNER_MARGIN := 1.0      # отступ крайних объектов от углов вдоль стены, м
 const OBJECT_GAP := 0.6         # зазор между соседними панелями вдоль стены, м
 const HEAD_CLEARANCE := 0.8     # запас над самым высоким объектом до верха стены, м
-const DOOR_MARGIN := 0.5        # отступ объектов от края проёма вдоль стены, м
 const EYE_LEVEL := 1.6          # высота центра текстовых/картиночных панелей, м (= высота камеры игрока)
 const PANEL_FLOOR_GAP := 0.3    # минимальный зазор от низа высокой панели до пола, м
 const TITLE_OVERHANG := 0.4     # на сколько вывеска-заголовок шире проёма с каждой стороны, м
@@ -106,31 +80,21 @@ var _doc_fg                                  # Color|null: цвет текста
 var _dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
 # Замеры/раскладка по фазам.
-var _parent_of: Dictionary = {}   # childId -> parentId
 var _object_size: Dictionary = {} # objectId -> Vector2(w, h), м
-var _room_cells: Dictionary = {}  # roomId -> Vector2i: футпринт в клетках (ширина, глубина)
-var _room_size: Dictionary = {}   # roomId -> Vector2: футпринт в метрах (cells*GRID)
 var _room_wall_h: Dictionary = {} # roomId -> высота стен, м
-var _pos2: Dictionary = {}        # roomId -> Vector2: координаты центра при утряске, м
-var _radius: Dictionary = {}      # roomId -> float: безопасный радиус круга комнаты, м
-var _depth: Dictionary = {}       # roomId -> int: глубина от корня (листья глубже -> пружины сильнее)
-var _grav_map: Array = []         # 2D карта гравитации (по сиду): [ряд][столбец] -> float
-var _grav_name := ""              # имя выбранной карты (для отладочного вывода)
-var _grav_w := 0                  # столбцов в карте
-var _grav_h := 0                  # рядов в карте
-var _grav_origin := Vector2.ZERO  # левый-верхний угол зоны проекции, м (фикс)
-var _grav_extent := Vector2.ONE   # размах зоны проекции, м (фикс, оценка из площади)
-var _room_cell: Dictionary = {}   # roomId -> Vector2i: левый-верхний угол комнаты на сетке
-var _occ: Dictionary = {}         # Vector2i -> roomId | CORR
-var _corr_cells: Dictionary = {}  # Vector2i -> true: клетки полов-коридоров
-var _room_openings: Dictionary = {} # roomId -> [{key, lo, hi}] проёмы в стенах (локальные м)
-var _room_entrance: Dictionary = {} # roomId -> {key, lo, hi}: проём-вход от родителя (над ним — вывеска-заголовок)
-var _direct_child: Dictionary = {} # childId -> true: соединён с коннектором прямым проёмом (без коридора)
 var _object_room: Dictionary = {} # objectId -> roomId
-var _positions: Dictionary = {}   # roomId -> Vector3 (центр пола, мир)
+
+# Раскладка из SpaceLayout (клетки, двери, коридоры) -> абсолютные клетки на общей сетке.
+var _layout: Dictionary = {}      # сырой результат SpaceLayout.build
+var _foot: Dictionary = {}        # roomId -> { Vector2i (абс. клетка) -> true }: футпринт-множество
+var _foot_cells: Dictionary = {}  # roomId -> Array[Vector2i] (абс): для построения полов
+var _door_edges: Dictionary = {}  # roomId -> { edge_key -> true }: рёбра-двери (проёмы в стенах)
+var _corr_cells: Dictionary = {}  # Vector2i (абс) -> true: клетки полов-коридоров
+var _room_entrance: Dictionary = {} # roomId -> {cell:Vector2i, dir:Vector2i}: проём-вход от родителя
+var _positions: Dictionary = {}   # roomId -> Vector3 (центр футпринта в мире)
 var _shift := Vector3.ZERO        # сдвиг сетки в мир (корень к началу координат)
 
-# Спавн «у первого объекта страницы, лицом к нему» (считается в фазе 5).
+# Спавн «у первого объекта страницы, лицом к нему» (считается в фазе геометрии).
 var _first_obj_id: int = -1        # id первого объекта в порядке чтения (см. _find_first_object_id)
 var _has_spawn_obj: bool = false   # нашли ли первый объект при расстановке
 var _spawn_obj_world := Vector3.ZERO  # мир-позиция первого объекта (на полу)
@@ -188,14 +152,8 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 	if _root_id == -1 or not _rooms.has(_root_id):
 		return
 
-	_build_parent_map()
-	_measure_objects()                       # фаза 1
-	_compute_room_dims()                     # фаза 2 (+ снап к клеткам)
-	_relax_layout()                          # фаза 3 (пружинная утряска, seeded)
-	_snap_to_cells()                         # снап на сетку + дискретное расталкивание
-	_finalize_positions()
-	_fill_occupancy()
-	_route_corridors()                       # фаза 4
+	_measure_objects()                       # фаза 1: размеры объектов (нужны для стен/панелей)
+	_consume_layout()                        # фаза 2: раскладка от SpaceLayout -> абс. клетки
 
 	_first_obj_id = _find_first_object_id()
 	for id in _rooms.keys():
@@ -214,7 +172,7 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 	# Синхронно (до первого кадра): свет/небо — чтобы мир был освещён, и комната спавна —
 	# чтобы spawn_point был готов к возврату из generate() и игроку было куда встать.
 	# Остальные комнаты достраиваются порциями по кадрам (см. _stream_remaining).
-	_build_atmosphere(_container, _root_id)     # фаза 5: атмосфера
+	_build_atmosphere(_container, _root_id)     # фаза 3: атмосфера
 	var spawn_room_id: int = _object_room.get(_first_obj_id, _root_id)
 	if _rooms.has(spawn_room_id):
 		_build_room(spawn_room_id, _container, on_transition)
@@ -252,12 +210,6 @@ func _stream_remaining() -> void:
 	build_finished.emit()
 
 
-func _build_parent_map() -> void:
-	for id in _rooms.keys():
-		for ch in _rooms[id]["children"]:
-			_parent_of[ch] = id
-
-
 ## Первый объект страницы в порядке чтения: наполнение комнаты идёт раньше её подкомнат,
 ## заголовок секции — первый объект комнаты (§D). Спускаемся по первым детям, пока не
 ## встретим комнату со своими объектами. -1, если объектов на странице нет вовсе.
@@ -285,15 +237,8 @@ func _compute_spawn() -> void:
 		spawn_look_at = _spawn_obj_world + Vector3(0, 1.6, 0)
 		has_spawn_look = true
 		return
-	var root_size: Vector2 = _room_size.get(_root_id, Vector2(GRID * 2, GRID * 2))
-	spawn_point = _positions.get(_root_id, Vector3.ZERO) + Vector3(0, 1.0, root_size.y * 0.3)
-
-
-func _link_count(id: int) -> int:
-	var n: int = _rooms[id]["children"].size()
-	if _parent_of.has(id):
-		n += 1
-	return n
+	var bb := _foot_bbox(_root_id)
+	spawn_point = _positions.get(_root_id, Vector3.ZERO) + Vector3(0, 1.0, float(bb.size.y) * GRID * 0.3)
 
 
 # --- Фаза 1: замер объектов (футпринт настенной панели) ---
@@ -412,665 +357,105 @@ func _measure_video(obj: Dictionary) -> Vector2:
 	return Vector2(maxf(0.2, w), maxf(0.2, h))
 
 
-# --- Фаза 2: размер комнаты под объекты, снапнутый к сетке ---
+# --- Фаза 2: раскладка от SpaceLayout (единый генератор пространства) ---
 
-func _compute_room_dims() -> void:
-	for id in _rooms.keys():
-		_compute_room_dim(id)
+## Зовёт SpaceLayout (тот же, что кормит вид сверху), переводит его клеточную раскладку в
+## абсолютные клетки на общей сетке и извлекает:
+##   _foot/_foot_cells — футпринт каждой комнаты (множество и список клеток);
+##   _door_edges       — рёбра-двери (где коридор/примыкание пробивает стену) -> проёмы;
+##   _corr_cells       — клетки полов-коридоров (свободные клетки на путях);
+##   _room_entrance    — проём-вход от родителя (над ним вешается вывеска-заголовок);
+##   _positions/_shift — мировые центры комнат и сдвиг корня к началу координат.
+func _consume_layout() -> void:
+	_layout = SpaceLayout.new().build(_space, _seed)
+	var rooms: Dictionary = _layout.get("rooms", {})
+
+	for id in rooms:
+		var rd: Dictionary = rooms[id]
+		var pos: Vector2i = rd.get("pos", Vector2i.ZERO)
+		var cell_set := {}
+		var cell_arr: Array = []
+		for c in rd.get("cells", []):
+			var a: Vector2i = c + pos
+			cell_set[a] = true
+			cell_arr.append(a)
+		_foot[id] = cell_set
+		_foot_cells[id] = cell_arr
+		_door_edges[id] = {}
+
+	# Двери и полы-коридоры из связей родитель→ребёнок. Путь связи: [клетка_родителя, ...,
+	# клетка_ребёнка]; концы лежат в комнатах (там проёмы-двери), середина — свободные клетки
+	# (полы-коридоры). adjacent-связь — путь из двух примыкающих клеток (прямая дверь).
+	for co in _layout.get("corridors", []):
+		var path: Array = co.get("path", [])
+		if path.size() < 2:
+			continue
+		var f: int = co["from"]
+		var t: int = co["to"]
+		var d_from: Vector2i = path[1] - path[0]
+		if _door_edges.has(f) and _is_unit(d_from):
+			_door_edges[f][_edge_key(path[0], d_from)] = true
+		var last: int = path.size() - 1
+		var d_to: Vector2i = path[last - 1] - path[last]
+		if _door_edges.has(t) and _is_unit(d_to):
+			_door_edges[t][_edge_key(path[last], d_to)] = true
+			_room_entrance[t] = {"cell": path[last], "dir": d_to}
+		for i in range(1, last):
+			_corr_cells[path[i]] = true
+
+	# Сдвиг: центр футпринта корня — в начало координат мира.
+	var rootbb := _foot_bbox(_root_id)
+	var center := Vector2(rootbb.position) + Vector2(rootbb.size) * 0.5
+	_shift = -Vector3(center.x * GRID, 0.0, center.y * GRID)
+
+	for id in rooms:
+		_positions[id] = _foot_centroid_world(id)
+		_room_wall_h[id] = _wall_height(id)
 
 
-func _compute_room_dim(id: int) -> void:
-	var objs: Array = _rooms[id]["objects"]
-	var total := 0.0
-	var max_w := 0.0
+## Высота стен комнаты: не ниже WALL_HEIGHT, с запасом над самым высоким объектом.
+func _wall_height(id: int) -> float:
 	var max_h := 0.0
-	for obj in objs:
-		var s: Vector2 = _object_size[obj["id"]]
-		total += s.x + OBJECT_GAP
-		max_w = maxf(max_w, s.x)
-		max_h = maxf(max_h, s.y)
-	# Периметр (4 стены минус полосы проходов) должен покрыть суммарную длину объектов.
-	var doors: int = mini(_link_count(id), 4)
-	var need := (total + float(doors) * GRID) * 1.2
-	var l := need / 4.0 + 2.0 * CORNER_MARGIN
-	l = maxf(l, max_w + 2.0 * (CORNER_MARGIN + DOOR_MARGIN))
-	# Снап к клеткам. Комнаты стартуют квадратными; коннекторы могут стать прямоугольными
-	# позже, при кластерной упаковке (_pack_clusters).
-	var cw: int = max(ROOM_MIN_CELLS, int(ceil(l / GRID)))
-	_room_cells[id] = Vector2i(cw, cw)
-	_room_size[id] = Vector2(cw, cw) * GRID
-	_room_wall_h[id] = maxf(WALL_HEIGHT, max_h + HEAD_CLEARANCE)
+	for obj in _rooms[id]["objects"]:
+		max_h = maxf(max_h, _object_size.get(obj["id"], Vector2.ZERO).y)
+	return maxf(WALL_HEIGHT, max_h + HEAD_CLEARANCE)
 
 
-# --- Фаза 3: пружинная утряска раскладки (force-directed), seeded ---
-
-## Континуальная утряска: пружины родитель↔ребёнок (листья сильнее, к корню слабее) +
-## расталкивание кругов (не дают налезать) + притяжение к сетке (стены ложатся на линии).
-## Сид задаёт ТОЛЬКО стартовый разброс; сама релаксация детерминирована ⇒ один сид = один итог.
-func _relax_layout() -> void:
-	_compute_depths()
-	for id in _rooms.keys():
-		var s: Vector2 = _room_size[id]
-		_radius[id] = maxf(s.x, s.y) * 0.5 + RELAX_GAP
-	_rng.seed = _seed
-	_pos2[_root_id] = Vector2.ZERO
-	_init_positions(_root_id)
-	_setup_gravity()
-
-	var max_depth := 1
-	for id in _depth.keys():
-		max_depth = max(max_depth, _depth[id])
-
-	for _iter in RELAX_ITERS:
-		var disp: Dictionary = {}
-		for id in _rooms.keys():
-			disp[id] = Vector2.ZERO
-		_apply_springs(disp, max_depth)
-		_apply_collision(disp)
-		_apply_grid_pull(disp)
-		_apply_gravity(disp)
-		var max_move := 0.0
-		for id in _rooms.keys():
-			var m: Vector2 = (disp[id] as Vector2).limit_length(RELAX_MAX_STEP)
-			_pos2[id] += m
-			max_move = maxf(max_move, m.length())
-		if max_move < RELAX_EPS:
-			break
+## Описывающий прямоугольник футпринта комнаты (в клетках).
+func _foot_bbox(id: int) -> Rect2i:
+	var lo := Vector2i(1 << 30, 1 << 30)
+	var hi := Vector2i(-(1 << 30), -(1 << 30))
+	for c in _foot_cells.get(id, []):
+		lo = lo.min(c)
+		hi = hi.max(c)
+	if lo.x > hi.x:
+		return Rect2i(Vector2i.ZERO, Vector2i.ONE)
+	return Rect2i(lo, hi - lo + Vector2i.ONE)
 
 
-func _compute_depths() -> void:
-	_depth[_root_id] = 0
-	var q: Array = [_root_id]
-	var qi := 0
-	while qi < q.size():
-		var id: int = q[qi]
-		qi += 1
-		for ch in _rooms[id]["children"]:
-			_depth[ch] = _depth[id] + 1
-			q.append(ch)
-
-
-## Стартовый разброс: каждый ребёнок — на сумму радиусов от родителя в случайную сторону (seed).
-func _init_positions(id: int) -> void:
-	for ch in _rooms[id]["children"]:
-		var ang := _rng.randf() * TAU
-		var dist: float = _radius[id] + _radius[ch]
-		_pos2[ch] = _pos2[id] + Vector2(cos(ang), sin(ang)) * dist
-		_init_positions(ch)
-
-
-## Пружины родитель↔ребёнок. Длина покоя = соприкосновение кругов; сила растёт с глубиной
-## ребёнка (листья тянет сильнее всего, ближе к корню — слабее).
-func _apply_springs(disp: Dictionary, max_depth: int) -> void:
-	for ch in _rooms.keys():
-		if not _parent_of.has(ch):
-			continue
-		var p: int = _parent_of[ch]
-		var d: Vector2 = _pos2[ch] - _pos2[p]
-		var dist: float = d.length()
-		if dist < 0.0001:
-			d = Vector2.RIGHT
-			dist = 0.0001
-		var dir: Vector2 = d / dist
-		var rest: float = _radius[p] + _radius[ch]
-		var t: float = float(_depth[ch]) / float(max_depth)
-		var k: float = lerpf(SPRING_MIN, SPRING_MAX, t)
-		var f: float = k * (dist - rest)
-		disp[ch] -= dir * f * 0.5
-		disp[p] += dir * f * 0.5
-
-
-## Расталкивание пересекающихся кругов — комнаты не налезают и не схлопываются.
-func _apply_collision(disp: Dictionary) -> void:
-	var ids: Array = _rooms.keys()
-	for i in ids.size():
-		for j in range(i + 1, ids.size()):
-			var a: int = ids[i]
-			var b: int = ids[j]
-			var d: Vector2 = _pos2[b] - _pos2[a]
-			var dist: float = d.length()
-			var mind: float = _radius[a] + _radius[b]
-			if dist >= mind:
-				continue
-			var dir: Vector2 = (d / dist) if dist > 0.0001 else Vector2.RIGHT
-			var push: float = (mind - dist) * COLLIDE_K
-			disp[a] -= dir * push * 0.5
-			disp[b] += dir * push * 0.5
-
-
-## Притяжение к сетке: тянет комнату так, чтобы её угол (а значит и стены) лёг на линии GRID.
-func _apply_grid_pull(disp: Dictionary) -> void:
-	for id in _rooms.keys():
-		var half: Vector2 = _room_size[id] * 0.5
-		var corner: Vector2 = _pos2[id] - half
-		var snap_corner := Vector2(roundf(corner.x / GRID) * GRID, roundf(corner.y / GRID) * GRID)
-		var target: Vector2 = snap_corner + half
-		disp[id] += (target - _pos2[id]) * GRID_PULL
-
-
-## Гравитация: тянет комнату в сторону роста поля карты (gradient ascent по билинейной выборке).
-func _apply_gravity(disp: Dictionary) -> void:
-	if _grav_map.is_empty():
-		return
-	for id in _rooms.keys():
-		disp[id] += _grav_grad(_pos2[id]) * GRAVITY_K
-
-
-## Выбирает карту по сиду из палитры и задаёт фикс-зону проекции вокруг корня (в начале координат).
-## Размах оценивается из суммарной площади комнат (квадрат, упаковывающий их без зазоров),
-## расширенный GRAVITY_COVER ⇒ комнаты в норме не выходят за зону (за краями — зеркальное отражение).
-func _setup_gravity() -> void:
-	_grav_map = _pick_gravity_map(_seed)
-	_grav_h = _grav_map.size()
-	_grav_w = 0 if _grav_h == 0 else (_grav_map[0] as Array).size()
-	if _grav_w == 0:
-		return
-	var total_cells := 0.0
-	for id in _rooms.keys():
-		var rc: Vector2i = _room_cells[id]
-		total_cells += float(rc.x * rc.y)
-	var side: float = sqrt(maxf(total_cells, 1.0)) * GRID * GRAVITY_COVER
-	_grav_extent = Vector2(side, side)
-	_grav_origin = -_grav_extent * 0.5   # центр зоны — в начале координат (там же корень)
-	_print_gravity()
-
-
-## Отладочный вывод применённой гравитации: имя карты, её сетка значений и размах зоны проекции.
-func _print_gravity() -> void:
-	var grid_str := ""
-	for row in _grav_map:
-		var cells := PackedStringArray()
-		for v in row:
-			cells.append(str(int(v)))
-		grid_str += "\n    " + " ".join(cells)
-	print("[WorldGen] gravity: «%s» (%dx%d, k=%.3f), зона %.1fx%.1f м:%s"
-			% [_grav_name, _grav_w, _grav_h, GRAVITY_K, _grav_extent.x, _grav_extent.y, grid_str])
-
-
-## Палитра безразмерных карт гравитации. Сид выбирает одну. Значения: чем выше — тем сильнее
-## притягивает (0 — нейтраль). Билинейная интерполяция сглаживает грубые клетки в градиент.
-## Каждая запись: [имя, ряды-строки]. Имя кладётся в `_grav_name` для отладочного вывода.
-func _pick_gravity_map(seed_value: int) -> Array:
-	var palette := [
-		["крест",     ["00100", "00200", "12221", "00200", "00100"]],  # стягивает к центральному кресту
-		["два-полюса", ["101", "101", "101"]],                          # растаскивает влево/вправо
-		["диагональ", ["100", "010", "001"]],                           # вытягивает по диагонали
-		["кольцо",    ["111", "101", "111"]],                           # выталкивает к периметру
-		["холм",      ["00000", "01110", "01210", "01110", "00000"]],   # один центральный сгусток
-	]
-	var idx: int = abs(seed_value) % palette.size()
-	_grav_name = palette[idx][0]
-	return _parse_gravity_map(palette[idx][1])
-
-
-## Строки цифр -> 2D-массив float.
-func _parse_gravity_map(rows: Array) -> Array:
-	var out: Array = []
-	for row in rows:
-		var s: String = row
-		var line: Array = []
-		for i in s.length():
-			line.append(float(s.substr(i, 1).to_int()))
-		out.append(line)
-	return out
-
-
-## Билинейный градиент поля карты в мировой точке (направлен к росту значения).
-## Считается в нормированных uv-координатах ⇒ сила не зависит от масштаба зоны проекции.
-func _grav_grad(world: Vector2) -> Vector2:
-	var uv := _grav_uv(world)
-	var eu: float = 0.5 / float(max(1, _grav_w - 1))
-	var ev: float = 0.5 / float(max(1, _grav_h - 1))
-	var dx: float = _grav_sample_uv(uv + Vector2(eu, 0.0)) - _grav_sample_uv(uv - Vector2(eu, 0.0))
-	var dy: float = _grav_sample_uv(uv + Vector2(0.0, ev)) - _grav_sample_uv(uv - Vector2(0.0, ev))
-	return Vector2(dx, dy)
-
-
-func _grav_uv(world: Vector2) -> Vector2:
-	return Vector2((world.x - _grav_origin.x) / _grav_extent.x,
-			(world.y - _grav_origin.y) / _grav_extent.y)
-
-
-## Билинейная выборка карты по uv (вне [0,1] — зеркальное отражение, поле непрерывно на краях).
-func _grav_sample_uv(uv: Vector2) -> float:
-	var gx := _mirror_index(uv.x * float(_grav_w - 1), _grav_w)
-	var gy := _mirror_index(uv.y * float(_grav_h - 1), _grav_h)
-	var x0: int = int(floor(gx))
-	var y0: int = int(floor(gy))
-	var x1: int = min(x0 + 1, _grav_w - 1)
-	var y1: int = min(y0 + 1, _grav_h - 1)
-	var fx: float = gx - float(x0)
-	var fy: float = gy - float(y0)
-	var top: float = lerpf(_grav_at(x0, y0), _grav_at(x1, y0), fx)
-	var bot: float = lerpf(_grav_at(x0, y1), _grav_at(x1, y1), fx)
-	return lerpf(top, bot, fy)
-
-
-func _grav_at(x: int, y: int) -> float:
-	return (_grav_map[y] as Array)[x]
-
-
-## Отражает координату c в диапазон [0, n-1] (зеркальный тайлинг, период 2*(n-1)).
-func _mirror_index(c: float, n: int) -> float:
-	if n <= 1:
-		return 0.0
-	var period: float = 2.0 * float(n - 1)
-	var m: float = fposmod(c, period)
-	if m > float(n - 1):
-		m = period - m
-	return m
-
-
-## Жёсткий снап на целочисленные клетки + дискретное расталкивание: точная сетка и зазор
-## ≥STREET_CELLS-улица между комнатами (для прокладки коридоров) гарантированы.
-## Упаковка идёт «единицами»: одиночная комната ИЛИ кластер (коннектор + его дети-неконнекторы,
-## приклеенные вплотную к стенам коннектора). Единицы ставятся от центра наружу спиральной
-## укладкой; каждая — в свою желаемую клетку, иначе спиралью ищется ближайшая свободная.
-## Внутри кластера зазора нет (двери прямые), вокруг кластера — улица ≥STREET_CELLS. Детерминированно.
-func _snap_to_cells() -> void:
-	var desired: Dictionary = {}
-	for id in _rooms.keys():
-		var half: Vector2 = _room_size[id] * 0.5
-		var corner: Vector2 = _pos2[id] - half
-		desired[id] = Vector2i(int(round(corner.x / GRID)), int(round(corner.y / GRID)))
-
-	# Кластеры: коннектор-якорь + его дети-неконнекторы (их ставит кластер, не основной цикл).
-	var cluster_of: Dictionary = {}   # childId -> connId
-	for id in _rooms.keys():
-		if _rooms[id]["kind"] != "connector":
-			continue
-		for ch in _rooms[id]["children"]:
-			if _rooms[ch]["kind"] != "connector":
-				cluster_of[ch] = id
-
-	# Единицы упаковки: кластеры (по якорю) и одиночные комнаты; ближе к центру — раньше.
-	var units: Array = []
-	for id in _rooms.keys():
-		if cluster_of.has(id):
-			continue
-		units.append(id)
-	units.sort_custom(func(a, b):
-		var da: float = (_pos2[a] as Vector2).length_squared()
-		var db: float = (_pos2[b] as Vector2).length_squared()
-		if absf(da - db) > 0.01:
-			return da < db
-		return a < b)
-
-	var blocked: Dictionary = {}   # клетки, занятые футпринтами + зазором
-	for id in units:
-		if _is_cluster_anchor(id):
-			_place_cluster(id, desired, blocked)
-		else:
-			var member := _rect_cells(Vector2i.ZERO, _room_cells[id])
-			var off: Vector2i = _place_unit(member, desired[id], blocked)
-			_room_cell[id] = off
-			_block_unit(member, off, blocked)
-
-
-## Коннектор-якорь = коннектор, у которого есть хотя бы один ребёнок-неконнектор.
-func _is_cluster_anchor(id: int) -> bool:
-	if _rooms[id]["kind"] != "connector":
-		return false
-	for ch in _rooms[id]["children"]:
-		if _rooms[ch]["kind"] != "connector":
-			return true
-	return false
-
-
-## Ставит кластер (коннектор + дети-неконнекторы вплотную) единым жёстким блоком и регистрирует
-## прямые проёмы коннектор↔ребёнок. Коннектор при необходимости растёт, чтобы стена вместила детей.
-func _place_cluster(conn: int, desired: Dictionary, blocked: Dictionary) -> void:
-	var layout := _build_cluster_layout(conn)
-	var member: Dictionary = layout["member"]
-	var off: Vector2i = _place_unit(member, desired[conn], blocked)
-	_block_unit(member, off, blocked)
-	for rid in layout["tops"]:
-		_room_cell[rid] = (layout["tops"][rid] as Vector2i) + off
-	for op in layout["openings"]:
-		_add_opening(op["a"], (op["acell"] as Vector2i) + off, op["adir"])
-		_room_entrance[op["b"]] = _add_opening(op["b"], (op["bcell"] as Vector2i) + off, op["bdir"])
-		_direct_child[op["b"]] = true
-
-
-## Локальная раскладка кластера (коннектор в (0,0)): распределяет детей по сторонам по направлению
-## из утряски, при тесноте растит коннектор по нужной оси, стопкой клеит детей вплотную к стенам.
-## Возвращает {member: клетки-локально, tops: roomId->левый-верх локально, openings:[...]}.
-func _build_cluster_layout(conn: int) -> Dictionary:
-	var base: Vector2i = _room_cells[conn]
-	var sides := {"E": [], "W": [], "N": [], "S": []}
-	for ch in _rooms[conn]["children"]:
-		if _rooms[ch]["kind"] == "connector":
-			continue
-		var d: Vector2 = _pos2[ch] - _pos2[conn]
-		if absf(d.x) >= absf(d.y):
-			sides["E" if d.x >= 0.0 else "W"].append(ch)
-		else:
-			sides["S" if d.y >= 0.0 else "N"].append(ch)
-
-	# Рост коннектора: стена вдоль оси должна вместить сумму детей этой стороны встык.
-	var w: int = maxi(base.x, maxi(_sum_axis(sides["N"], true), _sum_axis(sides["S"], true)))
-	var h: int = maxi(base.y, maxi(_sum_axis(sides["E"], false), _sum_axis(sides["W"], false)))
-	_room_cells[conn] = Vector2i(w, h)
-	_room_size[conn] = Vector2(w, h) * GRID
-
-	var member: Dictionary = {}
-	_add_rect(member, Vector2i.ZERO, Vector2i(w, h))
-	var tops: Dictionary = {conn: Vector2i.ZERO}
-	var openings: Array = []
-
-	# Вертикальные стены (E/W): дети стопкой по строкам, выровнены по центру стены.
-	for key in ["E", "W"]:
-		@warning_ignore("integer_division")
-		var cur: int = (h - _sum_axis(sides[key], false)) / 2
-		for ch in sides[key]:
-			var ks: Vector2i = _room_cells[ch]
-			var cx: int = w if key == "E" else -ks.x
-			tops[ch] = Vector2i(cx, cur)
-			_add_rect(member, tops[ch], ks)
-			@warning_ignore("integer_division")
-			var rm: int = clampi(cur + ks.y / 2, 0, h - 1)
-			if key == "E":
-				openings.append({"a": conn, "acell": Vector2i(w - 1, rm), "adir": Vector2i(1, 0),
-						"b": ch, "bcell": Vector2i(w, rm), "bdir": Vector2i(-1, 0)})
-			else:
-				openings.append({"a": conn, "acell": Vector2i(0, rm), "adir": Vector2i(-1, 0),
-						"b": ch, "bcell": Vector2i(-1, rm), "bdir": Vector2i(1, 0)})
-			cur += ks.y
-
-	# Горизонтальные стены (N/S): дети стопкой по столбцам, выровнены по центру стены.
-	for key in ["N", "S"]:
-		@warning_ignore("integer_division")
-		var cur: int = (w - _sum_axis(sides[key], true)) / 2
-		for ch in sides[key]:
-			var ks: Vector2i = _room_cells[ch]
-			var cy: int = h if key == "S" else -ks.y
-			tops[ch] = Vector2i(cur, cy)
-			_add_rect(member, tops[ch], ks)
-			@warning_ignore("integer_division")
-			var cm: int = clampi(cur + ks.x / 2, 0, w - 1)
-			if key == "S":
-				openings.append({"a": conn, "acell": Vector2i(cm, h - 1), "adir": Vector2i(0, 1),
-						"b": ch, "bcell": Vector2i(cm, h), "bdir": Vector2i(0, -1)})
-			else:
-				openings.append({"a": conn, "acell": Vector2i(cm, 0), "adir": Vector2i(0, -1),
-						"b": ch, "bcell": Vector2i(cm, -1), "bdir": Vector2i(0, 1)})
-			cur += ks.x
-
-	return {"member": member, "tops": tops, "openings": openings}
-
-
-## Сумма размеров детей вдоль оси стены (по X при along_x, иначе по Y), в клетках.
-func _sum_axis(children: Array, along_x: bool) -> int:
+## Центр футпринта комнаты в мире (середина клеток).
+func _foot_centroid_world(id: int) -> Vector3:
+	var sum := Vector2.ZERO
 	var n := 0
-	for ch in children:
-		var ks: Vector2i = _room_cells[ch]
-		n += ks.x if along_x else ks.y
-	return n
-
-
-func _rect_cells(origin: Vector2i, size: Vector2i) -> Dictionary:
-	var out: Dictionary = {}
-	_add_rect(out, origin, size)
-	return out
-
-
-func _add_rect(into: Dictionary, origin: Vector2i, size: Vector2i) -> void:
-	for dx in size.x:
-		for dy in size.y:
-			into[Vector2i(origin.x + dx, origin.y + dy)] = true
-
-
-## Спиральный поиск свободного смещения для набора клеток member вокруг желаемого desired.
-func _place_unit(member: Dictionary, desired: Vector2i, blocked: Dictionary) -> Vector2i:
-	var r := 0
-	while r <= PLACE_MAX_RADIUS:
-		for off in _ring(r):
-			var cand: Vector2i = desired + off
-			if _fits_unit(member, cand, blocked):
-				return cand
-		r += 1
-	return desired
-
-
-## Влезает ли набор клеток (со сдвигом off) с зазором-улицей STREET_CELLS от уже занятых.
-func _fits_unit(member: Dictionary, off: Vector2i, blocked: Dictionary) -> bool:
-	for c in member:
-		for dx in range(-STREET_CELLS, STREET_CELLS + 1):
-			for dy in range(-STREET_CELLS, STREET_CELLS + 1):
-				if blocked.has(Vector2i(c.x + off.x + dx, c.y + off.y + dy)):
-					return false
-	return true
-
-
-## Резервирует набор клеток (со сдвигом), расширенный на STREET_CELLS ⇒ соседи держат зазор.
-func _block_unit(member: Dictionary, off: Vector2i, blocked: Dictionary) -> void:
-	for c in member:
-		for dx in range(-STREET_CELLS, STREET_CELLS + 1):
-			for dy in range(-STREET_CELLS, STREET_CELLS + 1):
-				blocked[Vector2i(c.x + off.x + dx, c.y + off.y + dy)] = true
-
-
-## Клетки-смещения на «кольце» Чебышёва радиуса r (r=0 — сам центр).
-func _ring(r: int) -> Array:
-	if r == 0:
-		return [Vector2i.ZERO]
-	var out: Array = []
-	for x in range(-r, r + 1):
-		out.append(Vector2i(x, -r))
-		out.append(Vector2i(x, r))
-	for y in range(-r + 1, r):
-		out.append(Vector2i(-r, y))
-		out.append(Vector2i(r, y))
-	return out
-
-
-## Сдвигает сетку в мир так, чтобы корень был у начала координат; считает центры комнат.
-func _finalize_positions() -> void:
-	var rc: Vector2i = _room_cell[_root_id]
-	var rcw: Vector2i = _room_cells[_root_id]
-	_shift = -Vector3((rc.x + rcw.x * 0.5) * GRID, 0.0, (rc.y + rcw.y * 0.5) * GRID)
-	for id in _rooms.keys():
-		var c: Vector2i = _room_cell[id]
-		var cw: Vector2i = _room_cells[id]
-		_positions[id] = _cell_world(c.x + cw.x * 0.5, c.y + cw.y * 0.5)
-
-
-func _fill_occupancy() -> void:
-	for id in _rooms.keys():
-		var c: Vector2i = _room_cell[id]
-		var cw: Vector2i = _room_cells[id]
-		for dx in cw.x:
-			for dy in cw.y:
-				_occ[Vector2i(c.x + dx, c.y + dy)] = id
+	for c in _foot_cells.get(id, []):
+		sum += Vector2(c) + Vector2(0.5, 0.5)
+		n += 1
+	if n == 0:
+		return _shift
+	sum /= float(n)
+	return _cell_world(sum.x, sum.y)
 
 
 func _cell_world(col: float, row: float) -> Vector3:
 	return Vector3(col * GRID, 0.0, row * GRID) + _shift
 
 
-# --- Фаза 4: ортогональный роутинг коридоров по улицам ---
-
-func _route_corridors() -> void:
-	# Порядок — BFS от корня (короткие локальные маршруты раньше).
-	var order: Array = [_root_id]
-	var qi := 0
-	while qi < order.size():
-		var id: int = order[qi]
-		qi += 1
-		for ch in _rooms[id]["children"]:
-			# Дети-неконнекторы коннектора уже соединены прямым проёмом (кластер) — без коридора.
-			if not _direct_child.has(ch):
-				_route_edge(id, ch)
-			order.append(ch)
+func _is_unit(d: Vector2i) -> bool:
+	return absi(d.x) + absi(d.y) == 1
 
 
-func _route_edge(a: int, b: int) -> void:
-	# Сначала строго по свободным улицам (коридоры не пересекаются), иначе разрешаем
-	# проходить по чужим коридорам (общая клетка-перекрёсток, один пол), иначе фолбэк.
-	if _bfs_route(a, b, false):
-		return
-	if _bfs_route(a, b, true):
-		return
-	_fallback_route(a, b)
-
-
-## BFS по клеткам сетки от кольца вокруг a до клетки, смежной с b. allow_corr — можно ли
-## проходить по уже проложенным коридорам. Возвращает успех; при успехе резервирует путь
-## и регистрирует проёмы у a и b.
-func _bfs_route(a: int, b: int, allow_corr: bool) -> bool:
-	var lo := Vector2i.ZERO
-	var hi := Vector2i.ZERO
-	var bounds := _route_bounds(a, b)
-	lo = bounds[0]
-	hi = bounds[1]
-
-	var came: Dictionary = {}        # cell -> предыдущая клетка (источник указывает на себя)
-	var src_room: Dictionary = {}    # source cell -> клетка-стена a, к которой он примыкает
-	var frontier: Array = []
-	for bc in _border_cells(a):
-		for d in _dirs:
-			var nb: Vector2i = bc + d
-			if _occ.get(nb, CORR - 1) == a:
-				continue
-			if not _in_bounds(nb, lo, hi) or _passable(nb, allow_corr) == false:
-				continue
-			if not came.has(nb):
-				came[nb] = nb
-				src_room[nb] = bc
-				frontier.append(nb)
-
-	var qi := 0
-	var goal := Vector2i.ZERO
-	var goal_b := Vector2i.ZERO
-	var found := false
-	while qi < frontier.size():
-		var cur: Vector2i = frontier[qi]
-		qi += 1
-		var bcell := _adjacent_to(cur, b)
-		if bcell.x != 2147483647:
-			goal = cur
-			goal_b = bcell
-			found = true
-			break
-		for d in _dirs:
-			var nb: Vector2i = cur + d
-			if came.has(nb) or not _in_bounds(nb, lo, hi):
-				continue
-			if _passable(nb, allow_corr):
-				came[nb] = cur
-				frontier.append(nb)
-	if not found:
-		return false
-
-	# Восстановление пути источник..goal.
-	var path: Array = []
-	var node := goal
-	while true:
-		path.append(node)
-		var p: Vector2i = came[node]
-		if p == node:
-			break
-		node = p
-	path.reverse()
-
-	for c in path:
-		_occ[c] = CORR
-		_corr_cells[c] = true
-
-	# Проёмы: у a — между его стеной и первой клеткой пути; у b — между последней и b.
-	var a_wall: Vector2i = src_room[path[0]]
-	_add_opening(a, a_wall, path[0] - a_wall)
-	_room_entrance[b] = _add_opening(b, goal_b, goal - goal_b)
-	return true
-
-
-## Прямой манхэттенский тоннель как крайняя мера (если улицы переполнены). Может пройти
-## близко к комнатам, но гарантирует достижимость поддерева.
-func _fallback_route(a: int, b: int) -> void:
-	var ca: Vector2i = _room_cell[a]
-	var cwa: Vector2i = _room_cells[a]
-	var cb: Vector2i = _room_cell[b]
-	var cwb: Vector2i = _room_cells[b]
-	@warning_ignore("integer_division")
-	var ac := Vector2i(ca.x + cwa.x / 2, ca.y + cwa.y / 2)
-	@warning_ignore("integer_division")
-	var bc := Vector2i(cb.x + cwb.x / 2, cb.y + cwb.y / 2)
-	var da := _toward(ac, bc)
-	var db := _toward(bc, ac)
-	var a_wall := _border_toward(a, da)
-	var b_wall := _border_toward(b, db)
-	var start := a_wall + da
-	var goal := b_wall + db
-	var path := _manhattan(start, goal)
-	for c in path:
-		if not _occ.has(c) or _occ[c] == CORR:
-			_occ[c] = CORR
-		_corr_cells[c] = true
-	_add_opening(a, a_wall, da)
-	_room_entrance[b] = _add_opening(b, b_wall, db)
-
-
-func _route_bounds(a: int, b: int) -> Array:
-	var ca: Vector2i = _room_cell[a]
-	var cwa: Vector2i = _room_cells[a]
-	var cb: Vector2i = _room_cell[b]
-	var cwb: Vector2i = _room_cells[b]
-	var lo := Vector2i(min(ca.x, cb.x), min(ca.y, cb.y)) - Vector2i(ROUTE_EXPAND, ROUTE_EXPAND)
-	var hi := Vector2i(max(ca.x + cwa.x, cb.x + cwb.x), max(ca.y + cwa.y, cb.y + cwb.y)) + Vector2i(ROUTE_EXPAND, ROUTE_EXPAND)
-	return [lo, hi]
-
-
-func _in_bounds(c: Vector2i, lo: Vector2i, hi: Vector2i) -> bool:
-	return c.x >= lo.x and c.x <= hi.x and c.y >= lo.y and c.y <= hi.y
-
-
-func _passable(cell: Vector2i, allow_corr: bool) -> bool:
-	if not _occ.has(cell):
-		return true
-	return allow_corr and _occ[cell] == CORR
-
-
-## Клетки-стены комнаты (периметр футпринта).
-func _border_cells(id: int) -> Array:
-	var c: Vector2i = _room_cell[id]
-	var cw: Vector2i = _room_cells[id]
-	var out: Array = []
-	for dx in cw.x:
-		for dy in cw.y:
-			if dx == 0 or dy == 0 or dx == cw.x - 1 or dy == cw.y - 1:
-				out.append(Vector2i(c.x + dx, c.y + dy))
-	return out
-
-
-## Клетка комнаты id, смежная с cell (или sentinel x=2147483647, если нет).
-func _adjacent_to(cell: Vector2i, id: int) -> Vector2i:
-	for d in _dirs:
-		var nb: Vector2i = cell + d
-		if _occ.get(nb, CORR - 1) == id:
-			return nb
-	return Vector2i(2147483647, 0)
-
-
-## Регистрирует проём в стене комнаты id: room_cell — клетка-стена, d — наружу (в коридор).
-## Возвращает запись проёма {key, lo, hi} (новую либо уже существующую) — вызывающий
-## помечает ей вход-от-родителя для вывески-заголовка над проходом.
-func _add_opening(id: int, room_cell: Vector2i, d: Vector2i) -> Dictionary:
-	var c0: Vector2i = _room_cell[id]
-	var cw: Vector2i = _room_cells[id]
-	var key := _dir_key(d)
-	# Проём идёт вдоль стены: у стен ±x — по оси Y (cw.y), у стен ±z — по оси X (cw.x).
-	var span: int = cw.y if d.x != 0 else cw.x
-	var k: int = (room_cell.y - c0.y) if d.x != 0 else (room_cell.x - c0.x)
-	var lo := (-span * 0.5 + float(k)) * GRID
-	var op := {"key": key, "lo": lo, "hi": lo + GRID}
-	if not _room_openings.has(id):
-		_room_openings[id] = []
-	# Не дублируем один и тот же проём (две дороги в одну клетку-стену).
-	for o in _room_openings[id]:
-		if o["key"] == key and absf(o["lo"] - lo) < 0.01:
-			return o
-	_room_openings[id].append(op)
-	return op
+func _edge_key(cell: Vector2i, d: Vector2i) -> String:
+	return "%d,%d:%d,%d" % [cell.x, cell.y, d.x, d.y]
 
 
 func _dir_key(d: Vector2i) -> String:
@@ -1083,125 +468,166 @@ func _dir_key(d: Vector2i) -> String:
 	return "nz"
 
 
-func _toward(from: Vector2i, to: Vector2i) -> Vector2i:
-	var dx := to.x - from.x
-	var dy := to.y - from.y
-	if abs(dx) >= abs(dy):
-		return Vector2i(signi(dx), 0) if dx != 0 else Vector2i(1, 0)
-	return Vector2i(0, signi(dy))
-
-
-## Клетка-стена комнаты в направлении d (середина соответствующей стороны).
-func _border_toward(id: int, d: Vector2i) -> Vector2i:
-	var c: Vector2i = _room_cell[id]
-	var cw: Vector2i = _room_cells[id]
-	if d == Vector2i(1, 0):
-		@warning_ignore("integer_division")
-		return Vector2i(c.x + cw.x - 1, c.y + cw.y / 2)
-	if d == Vector2i(-1, 0):
-		@warning_ignore("integer_division")
-		return Vector2i(c.x, c.y + cw.y / 2)
-	if d == Vector2i(0, 1):
-		@warning_ignore("integer_division")
-		return Vector2i(c.x + cw.x / 2, c.y + cw.y - 1)
-	@warning_ignore("integer_division")
-	return Vector2i(c.x + cw.x / 2, c.y)
-
-
-func _manhattan(start: Vector2i, goal: Vector2i) -> Array:
-	var out: Array = []
-	var cur := start
-	out.append(cur)
-	while cur.x != goal.x:
-		cur += Vector2i(signi(goal.x - cur.x), 0)
-		out.append(cur)
-	while cur.y != goal.y:
-		cur += Vector2i(0, signi(goal.y - cur.y))
-		out.append(cur)
-	return out
-
-
-# --- Фаза 5: геометрия ---
+# --- Фаза 3: геометрия комнаты (полы по клеткам, стены по периметру, объекты) ---
 
 func _build_room(id: int, parent: Node3D, on_transition: Callable) -> void:
 	var room: Dictionary = _rooms[id]
+	# Геометрия строится в МИРОВЫХ координатах (футпринт нерегулярный), поэтому holder в начале
+	# координат: дочерние боксы кладутся по абсолютным клеткам.
 	var holder := Node3D.new()
 	holder.name = "Room_%d" % id
-	holder.position = _positions[id]
 	parent.add_child(holder)
 	if _debug:
 		_attach_debug(holder, _room_debug_text(id))
 
 	var is_connector: bool = room["kind"] == "connector"
-	var size: Vector2 = _room_size[id]
 	var floor_color := _room_color(room, is_connector)
-	_add_box(holder, Vector3(size.x, 0.4, size.y), Vector3(0, -0.2, 0), floor_color, true)
-	_build_walls(holder, id, floor_color.lightened(0.1))
+	var wall_color := floor_color.lightened(0.1)
+
+	# Полы: по GRID-квадрату на каждую клетку футпринта.
+	for c in _foot_cells[id]:
+		_add_box(holder, Vector3(GRID, 0.4, GRID), _cell_world(c.x + 0.5, c.y + 0.5) + Vector3(0, -0.2, 0), floor_color, true)
+
+	# Стены — по периметру футпринта, с проёмами на местах дверей.
+	var runs := _wall_runs(id)
+	var h: float = _room_wall_h[id]
+	for r in runs:
+		_add_wall_run(holder, r, h, wall_color)
+
 	# Заголовок секции (первый объект-heading комнаты) — вывеска над входным проёмом, читаемая
 	# с обеих сторон. Удаётся только если у комнаты есть вход от родителя; иначе (корень)
 	# заголовок остаётся настенной табличкой, как обычный объект.
 	var title_obj = _room_title_object(id)
 	var titled: bool = title_obj != null and _build_room_title(holder, id, title_obj)
-	_place_objects(room, holder, on_transition, title_obj if titled else null)
+	_place_objects(room, holder, on_transition, runs, title_obj if titled else null)
 
 
-## Четыре стены; на каждой вычитаем интервалы-проёмы (_room_openings) и ставим сегменты.
-func _build_walls(holder: Node3D, id: int, color: Color) -> void:
-	var size: Vector2 = _room_size[id]
-	var h: float = _room_wall_h[id]
-	var half_x := size.x * 0.5
-	var half_z := size.y * 0.5
-	var ops: Array = _room_openings.get(id, [])
-	for w in _wall_defs():
-		# along_half — половина длины стены (по ней режем проёмы); off_half — отступ стены от центра.
-		var along_half: float = half_z if w["kind"] == "x" else half_x
-		var off_half: float = half_x if w["kind"] == "x" else half_z
-		var gaps: Array = []
-		for o in ops:
-			if o["key"] == w["key"]:
-				gaps.append([o["lo"], o["hi"]])
-		gaps.sort_custom(func(p, q): return p[0] < q[0])
-		var cursor := -along_half
-		for g in gaps:
-			_add_wall_seg(holder, w, cursor, g[0], off_half, h, color)
-			cursor = g[1]
-		_add_wall_seg(holder, w, cursor, along_half, off_half, h, color)
+## Стены комнаты как набор прямых ПРОБЕГОВ по периметру футпринта. Граничное ребро — это
+## грань клетки футпринта, у которой снаружи нет клетки той же комнаты. Рёбра-двери (там, где
+## связь пробивает стену) исключаются — на их месте проём. Смежные коллинеарные граничные
+## рёбра склеиваются в один пробег (одна длинная стена и площадка под расстановку объектов).
+## Возвращает список пробегов {key, kind, wall_fixed, inner, along_lo, along_hi, yaw, flip, order}.
+func _wall_runs(id: int) -> Array:
+	var foot: Dictionary = _foot[id]
+	var doors: Dictionary = _door_edges.get(id, {})
+	# По каждой стороне (px/nx/pz/nz): fixed-координата стены -> список varying-координат клеток.
+	var sides := {"px": {}, "nx": {}, "pz": {}, "nz": {}}
+	for c in foot:
+		for d in _dirs:
+			if foot.has(c + d):
+				continue   # внутреннее ребро — стены нет
+			if doors.has(_edge_key(c, d)):
+				continue   # дверь — проём
+			var key := _dir_key(d)
+			var fixed: int = c.x if d.x != 0 else c.y
+			var vary: int = c.y if d.x != 0 else c.x
+			var g: Dictionary = sides[key]
+			if not g.has(fixed):
+				g[fixed] = []
+			g[fixed].append(vary)
+
+	var runs: Array = []
+	for key in sides:
+		for fixed in sides[key]:
+			var vals: Array = sides[key][fixed]
+			vals.sort()
+			var i := 0
+			while i < vals.size():
+				var a: int = vals[i]
+				var b: int = a
+				while i + 1 < vals.size() and vals[i + 1] == b + 1:
+					i += 1
+					b = vals[i]
+				i += 1
+				runs.append(_make_run(key, int(fixed), a, b))
+	return runs
 
 
-func _wall_defs() -> Array:
-	return [
-		{"kind": "x", "sign": 1.0, "yaw": -PI * 0.5, "key": "px"},
-		{"kind": "x", "sign": -1.0, "yaw": PI * 0.5, "key": "nx"},
-		{"kind": "z", "sign": 1.0, "yaw": PI, "key": "pz"},
-		{"kind": "z", "sign": -1.0, "yaw": 0.0, "key": "nz"},
-	]
+## Геометрия одного пробега стены. fixed — координата клетки вдоль нормали; [a..b] — диапазон
+## клеток вдоль стены. Стена сдвинута внутрь комнаты на полтолщины (внешняя грань на границе
+## клетки) — у вплотную стоящих комнат стены стыкуются грань-в-грань, без дырок и z-fight.
+func _make_run(key: String, fixed: int, a: int, b: int) -> Dictionary:
+	var run := {"key": key, "flip": false}
+	match key:
+		"px":
+			var outer_x := _cell_world(fixed + 1, 0).x
+			run["kind"] = "x"
+			run["wall_fixed"] = outer_x - WALL_THICK * 0.5
+			run["inner"] = outer_x - OBJECT_INSET
+			run["along_lo"] = _cell_world(0, a).z
+			run["along_hi"] = _cell_world(0, b + 1).z
+			run["yaw"] = -PI * 0.5
+			run["order"] = 1
+		"nx":
+			var ox := _cell_world(fixed, 0).x
+			run["kind"] = "x"
+			run["wall_fixed"] = ox + WALL_THICK * 0.5
+			run["inner"] = ox + OBJECT_INSET
+			run["along_lo"] = _cell_world(0, a).z
+			run["along_hi"] = _cell_world(0, b + 1).z
+			run["yaw"] = PI * 0.5
+			run["flip"] = true
+			run["order"] = 3
+		"pz":
+			var outer_z := _cell_world(0, fixed + 1).z
+			run["kind"] = "z"
+			run["wall_fixed"] = outer_z - WALL_THICK * 0.5
+			run["inner"] = outer_z - OBJECT_INSET
+			run["along_lo"] = _cell_world(a, 0).x
+			run["along_hi"] = _cell_world(b + 1, 0).x
+			run["yaw"] = PI
+			run["flip"] = true
+			run["order"] = 2
+		_:  # nz
+			var oz := _cell_world(0, fixed).z
+			run["kind"] = "z"
+			run["wall_fixed"] = oz + WALL_THICK * 0.5
+			run["inner"] = oz + OBJECT_INSET
+			run["along_lo"] = _cell_world(a, 0).x
+			run["along_hi"] = _cell_world(b + 1, 0).x
+			run["yaw"] = 0.0
+			run["order"] = 0
+	return run
 
 
-func _add_wall_seg(holder: Node3D, w: Dictionary, lo: float, hi: float, off_half: float, h: float, color: Color) -> void:
-	if hi - lo <= 0.05:
-		return
+func _add_wall_run(holder: Node3D, r: Dictionary, h: float, color: Color) -> void:
+	var lo: float = r["along_lo"]
+	var hi: float = r["along_hi"]
 	var center := (lo + hi) * 0.5
 	var length := hi - lo
-	# Сдвигаем стену внутрь комнаты на половину толщины: внешняя грань ложится точно на границу
-	# комнаты. У комнат/коннекторов вплотную стены стыкуются грань-в-грань — без дырок и z-fight.
-	var off: float = off_half - WALL_THICK * 0.5
-	if w["kind"] == "x":
-		_add_box(holder, Vector3(WALL_THICK, h, length), Vector3(w["sign"] * off, h * 0.5, center), color, true)
+	if length <= 0.05:
+		return
+	if r["kind"] == "x":
+		_add_box(holder, Vector3(WALL_THICK, h, length), Vector3(r["wall_fixed"], h * 0.5, center), color, true)
 	else:
-		_add_box(holder, Vector3(length, h, WALL_THICK), Vector3(center, h * 0.5, w["sign"] * off), color, true)
+		_add_box(holder, Vector3(length, h, WALL_THICK), Vector3(center, h * 0.5, r["wall_fixed"]), color, true)
 
 
-## Расставляет объекты по стенам в порядке чтения: стены обходятся по часовой стрелке
-## (см. _object_walls), внутри стены — слева направо (курсор u растёт от левого края, см.
-## _mk_span/_span_pos). Курсор двигается на ширину объекта + зазор; если объект не влезает
-## в остаток текущего пролёта — переходим к следующему (следующая стена/интервал).
-func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, skip_obj = null) -> void:
+## Расставляет объекты по стенам в порядке чтения: пробеги стен обходятся по часовой стрелке
+## (order: север nz → восток px → юг pz → запад nx), внутри пробега — слева направо для
+## зрителя в комнате (у flip-стен «лево» — высокий конец координаты). Курсор двигается на
+## ширину объекта + зазор; не влез в остаток пробега — переходим к следующему.
+func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, runs: Array, skip_obj = null) -> void:
 	var objs: Array = room["objects"]
 	if objs.is_empty():
 		return
-	var spans := _wall_spans(room["id"])
+	var ordered: Array = runs.duplicate()
+	ordered.sort_custom(func(p, q):
+		if p["order"] != q["order"]:
+			return p["order"] < q["order"]
+		return p["along_lo"] < q["along_lo"])
+
+	var spans: Array = []
+	for r in ordered:
+		var lo: float = r["along_lo"] + CORNER_MARGIN
+		var hi: float = r["along_hi"] - CORNER_MARGIN
+		if hi - lo < 0.6:
+			continue
+		spans.append({"r": r, "base_t": (hi if r["flip"] else lo),
+			"sign_u": (-1.0 if r["flip"] else 1.0), "length": hi - lo, "cursor": 0.0})
 	if spans.is_empty():
 		return
+
 	var si := 0
 	for obj in objs:
 		# Заголовок, ушедший вывеской над входом, на стене не дублируем.
@@ -1215,28 +641,39 @@ func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, s
 		var span: Dictionary = spans[si]
 		var u: float = span["cursor"] + w * 0.5
 		span["cursor"] = span["cursor"] + w + OBJECT_GAP
-		var local_pos := _span_pos(span, u)
+		var local_pos := _span_pos(span["r"], span["base_t"] + span["sign_u"] * u)
 		if obj["id"] == _first_obj_id:
-			_record_spawn(room["id"], holder.position, local_pos, span["w"])
-		_build_object(obj, holder, local_pos, span["w"]["yaw"], on_transition)
+			_record_spawn(span["r"], local_pos, span["length"])
+		_build_object(obj, holder, local_pos, span["r"]["yaw"], on_transition)
+
+
+## Мировая точка на внутренней грани стены пробега r по координате t вдоль стены (y=0).
+func _span_pos(r: Dictionary, t: float) -> Vector3:
+	if r["kind"] == "x":
+		return Vector3(r["inner"], 0.0, t)
+	return Vector3(t, 0.0, r["inner"])
 
 
 ## Запоминает геометрию первого объекта для спавна: его мир-позицию, направление внутрь
 ## комнаты от его стены и потолок отступа (чтобы спавн не вылез за противоположную стену).
-func _record_spawn(room_id: int, holder_pos: Vector3, local_pos: Vector3, w: Dictionary) -> void:
-	var size: Vector2 = _room_size[room_id]
-	var along: float = size.x if w["kind"] == "x" else size.y
-	_spawn_obj_world = holder_pos + local_pos
-	_spawn_inward = _wall_inward(w)
-	_spawn_max_d = along - OBJECT_INSET - 1.0
+func _record_spawn(r: Dictionary, world_pos: Vector3, span_len: float) -> void:
+	_spawn_obj_world = world_pos
+	_spawn_inward = _wall_inward(r["key"])
+	_spawn_max_d = maxf(1.4, span_len - OBJECT_INSET)
 	_has_spawn_obj = true
 
 
-## Направление от стены внутрь комнаты (противоположно наружной нормали стены).
-func _wall_inward(w: Dictionary) -> Vector3:
-	if w["kind"] == "x":
-		return Vector3(-w["sign"], 0.0, 0.0)
-	return Vector3(0.0, 0.0, -w["sign"])
+## Направление от стороны key внутрь комнаты (противоположно наружной нормали стены).
+func _wall_inward(key: String) -> Vector3:
+	match key:
+		"px":
+			return Vector3(-1, 0, 0)
+		"nx":
+			return Vector3(1, 0, 0)
+		"pz":
+			return Vector3(0, 0, -1)
+		_:  # nz
+			return Vector3(0, 0, 1)
 
 
 ## Объект-заголовок секции = первый объект комнаты типа "heading" (см. TopologyBuilder:
@@ -1255,25 +692,23 @@ func _room_title_object(id: int):
 ## поэтому название читается и из комнаты, и снаружи. Возвращает false, если входа нет (корень)
 ## или текст пуст — тогда заголовок остаётся обычной настенной табличкой.
 func _build_room_title(holder: Node3D, id: int, title_obj: Dictionary) -> bool:
-	var op = _room_entrance.get(id, null)
-	if op == null:
+	var ent = _room_entrance.get(id, null)
+	if ent == null:
 		return false
 	var text := _truncate(_obj_text(title_obj).strip_edges(), 80)
 	if text == "":
 		return false
 
-	var size: Vector2 = _room_size[id]
-	var half_x := size.x * 0.5
-	var half_z := size.y * 0.5
+	var c: Vector2i = ent["cell"]
+	var d: Vector2i = ent["dir"]
+	var key := _dir_key(d)
 	var wall_h: float = _room_wall_h[id]
-	var key: String = op["key"]
-	var along: float = (float(op["lo"]) + float(op["hi"])) * 0.5
-	var opening_w: float = float(op["hi"]) - float(op["lo"])
 
 	var level: int = int(title_obj.get("content", {}).get("level", 2))
 	var font_px: float = _base_px * float(HEADING_EM.get(level, 1.0))
 	var glyph_m := _px_to_m(font_px)
 	var band_h := clampf(glyph_m * 1.5 + 0.2, TITLE_MIN_H, TITLE_MAX_H)
+	var opening_w := GRID
 	var band_w := opening_w + 2.0 * TITLE_OVERHANG
 	var center_y := wall_h - band_h * 0.5   # лента-перемычка прижата к верху проёма
 
@@ -1282,13 +717,17 @@ func _build_room_title(holder: Node3D, id: int, title_obj: Dictionary) -> bool:
 	var inward_yaw := 0.0              # ориентация Label3D лицом внутрь комнаты
 	match key:
 		"px":
-			pos = Vector3(half_x, center_y, along); out_n = Vector3(1, 0, 0); inward_yaw = -PI * 0.5
+			pos = Vector3(_cell_world(c.x + 1, 0).x, center_y, _cell_world(0, c.y + 0.5).z)
+			out_n = Vector3(1, 0, 0); inward_yaw = -PI * 0.5
 		"nx":
-			pos = Vector3(-half_x, center_y, along); out_n = Vector3(-1, 0, 0); inward_yaw = PI * 0.5
+			pos = Vector3(_cell_world(c.x, 0).x, center_y, _cell_world(0, c.y + 0.5).z)
+			out_n = Vector3(-1, 0, 0); inward_yaw = PI * 0.5
 		"pz":
-			pos = Vector3(along, center_y, half_z); out_n = Vector3(0, 0, 1); inward_yaw = PI
+			pos = Vector3(_cell_world(c.x + 0.5, 0).x, center_y, _cell_world(0, c.y + 1).z)
+			out_n = Vector3(0, 0, 1); inward_yaw = PI
 		_:  # nz
-			pos = Vector3(along, center_y, -half_z); out_n = Vector3(0, 0, -1); inward_yaw = 0.0
+			pos = Vector3(_cell_world(c.x + 0.5, 0).x, center_y, _cell_world(0, c.y).z)
+			out_n = Vector3(0, 0, -1); inward_yaw = 0.0
 
 	var node := Node3D.new()
 	node.position = pos
@@ -1303,7 +742,7 @@ func _build_room_title(holder: Node3D, id: int, title_obj: Dictionary) -> bool:
 	_add_title_label(node, text, font_px, band_w, inward_yaw + PI, out_n * face_off)    # наружу
 
 	if title_obj["id"] == _first_obj_id:
-		_record_title_spawn(holder.position + pos, -out_n, key, half_x, half_z)
+		_record_title_spawn(pos, -out_n, GRID * 1.2)
 	return true
 
 
@@ -1327,91 +766,12 @@ func _add_title_label(node: Node3D, text: String, font_css_px: float, width_m: f
 
 ## Спавн, когда первый объект страницы ушёл вывеской над входом: игрок встаёт сразу за
 ## титульным проёмом и смотрит в комнату (на её центр), въезжая «через заголовок».
-func _record_title_spawn(door_world: Vector3, inward: Vector3, key: String,
-		half_x: float, half_z: float) -> void:
-	var reach: float = half_x if (key == "px" or key == "nx") else half_z
+func _record_title_spawn(door_world: Vector3, inward: Vector3, reach: float) -> void:
 	var d: float = clampf(reach * 0.6, 1.2, 3.0)
 	spawn_point = door_world + inward * d + Vector3(0, 1.0, 0)
 	spawn_look_at = Vector3(door_world.x, 0.0, door_world.z) + inward * (reach + 1.0) + Vector3(0, 1.6, 0)
 	has_spawn_look = true
 	_spawn_done = true
-
-
-func _wall_spans(id: int) -> Array:
-	var size: Vector2 = _room_size[id]
-	var half_x := size.x * 0.5
-	var half_z := size.y * 0.5
-	var ops: Array = _room_openings.get(id, [])
-	var spans: Array = []
-	for w in _object_walls():
-		var along_half: float = half_z if w["kind"] == "x" else half_x
-		var off_half: float = half_x if w["kind"] == "x" else half_z
-		var inset := off_half - OBJECT_INSET
-		var along_lo := -along_half + CORNER_MARGIN
-		var along_hi := along_half - CORNER_MARGIN
-		var gaps: Array = []
-		for o in ops:
-			if o["key"] == w["key"]:
-				gaps.append([o["lo"], o["hi"]])
-		gaps.sort_custom(func(p, q): return p[0] < q[0])
-		var free := _subtract_gaps(along_lo, along_hi, gaps, DOOR_MARGIN)
-		# Интервалы свободны слева направо для зрителя в комнате: у flip-стен «лево» —
-		# это высокий конец координаты, поэтому порядок интервалов разворачиваем.
-		if w["flip"]:
-			free.reverse()
-		for iv in free:
-			if iv[1] - iv[0] >= 0.6:
-				spans.append(_mk_span(w, iv[0], iv[1], inset))
-	return spans
-
-
-## Стены в порядке обхода ПО ЧАСОВОЙ СТРЕЛКЕ (вид сверху, север = -Z):
-## север(nz) → восток(px) → юг(pz) → запад(nx). `flip` помечает стены, где «слева направо»
-## для зрителя, стоящего в комнате лицом к стене, идёт в сторону УБЫВАНИЯ координаты вдоль стены
-## (юг и запад). yaw/sign/key совпадают с _wall_defs (геометрия стен), порядок здесь — только
-## для расстановки объектов.
-func _object_walls() -> Array:
-	return [
-		{"kind": "z", "sign": -1.0, "yaw": 0.0, "key": "nz", "flip": false},
-		{"kind": "x", "sign": 1.0, "yaw": -PI * 0.5, "key": "px", "flip": false},
-		{"kind": "z", "sign": 1.0, "yaw": PI, "key": "pz", "flip": true},
-		{"kind": "x", "sign": -1.0, "yaw": PI * 0.5, "key": "nx", "flip": true},
-	]
-
-
-## Свободные интервалы [lo,hi] за вычетом gaps (расширенных margin с каждой стороны).
-func _subtract_gaps(lo: float, hi: float, gaps: Array, margin: float) -> Array:
-	var free: Array = []
-	var cur := lo
-	for g in gaps:
-		var glo: float = g[0] - margin
-		var ghi: float = g[1] + margin
-		if glo > cur:
-			free.append([cur, minf(glo, hi)])
-		cur = maxf(cur, ghi)
-		if cur >= hi:
-			break
-	if cur < hi:
-		free.append([cur, hi])
-	return free
-
-
-## Пролёт стены под укладку объектов. Курсор измеряется в u ∈ [0, length] от ЛЕВОГО для
-## зрителя края: координата вдоль стены t = base_t + sign_u·u. У flip-стен лево — высокий
-## конец (base_t = hi, sign_u = -1), у обычных — низкий (base_t = lo, sign_u = +1).
-func _mk_span(w: Dictionary, lo: float, hi: float, inset: float) -> Dictionary:
-	var base_t: float = hi if w["flip"] else lo
-	var sign_u: float = -1.0 if w["flip"] else 1.0
-	return {"w": w, "base_t": base_t, "sign_u": sign_u, "length": hi - lo, "inset": inset, "cursor": 0.0}
-
-
-func _span_pos(span: Dictionary, u: float) -> Vector3:
-	var w: Dictionary = span["w"]
-	var inset: float = span["inset"]
-	var t: float = span["base_t"] + span["sign_u"] * u
-	if w["kind"] == "x":
-		return Vector3(w["sign"] * inset, 0.0, t)
-	return Vector3(t, 0.0, w["sign"] * inset)
 
 
 ## Полы коридоров — по одному GRID-квадрату на коридорную клетку.

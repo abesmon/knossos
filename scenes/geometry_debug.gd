@@ -1,14 +1,15 @@
 extends Node
 
-## Отладочная сцена геометрии (вид сверху): адрес -> HTML -> топология -> GeometryLab ->
-## 2D-раскладка комнат на сетке. Площадка для алгоритма ФОРМ комнат (пентамино + примыкание),
-## отдельная от продакшн-геометрии (world_generator.gd). См. docs/geometry-lab.md.
+## Отладочная сцена геометрии (вид сверху): адрес -> HTML -> топология -> SpaceLayout ->
+## 2D-раскладка комнат на сетке. Площадка для алгоритма ФОРМ комнат (пентамино + примыкание).
+## SpaceLayout — тот же единый генератор пространства, что строит и реальное 3D-пространство
+## (WorldGenerator). Здесь та же раскладка показана видом сверху. См. docs/geometry-lab.md.
 
 @onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/address bar"
 @onready var _go: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/go"
 
 var _fetcher: PageFetcher
-var _lab: GeometryLab
+var _lab: SpaceLayout
 var _view: GeometryTopView
 var _details: RichTextLabel
 var _status: Label
@@ -20,7 +21,7 @@ var _loading := false
 
 
 func _ready() -> void:
-	_lab = GeometryLab.new()
+	_lab = SpaceLayout.new()
 	_build_ui()
 
 	_fetcher = PageFetcher.new()
@@ -223,4 +224,4 @@ func _format_room(room_id: int) -> String:
 func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
-	print("[GeometryLab] ", text)
+	print("[SpaceLayout] ", text)
