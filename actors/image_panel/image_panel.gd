@@ -63,7 +63,11 @@ func _ready() -> void:
 	_mesh.mesh = _quad
 	_mat = StandardMaterial3D.new()
 	_mat.albedo_color = Color(0.18, 0.21, 0.28)   # тон заглушки
+	# Рендерим квад на обе стороны: картинка видна и сзади (без отбраковки граней).
 	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Unlit: текстура показывается как есть, без зависимости от освещения сцены —
+	# иначе обратная грань (и грань без света) уходила бы в темноту.
+	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mesh.material_override = _mat
 	add_child(_mesh)
 
@@ -123,7 +127,7 @@ func _on_texture(tex: Texture2D) -> void:
 	_mat.albedo_texture = tex
 	_mat.albedo_color = Color.WHITE
 	_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	# Остаёмся в unlit (см. _ready): картинка одинаково яркая с обеих сторон.
 	# Без этого StandardMaterial3D игнорирует альфу PNG/GIF и прозрачные пиксели
 	# рендерятся своим RGB (обычно чёрным) — отсюда «чёрный фон». Альфу включаем
 	# только если она реально есть, чтобы не платить за сортировку прозрачных
