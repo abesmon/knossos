@@ -9,18 +9,29 @@ extends StaticBody3D
 signal link_activated(transition: Dictionary)
 
 const GROUP := "rich_panel"
-const PANEL_WIDTH_PX := 960       # шире = текст растёт вширь, а не вверх (меньше высоких столбов)
-const MAX_HEIGHT_PX := 832        # потолок высоты панели (~2.6 м): выше — скролл, а не башня
-const PIXEL_PER_METER := 320.0   # перевод пикселей вьюпорта в метры квада
+# Метрика мира: 1 м = 128 px вьюпорта. Та же линейка, что у текста и картинок снаружи
+# (WorldGenerator.PX_PER_METER / ImagePanel.PX_PER_METER) — поэтому ширина колонки,
+# инлайн-картинки в тексте и кегль шрифта консистентны с остальным миром.
+const PIXEL_PER_METER := 128.0
+# Ширина панели пружинит под контент (см. _upper_w_px/_refit): текст не шире TEXT_MAX_M, но
+# картинка пошире расширяет панель под свою ширину; MIN_W_M — чтобы короткий текст не сжимался
+# в нечитаемую полоску. MAX_HEIGHT_M — потолок высоты, выше него контент уходит в скролл.
+const TEXT_MAX_M := 1.7
+const MIN_W_M := 0.5
+const MAX_HEIGHT_M := 2.6
 const FONT_SIZE := 24            # дефолтный кегль вьюпорта, если мир не задал свой
 const MARGIN := 18
 const SCROLLBAR_W := 16          # ширина заметного скроллбара у прокручиваемых панелей, px
+const TEXT_MAX_W_PX := int(TEXT_MAX_M * PIXEL_PER_METER)   # текст-кап ширины панели, px вьюпорта
+const MIN_W_PX := int(MIN_W_M * PIXEL_PER_METER)
+const MAX_HEIGHT_PX := int(MAX_HEIGHT_M * PIXEL_PER_METER)
+const CHROME_PX := MARGIN * 2 + SCROLLBAR_W                # поля + жёлоб скроллбара по ширине
 const PLACEHOLDER_COLOR := Color(0.18, 0.21, 0.28, 1.0)  # тон заглушки инлайн-картинки до загрузки
 
 var _runs: Array = []
 var _metas: Array = []           # индекс url-меты -> Transition
 var _meta_alt: Dictionary = {}   # индекс url-меты -> alt картинки (для строки статуса)
-var _w_px := PANEL_WIDTH_PX
+var _w_px := TEXT_MAX_W_PX       # текущая ширина панели, px; пружинит под контент (см. _refit)
 var _h_px := 120
 var _font_size := FONT_SIZE      # кегль вьюпорта; мир задаёт его из базы текста страницы
 var _probing := false            # is_active_at «кликает» вхолостую, чтобы узнать, есть ли ссылка
@@ -54,6 +65,9 @@ func setup(runs: Array, font_world_m: float = -1.0, image_loader: ImageLoader = 
 	_base_url = base_url
 	if font_world_m > 0.0:
 		_font_size = max(8, int(round(font_world_m * PIXEL_PER_METER)))
+	# Стартовая ширина — верхняя граница (текст-кап или самая широкая HTML-картинка). Точную
+	# ширину под текст ужмёт _refit по факту раскладки, когда станет известна ширина контента.
+	_w_px = _upper_w_px()
 	_estimate_height()
 
 
@@ -195,8 +209,7 @@ func _text_run_bbcode(r: Dictionary) -> String:
 ## луча (синтетический клик во вьюпорте) попадает в meta-регион и эмитит meta_clicked — отдельная
 ## подпись-ссылка больше не нужна. alt такой картинки уходит в строку статуса (см. aim_hint_at).
 func _append_image(r: Dictionary) -> void:
-	var src := str(r.get("src", "")).strip_edges()
-	var url := PageFetcher.resolve_url(src, _base_url) if src != "" else ""
+	var url := _run_url(r)
 	var alt := str(r.get("alt", "")).strip_edges()
 	var fn = r.get("function", null)
 	var has_link: bool = fn != null and typeof(fn) == TYPE_DICTIONARY
@@ -213,11 +226,10 @@ func _append_image(r: Dictionary) -> void:
 		_image_loader.request_image(url, func(t: Texture2D): _on_image_result(url, t))
 
 	var tex: Texture2D = _img_tex.get(url, null)  # null здесь = ещё грузится (failed отсеян выше)
-	var aspect := -1.0
+	var tex_px := Vector2.ZERO
 	if tex != null:
-		var px := tex.get_size()
-		aspect = 1.0 if px.y <= 0 else float(px.x) / float(px.y)
-	var size := _inline_size(r, aspect)
+		tex_px = Vector2(tex.get_size())
+	var size := _inline_size(r, tex_px)
 
 	# Ссылка-картинка: push_meta делает кликабельным сам [img] (meta_clicked по клику в регион).
 	if has_link:
@@ -261,11 +273,14 @@ func _do_repopulate() -> void:
 	_refit()  # пересчитает высоту под подросший контент и попросит перерисовать кадр
 
 
-## Размер инлайн-картинки в пикселях вьюпорта. Приоритет — размеры из HTML (width_px/height_px);
-## недостающее измерение берём из пропорций реальной текстуры (aspect>0) либо из дефолта.
-## Ширину капим под колонку текста, чтобы картинка не вылезала за панель и скроллбар.
-func _inline_size(r: Dictionary, aspect: float) -> Vector2i:
+## Размер инлайн-картинки в пикселях вьюпорта (= px страницы: вьюпорт 1:1, PIXEL_PER_METER).
+## Приоритет — размеры из HTML (width_px/height_px); недостающее измерение берём из пропорций
+## реальной текстуры. Без размеров в HTML берём СОБСТВЕННОЕ разрешение картинки (как ImagePanel),
+## чтобы инлайн и отдельная картинка одного источника совпадали по размеру. Ширину капим под
+## колонку текста, чтобы картинка не вылезала за панель и скроллбар.
+func _inline_size(r: Dictionary, tex_px: Vector2) -> Vector2i:
 	var content_w := float(_w_px - MARGIN * 2 - SCROLLBAR_W)
+	var aspect := (tex_px.x / tex_px.y) if (tex_px.x > 0.0 and tex_px.y > 0.0) else -1.0
 	var w := float(r.get("width_px", 0.0))
 	var h := float(r.get("height_px", 0.0))
 	if w > 0.0 and h > 0.0:
@@ -274,9 +289,13 @@ func _inline_size(r: Dictionary, aspect: float) -> Vector2i:
 		h = (w / aspect) if aspect > 0.0 else w * 0.66
 	elif h > 0.0:
 		w = (h * aspect) if aspect > 0.0 else h / 0.66
+	elif tex_px.x > 0.0:
+		w = tex_px.x
+		h = tex_px.y
 	else:
+		# Текстура ещё не пришла — временный дефолт до перезаполнения по _on_image_result.
 		w = minf(content_w, 360.0)
-		h = (w / aspect) if aspect > 0.0 else w * 0.66
+		h = w * 0.66
 	if w > content_w:
 		h *= content_w / w
 		w = content_w
@@ -319,7 +338,7 @@ func _estimate_height() -> void:
 ## Оценка высоты панели (px) по длине текста и переносам — БЕЗ рендера. static, чтобы
 ## WorldGenerator мог замерить будущую панель тем же кодом, что и сама панель (футпринт
 ## для раскладки и фактическая геометрия совпадают). См. WorldGenerator._measure_object.
-static func estimate_height_px(runs: Array, font_size: int, w_px: int = PANEL_WIDTH_PX) -> int:
+static func estimate_height_px(runs: Array, font_size: int, w_px: int = TEXT_MAX_W_PX) -> int:
 	var plain := ""
 	var explicit_lines := 1
 	for r in runs:
@@ -339,6 +358,52 @@ static func estimate_height_px(runs: Array, font_size: int, w_px: int = PANEL_WI
 ## Та же оценка в метрах квада — удобна геометрии.
 static func estimate_height_m(runs: Array, font_size: int) -> float:
 	return float(estimate_height_px(runs, font_size)) / PIXEL_PER_METER
+
+
+## Верхняя граница ширины панели (px): текст не шире текст-капа, но картинка пошире расширяет
+## панель под себя (ширина самой широкой картинки + хром). static, чтобы WorldGenerator брал тот
+## же футпринт по ширине. Учитывает только HTML-размер картинок (реальное разрешение неизвестно
+## до загрузки); рантайм может подрасти под интринзик-размер уже загруженной текстуры.
+static func estimate_width_px(runs: Array) -> int:
+	var img := 0
+	for r in runs:
+		if str(r.get("type", "")) == "image":
+			img = maxi(img, int(r.get("width_px", 0)))
+	return maxi(TEXT_MAX_W_PX, img + CHROME_PX) if img > 0 else TEXT_MAX_W_PX
+
+
+## Та же оценка ширины в метрах квада — для футпринта WorldGenerator.
+static func estimate_width_m(runs: Array) -> float:
+	return float(estimate_width_px(runs)) / PIXEL_PER_METER
+
+
+## Верхняя граница ширины конкретной панели (px). В отличие от static estimate_width_px, видит
+## реальное разрешение уже докачанных картинок-прогонов (важно для картинок без HTML-размеров).
+func _upper_w_px() -> int:
+	var img := _widest_image_px()
+	return maxi(TEXT_MAX_W_PX, img + CHROME_PX) if img > 0 else TEXT_MAX_W_PX
+
+
+## Ширина самой широкой картинки-прогона, px: размер из HTML width_px, иначе собственное
+## разрешение уже загруженной текстуры (0, если её ещё нет — учтём при перезаполнении).
+func _widest_image_px() -> int:
+	var best := 0
+	for r in _runs:
+		if str(r.get("type", "")) != "image":
+			continue
+		var w := int(r.get("width_px", 0))
+		if w <= 0:
+			var tex: Texture2D = _img_tex.get(_run_url(r), null)
+			if tex != null:
+				w = int(tex.get_size().x)
+		best = maxi(best, w)
+	return best
+
+
+## URL картинки-прогона (резолв src относительно base_url) — общий с _append_image/_widest_image_px.
+func _run_url(r: Dictionary) -> String:
+	var src := str(r.get("src", "")).strip_edges()
+	return PageFetcher.resolve_url(src, _base_url) if src != "" else ""
 
 
 func _layout_viewport() -> void:
@@ -412,25 +477,38 @@ func _build_quad() -> void:
 	box.size = Vector3(w_m, h_m, 0.08)
 
 
-## После реальной раскладки текста берём фактическую высоту контента (get_content_height) —
-## оценка _estimate_height её систематически занижала, отсюда обрезанные снизу панели. Если
-## контент выше потолка MAX_HEIGHT_PX — фиксируем высоту на потолке и включаем скролл.
+## После реальной раскладки текста подгоняем панель под факт: сперва ШИРИНУ (пружиним до
+## ширины контента — короткий текст не растягивается до текст-капа, но картинка пошире держит
+## панель широкой), затем ВЫСОТУ (get_content_height; оценка _estimate_height её занижала,
+## отсюда обрезанные снизу панели). Контент выше потолка MAX_HEIGHT_PX уходит в скролл.
 func _refit() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	if not is_instance_valid(self):
 		return
+	# Ширина: ужимаем до фактической ширины контента, но не уже MIN и не шире верхней границы
+	# (текст-кап / самая широкая картинка). get_content_width при включённом переносе вернёт
+	# ширину самой длинной строки — для короткого текста это даст узкую панель.
+	var upper := _upper_w_px()
+	var cw := _label.get_content_width()
+	var new_w := clampi(int(ceil(cw)) + CHROME_PX, MIN_W_PX, upper) if cw > 0 else upper
+	if new_w != _w_px:
+		_w_px = new_w
+		_viewport.size = Vector2i(_w_px, _h_px)
+		# Дать тексту переразложиться под новую ширину, прежде чем мерить высоту.
+		await get_tree().process_frame
+		await get_tree().process_frame
+		if not is_instance_valid(self):
+			return
 	var ch := _label.get_content_height()
 	if ch <= 0:
 		return   # раскладка ещё не готова — оставляем оценку, текст не теряется
 	var content := int(ceil(ch)) + MARGIN * 2
 	_scrollable = content > MAX_HEIGHT_PX
 	_label.scroll_active = _scrollable
-	var target := clampi(content, 80, MAX_HEIGHT_PX)
-	if target != _h_px:
-		_h_px = target
-		_viewport.size = Vector2i(_w_px, _h_px)  # фон/лейбл с PRESET_FULL_RECT тянутся сами
-		_build_quad()
+	_h_px = clampi(content, 80, MAX_HEIGHT_PX)
+	_viewport.size = Vector2i(_w_px, _h_px)  # фон/лейбл с PRESET_FULL_RECT тянутся сами
+	_build_quad()
 	_update_thumb()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 

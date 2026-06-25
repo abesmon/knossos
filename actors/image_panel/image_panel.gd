@@ -11,9 +11,15 @@ extends StaticBody3D
 signal link_activated(transition: Dictionary)
 
 const GROUP := "image_panel"
+# Единая метрика мира: 1 м = 128 пикселей. Размеры картинки из HTML (width/height) и её
+# собственное разрешение текстуры переводятся в метры через неё — та же линейка, что у
+# текста и ширин панелей (WorldGenerator.PX_PER_METER, docs/html-to-3d-topology.md §13).
+const PX_PER_METER := 128.0
 const BASE_WIDTH := 2.6        # запасная ширина квада, если мир не задал свою, м
-const MAX_WIDTH := 6.3         # потолок ширины (~0.7 комнаты), чтобы не перекрывать стены
-const MAX_HEIGHT := 3.0        # потолок высоты, чтобы вытянутые картинки не пробивали стены
+# Потолки не ограничивают картинку (она занимает свой реальный размер), но нужны как
+# дефолт-капы для экрана <video> в WorldGenerator._measure_video.
+const MAX_WIDTH := 6.3
+const MAX_HEIGHT := 3.0
 const DEFAULT_RATIO := 0.66    # стартовые пропорции заглушки до загрузки
 const EYE_LEVEL := 1.6         # высота центра картинки, м (= высота камеры игрока)
 const FLOOR_GAP := 0.1         # минимальный зазор от низа высокой картинки до пола, м
@@ -107,7 +113,8 @@ func _on_texture(tex: Texture2D) -> void:
 	var size := tex.get_size()
 	var aspect: float = 1.0 if size.y <= 0 else float(size.x) / float(size.y)
 	# Размеры из HTML главнее: оба заданы -> берём как есть; один -> второй из пропорций
-	# реальной текстуры; ничего нет -> запасная ширина и пропорции текстуры.
+	# реальной текстуры; ничего нет -> собственное разрешение картинки в масштабе
+	# PX_PER_METER (1024px = 1м), без привязки к запасной ширине.
 	var w: float
 	var h: float
 	if _want_w > 0.0 and _want_h > 0.0:
@@ -120,8 +127,8 @@ func _on_texture(tex: Texture2D) -> void:
 		h = _want_h
 		w = h * aspect
 	else:
-		w = _fallback_w
-		h = w / aspect
+		w = float(size.x) / PX_PER_METER
+		h = float(size.y) / PX_PER_METER
 	_quad.size = _clamp_size(Vector2(w, h))
 
 	_mat.albedo_texture = tex
@@ -188,19 +195,11 @@ func _initial_size() -> Vector2:
 	return _clamp_size(Vector2(w, h))
 
 
-## Ужимает размер под потолки ширины/высоты, сохраняя пропорции.
+## Размер квада берётся как есть — без пола и потолков: картинка занимает ровно свой
+## размер по метрике 1м=512px, хоть крошечная, хоть огромная. Только страхуемся от
+## вырожденного нуля, чтобы квад не схлопнулся.
 func _clamp_size(s: Vector2) -> Vector2:
-	var w := s.x
-	var h := s.y
-	if w > MAX_WIDTH:
-		var k := MAX_WIDTH / w
-		w *= k
-		h *= k
-	if h > MAX_HEIGHT:
-		var k := MAX_HEIGHT / h
-		w *= k
-		h *= k
-	return Vector2(maxf(0.2, w), maxf(0.2, h))
+	return Vector2(maxf(0.001, s.x), maxf(0.001, s.y))
 
 
 func _update_layout() -> void:

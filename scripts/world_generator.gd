@@ -48,11 +48,20 @@ const TITLE_MAX_H := 1.2        # максимальная высота выве
 const PORTAL_W := 1.4
 const PORTAL_H := 2.6
 
-# --- Масштаб: единый перевод CSS-пикселей страницы в метры мира ---
-const M_PER_BASE_LINE := 0.18   # мир-высота глифа базового текста, м
-const LABEL_PIXEL_SIZE := 0.006 # Label3D: 1px кегля Godot -> м
+# --- Масштаб: единая метрика «1 м мира = PX_PER_METER CSS-пикселей страницы» ---
+# От неё считается ВСЁ: размеры шрифтов, ширины панелей, картинки (HTML-размеры и реальное
+# разрешение текстуры). Один коэффициент px→м для текста и картинок — поэтому картинки больше
+# не нужно подгонять под текст, у них общая линейка. Меняешь это число — консистентно
+# пересчитывается весь мир. Должно совпадать с ImagePanel.PX_PER_METER и
+# RichPanel.PIXEL_PER_METER (docs/html-to-3d-topology.md §13).
+const PX_PER_METER := 128.0
+# Label3D разводит мировой размер на растровый кегль (качество) и pixel_size (масштаб):
+# растр держим в LABEL_RASTER_SCALE× от css-кегля (крупно, не мылит), а pixel_size выводим
+# из метрики — тогда итог font_size * pixel_size = css_px / PX_PER_METER (см. _godot_font),
+# а качество растра не зависит от выбранного масштаба мира.
+const LABEL_RASTER_SCALE := 1.875
+const LABEL_PIXEL_SIZE := 1.0 / (PX_PER_METER * LABEL_RASTER_SCALE)
 const PANEL_WIDTH_M := 2.2      # ширина текстовой таблички-Label3D, м
-const IMAGE_FALLBACK_EM := 20.0 # ширина картинки без размеров в HTML, в «эмах» базы
 const VIDEO_FALLBACK_EM := 26.0 # ширина <video> без размеров в HTML, в «эмах» базы (экран крупнее картинки)
 const HEADING_EM := {1: 2.0, 2: 1.5, 3: 1.17, 4: 1.0, 5: 0.83, 6: 0.67}
 
@@ -66,8 +75,7 @@ var _image_loader: ImageLoader = null
 var _sources: Dictionary = {}     # id -> исходный HTML (есть только при debug-сборке топологии)
 var _debug: bool = false          # привязывать ли провенанс к узлам (есть "sources" в артефакте)
 var _base_px := 16.0
-var _m_per_px := M_PER_BASE_LINE / 16.0
-var _rich_w_m := 2.375
+var _m_per_px := 1.0 / PX_PER_METER
 var _rich_font_px := 24
 
 # Визуальный паспорт документа (artifact["document"], см. topology_builder): из них небо,
@@ -147,8 +155,10 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 	_base_px = float(space.get("typography", {}).get("base_px", 16.0))
 	if _base_px <= 0.0:
 		_base_px = 16.0
-	_m_per_px = M_PER_BASE_LINE / _base_px
-	_rich_w_m = float(RichPanel.PANEL_WIDTH_PX) / RichPanel.PIXEL_PER_METER
+	# Масштаб фиксирован метрикой PX_PER_METER и НЕ зависит от base_px: «14px шрифт» всегда
+	# 14/PX_PER_METER м на любой странице. base_px остаётся лишь для детекции заголовков и
+	# расчёта реального css-кегля элементов (em-множители), но не для перевода px→м.
+	_m_per_px = 1.0 / PX_PER_METER
 	_rich_font_px = max(8, int(round(_px_to_m(_base_px) * RichPanel.PIXEL_PER_METER)))
 	_root_id = space.get("root", -1)
 	if _root_id == -1 or not _rooms.has(_root_id):
@@ -262,13 +272,15 @@ func _measure_object(obj: Dictionary) -> Vector2:
 		return Vector2(PORTAL_W, PORTAL_H)
 	var runs: Array = obj.get("content", {}).get("runs", [])
 	if type == "text" and not runs.is_empty() and (_runs_have_links(runs) or _obj_text(obj).length() > 200):
-		return Vector2(_rich_w_m, RichPanel.estimate_height_m(runs, _rich_font_px))
+		return Vector2(RichPanel.estimate_width_m(runs), RichPanel.estimate_height_m(runs, _rich_font_px))
 	if type == "heading" and _runs_have_links(obj.get("content", {}).get("runs", [])):
-		return Vector2(_rich_w_m, RichPanel.estimate_height_m(runs, _heading_rich_px(obj)))
+		return Vector2(RichPanel.estimate_width_m(runs), RichPanel.estimate_height_m(runs, _heading_rich_px(obj)))
 	if type == "list" and (_list_has_links(obj) or _list_has_images(obj)):
-		return Vector2(_rich_w_m, RichPanel.estimate_height_m(_list_runs(obj), _rich_font_px))
+		var list_runs := _list_runs(obj)
+		return Vector2(RichPanel.estimate_width_m(list_runs), RichPanel.estimate_height_m(list_runs, _rich_font_px))
 	if type == "table" and (_table_has_links(obj) or _table_has_images(obj)):
-		return Vector2(_rich_w_m, RichPanel.estimate_height_m(_table_runs(obj), _rich_font_px))
+		var table_runs := _table_runs(obj)
+		return Vector2(RichPanel.estimate_width_m(table_runs), RichPanel.estimate_height_m(table_runs, _rich_font_px))
 	return _measure_panel(obj)
 
 
@@ -299,9 +311,9 @@ func _measure_panel(obj: Dictionary) -> Vector2:
 
 func _measure_image(obj: Dictionary) -> Vector2:
 	var content: Dictionary = obj.get("content", {})
-	var want_w := _px_to_m(float(content.get("width_px", 0.0)))
-	var want_h := _px_to_m(float(content.get("height_px", 0.0)))
-	var fallback_w := _px_to_m(_base_px * IMAGE_FALLBACK_EM)
+	var want_w := _img_px_to_m(float(content.get("width_px", 0.0)))
+	var want_h := _img_px_to_m(float(content.get("height_px", 0.0)))
+	var fallback_w := ImagePanel.BASE_WIDTH
 	var w := 0.0
 	var h := 0.0
 	if want_w > 0.0 and want_h > 0.0:
@@ -316,15 +328,9 @@ func _measure_image(obj: Dictionary) -> Vector2:
 	else:
 		w = fallback_w
 		h = fallback_w * ImagePanel.DEFAULT_RATIO
-	if w > ImagePanel.MAX_WIDTH:
-		var k := ImagePanel.MAX_WIDTH / w
-		w *= k
-		h *= k
-	if h > ImagePanel.MAX_HEIGHT:
-		var k2 := ImagePanel.MAX_HEIGHT / h
-		w *= k2
-		h *= k2
-	return Vector2(maxf(0.2, w), maxf(0.2, h))
+	# Без потолков/пола: картинка занимает ровно свой размер по метрике 1м=512px (footprint
+	# для раскладки совпадает с реальным квадом). Пусть будет хоть крошечной, хоть огромной.
+	return Vector2(maxf(0.001, w), maxf(0.001, h))
 
 
 ## Размер экрана <video>: из width/height (если заданы), иначе запасная ширина с пропорциями
@@ -1057,9 +1063,9 @@ func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw
 		transition, on_transition: Callable) -> Node3D:
 	var content: Dictionary = obj.get("content", {})
 	var alt: String = str(content.get("alt", content.get("text", "")))
-	var want_w := _px_to_m(float(content.get("width_px", 0.0)))
-	var want_h := _px_to_m(float(content.get("height_px", 0.0)))
-	var fallback_w := _px_to_m(_base_px * IMAGE_FALLBACK_EM)
+	var want_w := _img_px_to_m(float(content.get("width_px", 0.0)))
+	var want_h := _img_px_to_m(float(content.get("height_px", 0.0)))
+	var fallback_w := ImagePanel.BASE_WIDTH
 	var panel := ImagePanel.new()
 	panel.setup(alt, transition, want_w, want_h, fallback_w)
 	holder.add_child(panel)
@@ -1335,6 +1341,12 @@ func _collapse_html(html: String) -> String:
 
 func _px_to_m(px: float) -> float:
 	return px * _m_per_px
+
+
+## Перевод пикселей картинки в метры — та же метрика, что у текста (1м = PX_PER_METER px).
+## Сверяемся с ImagePanel.PX_PER_METER, чтобы footprint и реальный квад картинки не разошлись.
+func _img_px_to_m(px: float) -> float:
+	return px / ImagePanel.PX_PER_METER
 
 
 func _godot_font(css_px: float) -> int:
