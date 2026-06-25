@@ -33,6 +33,7 @@ var _want_h := 0.0
 var _fallback_w := BASE_WIDTH
 
 var _mesh: MeshInstance3D
+var _mesh_back: MeshInstance3D   # изнанка: тот же квад, развёрнутый на 180° вокруг Y
 var _quad: QuadMesh
 var _mat: StandardMaterial3D
 var _label: Label3D
@@ -69,13 +70,23 @@ func _ready() -> void:
 	_mesh.mesh = _quad
 	_mat = StandardMaterial3D.new()
 	_mat.albedo_color = Color(0.18, 0.21, 0.28)   # тон заглушки
-	# Рендерим квад на обе стороны: картинка видна и сзади (без отбраковки граней).
-	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Каждая грань рисуется только со своей стороны (CULL_BACK), а изнанку даёт
+	# второй квад, развёрнутый на 180° вокруг Y (_mesh_back). Так картинка читается
+	# одинаково с обеих сторон, без зеркала, которое давала единая двусторонняя грань.
+	_mat.cull_mode = BaseMaterial3D.CULL_BACK
 	# Unlit: текстура показывается как есть, без зависимости от освещения сцены —
 	# иначе обратная грань (и грань без света) уходила бы в темноту.
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mesh.material_override = _mat
 	add_child(_mesh)
+
+	# Изнанка: тот же меш и материал, развёрнут на 180° вокруг Y — обращён назад и
+	# показывает картинку в нормальной (не зеркальной) ориентации.
+	_mesh_back = MeshInstance3D.new()
+	_mesh_back.mesh = _quad
+	_mesh_back.material_override = _mat
+	_mesh_back.rotation = Vector3(0, PI, 0)
+	add_child(_mesh_back)
 
 	_label = Label3D.new()
 	_label.text = _placeholder_text()
@@ -208,6 +219,7 @@ func _update_layout() -> void:
 	# лицом, высокие приподняты так, чтобы низ не вжимался в пол (FLOOR_GAP).
 	var center_y := maxf(EYE_LEVEL, _height_m * 0.5 + FLOOR_GAP)
 	_mesh.position = Vector3(0, center_y, 0)
+	_mesh_back.position = Vector3(0, center_y, 0)
 	_shape.size = Vector3(_quad.size.x, _height_m, 0.08)
 	_collision.position = Vector3(0, center_y, 0)
 	_label.position = Vector3(0, center_y, 0.06)
