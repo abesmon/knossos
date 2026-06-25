@@ -19,19 +19,23 @@ const PLACEHOLDER_COLOR := Color(0.18, 0.21, 0.28, 1.0)  # тон заглушк
 
 var _runs: Array = []
 var _metas: Array = []           # индекс url-меты -> Transition
+var _meta_alt: Dictionary = {}   # индекс url-меты -> alt картинки (для строки статуса)
 var _w_px := PANEL_WIDTH_PX
 var _h_px := 120
 var _font_size := FONT_SIZE      # кегль вьюпорта; мир задаёт его из базы текста страницы
 var _probing := false            # is_active_at «кликает» вхолостую, чтобы узнать, есть ли ссылка
 var _probe_hit := false          # результат такого пробного клика
 var _probe_transition = null     # Transition под точкой пробного клика (для строки статуса)
+var _probe_alt := ""             # alt картинки под точкой пробного клика (приоритетный текст статуса)
 var _scrollable := false         # контент выше потолка ⇒ панель прокручивается колесом
 var _thumb: ColorRect = null     # собственный индикатор скролла (штатный бар RichTextLabel прячем)
 # Источник растрового инлайна: лоадер тянет текстуры картинок-прогонов, base_url резолвит src.
 var _image_loader: ImageLoader = null
 var _base_url := ""
-var _img_seq := 0                # уникальные ключи для add_image/update_image
 var _placeholder_tex: Texture2D = null  # 1×1 заглушка под add_image до прихода текстуры
+var _img_tex: Dictionary = {}    # url -> Texture2D (null = не удалось); результаты докачки картинок
+var _img_requested: Dictionary = {}  # url'ы, по которым докачка уже запрошена (без дублей)
+var _repopulate_queued := false  # дебаунс перезаполнения лейбла, когда подряд приходит несколько картинок
 
 @onready var _viewport: SubViewport = $SubViewport
 @onready var _bg: ColorRect = $SubViewport/Background
@@ -101,15 +105,20 @@ func is_active_at(point: Vector3) -> bool:
 	_probing = true
 	_probe_hit = false
 	_probe_transition = null
+	_probe_alt = ""
 	_push_click(px)
 	_probing = false
 	return _probe_hit
 
 
-## Куда ведёт ссылка под прицелом — для строки статуса. Переиспользует Transition,
-## пойманный последним пробным is_active_at (Player зовёт его в том же кадре перед этим).
+## Что под прицелом — для строки статуса. У картинки-ссылки показываем её alt (описание
+## картинки) И куда ведёт переход; у текстовой ссылки — только переход. Переиспользует данные,
+## пойманные последним пробным is_active_at (Player зовёт его в том же кадре перед этим).
 func aim_hint_at(_point: Vector3) -> String:
-	return TransitionText.describe(_probe_transition)
+	var dest := TransitionText.describe(_probe_transition)
+	if _probe_alt == "":
+		return dest
+	return "%s  %s" % [_probe_alt, dest] if dest != "" else _probe_alt
 
 
 ## Точка попадания луча -> пиксель вьюпорта. Vector2(-1, -1) — квад ещё не построен.
@@ -140,6 +149,7 @@ func _on_meta_clicked(meta: Variant) -> void:
 		_probe_hit = true
 		if idx >= 0 and idx < _metas.size():
 			_probe_transition = _metas[idx]
+			_probe_alt = str(_meta_alt.get(idx, ""))
 		return
 	if idx >= 0 and idx < _metas.size():
 		link_activated.emit(_metas[idx])
@@ -148,11 +158,13 @@ func _on_meta_clicked(meta: Variant) -> void:
 # --- Сборка ---
 
 ## Заполняет RichTextLabel прогонами: текст/ссылки — bbcode'ом через append_text, картинки —
-## реальной текстурой через add_image (заглушка + асинхронная докачка, см. _append_image).
-## Метаданные ссылок (_metas) собираем здесь же, в порядке добавления, чтобы [url=idx]
-## из разных фрагментов ссылались на общий индекс.
+## реальной текстурой через add_image (см. _append_image). Каждый вызов перерисовывает лейбл
+## целиком из текущего состояния (_runs + докачанные _img_tex), поэтому по приходе текстуры мы
+## просто перезаполняем его заново (_schedule_repopulate). Метаданные ссылок (_metas/_meta_alt)
+## собираем тут же, в порядке добавления, чтобы [url=idx] и push_meta ссылались на общий индекс.
 func _populate_label() -> void:
 	_metas.clear()
+	_meta_alt.clear()
 	_label.clear()
 	for r in _runs:
 		if str(r.get("type", "")) == "image":
@@ -176,56 +188,77 @@ func _text_run_bbcode(r: Dictionary) -> String:
 	return text
 
 
-## Картинка-прогон: вставляем растровую текстуру прямо в поток текста. До загрузки —
-## серая заглушка нужного размера через add_image(key); ImageLoader по готовности зовёт
-## _on_inline_texture, тот заменяет её настоящей текстурой через update_image. Без лоадера
-## или src откатываемся к старому текстовому токену 🖼. У инлайн-[img] нет meta-канала
-## (meta_clicked он не эмитит), поэтому ссылке-картинке дополнительно даём кликабельную
-## подпись рядом — через неё и срабатывает переход.
+## Картинка-прогон: вставляем растровую текстуру прямо в поток текста. До прихода текстуры —
+## серая заглушка нужного размера, после докачки — настоящая картинка (перезаполнением лейбла).
+## Не удалось загрузить или нет лоадера/src — показываем alt текстовым токеном 🖼. Картинку-ссылку
+## делаем кликабельной прямо по изображению: оборачиваем add_image в push_meta/pop, тогда клик
+## луча (синтетический клик во вьюпорте) попадает в meta-регион и эмитит meta_clicked — отдельная
+## подпись-ссылка больше не нужна. alt такой картинки уходит в строку статуса (см. aim_hint_at).
 func _append_image(r: Dictionary) -> void:
 	var src := str(r.get("src", "")).strip_edges()
 	var url := PageFetcher.resolve_url(src, _base_url) if src != "" else ""
-	if url == "" or _image_loader == null:
+	var alt := str(r.get("alt", "")).strip_edges()
+	var fn = r.get("function", null)
+	var has_link: bool = fn != null and typeof(fn) == TYPE_DICTIONARY
+
+	# Нет растрового источника или докачка не удалась — текстовый токен 🖼 alt (кликабельный
+	# как ссылка, если картинка завёрнута в <a>). Сам src/лоадер недоступны либо _img_tex=null.
+	if url == "" or _image_loader == null or (_img_tex.has(url) and _img_tex[url] == null):
 		_label.append_text(_image_token(r))
 		return
 
-	var size := _inline_size(r, -1.0)
-	var key := _img_seq
-	_img_seq += 1
-	_label.add_image(_get_placeholder(), size.x, size.y, PLACEHOLDER_COLOR,
-		INLINE_ALIGNMENT_CENTER, Rect2(), key)
-	_image_loader.request_image(url, func(tex: Texture2D): _on_inline_texture(key, r, tex))
+	# Запрашиваем текстуру один раз на url; результат осядет в _img_tex и перезапустит заполнение.
+	if not _img_requested.has(url):
+		_img_requested[url] = true
+		_image_loader.request_image(url, func(t: Texture2D): _on_image_result(url, t))
 
-	var fn = r.get("function", null)
-	if fn != null and typeof(fn) == TYPE_DICTIONARY:
+	var tex: Texture2D = _img_tex.get(url, null)  # null здесь = ещё грузится (failed отсеян выше)
+	var aspect := -1.0
+	if tex != null:
+		var px := tex.get_size()
+		aspect = 1.0 if px.y <= 0 else float(px.x) / float(px.y)
+	var size := _inline_size(r, aspect)
+
+	# Ссылка-картинка: push_meta делает кликабельным сам [img] (meta_clicked по клику в регион).
+	if has_link:
 		var idx := _metas.size()
 		_metas.append(fn)
-		var cap := str(r.get("alt", "")).strip_edges()
-		cap = ("↗ " + cap) if cap != "" else "↗"
-		cap = cap.replace("[", "[lb]")
-		var col := "#5cc8ff"  # navigate по умолчанию
-		match fn.get("kind", ""):
-			"teleport": col = "#9be7ff"
-			"external": col = "#c69bff"
-		_label.append_text(" [color=%s][u][url=%d]%s[/url][/u][/color]" % [col, idx, cap])
+		_meta_alt[idx] = alt
+		# Подчёркивание meta (как у текстовых ссылок) под картинкой смотрелось бы линией снизу —
+		# гасим его: сигналом «это ссылка» служит курсор Player'а и alt в строке статуса.
+		_label.push_meta(str(idx), RichTextLabel.META_UNDERLINE_NEVER)
+	if tex != null:
+		_label.add_image(tex, size.x, size.y, Color.WHITE, INLINE_ALIGNMENT_CENTER)
+	else:
+		_label.add_image(_get_placeholder(), size.x, size.y, PLACEHOLDER_COLOR,
+			INLINE_ALIGNMENT_CENTER)
+	if has_link:
+		_label.pop()
 
 
-## Текстура картинки пришла: меняем заглушку на неё, уточняя размер под реальные пропорции
-## (если HTML не задал оба измерения). null — оставляем заглушку. Картинка изменила высоту
-## контента, поэтому пересчитываем панель (_refit) и просим перерисовать кадр вьюпорта.
-func _on_inline_texture(key: int, r: Dictionary, tex: Texture2D) -> void:
+## Докачка картинки завершилась (tex=null — не удалось): кэшируем результат по url и
+## перезаполняем лейбл, чтобы заглушка сменилась картинкой (или alt-токеном при провале).
+func _on_image_result(url: String, tex: Texture2D) -> void:
 	if not is_instance_valid(self):
 		return
-	if tex == null:
+	_img_tex[url] = tex
+	_schedule_repopulate()
+
+
+## Дебаунс: несколько картинок, пришедших в одном кадре, дают одно перезаполнение и один _refit.
+func _schedule_repopulate() -> void:
+	if _repopulate_queued:
 		return
-	var px := tex.get_size()
-	var aspect := 1.0 if px.y <= 0 else float(px.x) / float(px.y)
-	var size := _inline_size(r, aspect)
-	_label.update_image(key,
-		RichTextLabel.UPDATE_TEXTURE | RichTextLabel.UPDATE_SIZE | RichTextLabel.UPDATE_COLOR,
-		tex, size.x, size.y, Color.WHITE)
-	_refit.call_deferred()
-	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	_repopulate_queued = true
+	_do_repopulate.call_deferred()
+
+
+func _do_repopulate() -> void:
+	_repopulate_queued = false
+	if not is_instance_valid(self):
+		return
+	_populate_label()
+	_refit()  # пересчитает высоту под подросший контент и попросит перерисовать кадр
 
 
 ## Размер инлайн-картинки в пикселях вьюпорта. Приоритет — размеры из HTML (width_px/height_px);
@@ -260,8 +293,8 @@ func _get_placeholder() -> Texture2D:
 	return _placeholder_tex
 
 
-## Картинка-прогон без растрового источника (нет лоадера/src): показываем alt (или маркер 🖼)
-## токеном — кликабельным, если у картинки есть функция перехода.
+## Картинка-прогон без растрового рендера (нет лоадера/src или докачка не удалась): показываем
+## alt (или маркер 🖼) токеном — кликабельным, если у картинки есть функция перехода.
 func _image_token(r: Dictionary) -> String:
 	var alt := str(r.get("alt", "")).strip_edges()
 	var label := ("🖼 " + alt) if alt != "" else "🖼"
@@ -270,6 +303,7 @@ func _image_token(r: Dictionary) -> String:
 	if fn != null and typeof(fn) == TYPE_DICTIONARY:
 		var idx := _metas.size()
 		_metas.append(fn)
+		_meta_alt[idx] = alt
 		var col := "#5cc8ff"  # navigate по умолчанию
 		match fn.get("kind", ""):
 			"teleport": col = "#9be7ff"
