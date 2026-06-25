@@ -1030,7 +1030,8 @@ func _panel_height(text: String, glyph_m: float) -> float:
 func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: float,
 		on_transition: Callable, font_world_m: float = -1.0) -> Node3D:
 	var panel: RichPanel = RICH_PANEL_SCENE.instantiate()
-	panel.setup(runs, font_world_m if font_world_m > 0.0 else _px_to_m(_base_px))
+	panel.setup(runs, font_world_m if font_world_m > 0.0 else _px_to_m(_base_px),
+		_image_loader, _base_url)
 	holder.add_child(panel)
 	panel.rotation.y = yaw
 	# Центр панели на уровне глаз; высота капнута в RichPanel, поэтому низ не уходит в пол.
