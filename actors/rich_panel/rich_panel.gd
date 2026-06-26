@@ -7,6 +7,7 @@ extends StaticBody3D
 ## RichTextLabel — тот сам определяет ссылку под точкой и эмитит meta_clicked.
 
 signal link_activated(transition: Dictionary)
+signal size_changed(size: Vector2)
 
 const GROUP := "rich_panel"
 # Метрика мира: 1 м = 128 px вьюпорта. Та же линейка, что у текста и картинок снаружи
@@ -506,6 +507,7 @@ func _refit() -> void:
 	await get_tree().process_frame
 	if not is_instance_valid(self):
 		return
+	var old_size := _current_size_m()
 	# Ширина: ужимаем до фактической ширины контента, но не уже MIN и не шире верхней границы
 	# (текст-кап / самая широкая картинка). get_content_width при включённом переносе вернёт
 	# ширину самой длинной строки — для короткого текста это даст узкую панель.
@@ -531,6 +533,13 @@ func _refit() -> void:
 	_build_quad()
 	_update_thumb()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	var new_size := _current_size_m()
+	if old_size.distance_to(new_size) > 0.01:
+		size_changed.emit(new_size)
+
+
+func _current_size_m() -> Vector2:
+	return Vector2(float(_w_px) / PIXEL_PER_METER, float(_h_px) / PIXEL_PER_METER)
 
 
 ## Двигает индикатор скролла под текущее положение: высота бегунка = доля видимого окна,

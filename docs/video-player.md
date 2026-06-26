@@ -323,11 +323,11 @@ URL**, синхронизируется только **состояние тра
 | Файл | Роль |
 |---|---|
 | [scripts/vrweb_video_player.gd](../scripts/vrweb_video_player.gd) | логический плеер: FFmpeg-декод в текстуру, прогрессивная докачка src (буферизация, ранний старт), транспорт, локальный/удалённый режимы |
-| [scripts/vrweb_video_screen.gd](../scripts/vrweb_video_screen.gd) | поверхность-квад: albedo = текстура плеера, заглушка до кадра, клик `interact_at` → toggle, наэкранный UI (прогресс/буфер) по `hover_at` |
+| [scripts/vrweb_video_screen.gd](../scripts/vrweb_video_screen.gd) | поверхность-квад: albedo = текстура плеера, заглушка до кадра, клик `interact_at` → toggle, наэкранный UI (прогресс/буфер) по `hover_at`, `size_changed` после подгонки aspect ratio |
 | [scripts/vrweb_video_manager.gd](../scripts/vrweb_video_manager.gd) | реестр плееров по `id`, привязка экранов, мост к `NetworkManager` (sync + heartbeat) |
 | [scripts/vrweb_builder.gd](../scripts/vrweb_builder.gd) | теги `<VRWebVideoPlayer>`/`<VRWebVideoScreen>` (как `<VRWebMirror>`) |
 | [scripts/topology_builder.gd](../scripts/topology_builder.gd) | HTML-тег `<video>` → объект `media` с `media_tag="video"` (src из `<video>`/`<source>`, autoplay/loop, размеры) |
-| [scripts/world_generator.gd](../scripts/world_generator.gd) | `_build_video_screen` строит `VrwebVideoScreen` из объекта `media`-video; `_measure_video` — его габариты |
+| [scripts/world_generator.gd](../scripts/world_generator.gd) | `_build_video_screen` строит `VrwebVideoScreen` из объекта `media`-video; `_measure_video` — первичные габариты, поздний `size_changed` запускает reflow комнаты |
 | [scripts/network_manager.gd](../scripts/network_manager.gd) | `send_video_event`/`send_video_sync` + RPC `_recv_video_*` + сигнал `video_state_received` |
 | [scenes/main.gd](../scenes/main.gd) | создаёт `VrwebVideoManager` в мире и зовёт `scan(vrweb_root)` |
 

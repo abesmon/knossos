@@ -1,6 +1,8 @@
 class_name VrwebVideoScreen
 extends StaticBody3D
 
+signal size_changed(size: Vector2)
+
 ## Поверхность-экран VRWeb: 3D-квад, на который натянута текстура логического плеера
 ## (VrwebVideoPlayer). Одну текстуру плеера можно показать на нескольких экранах. До
 ## появления кадра показывает заглушку «▶ video». Кликабелен лучом игрока (общий интерфейс
@@ -143,10 +145,13 @@ func _apply_aspect(tex: Texture2D) -> void:
 	var aspect := float(ts.x) / float(ts.y)
 	var w := _want_w if _want_w > 0.0 else (_want_h * aspect if _want_h > 0.0 else DEFAULT_WIDTH)
 	var h := _want_h if _want_h > 0.0 else w / aspect
+	var old_size := _quad.size
 	_quad.size = Vector2(w, h)
 	_update_collision()
 	_layout_ui()
 	_auto_sized = true
+	if old_size.distance_to(_quad.size) > 0.01:
+		size_changed.emit(_quad.size)
 
 
 ## Общий интерфейс взаимодействия по лучу игрока. Клик по видимому прогресс-бару — перемотка

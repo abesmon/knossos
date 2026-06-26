@@ -1155,7 +1155,7 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 	var runs: Array = obj.get("content", {}).get("runs", [])
 	if obj.get("type", "") == "text" and not runs.is_empty():
 		if _runs_have_links(runs) or _obj_text(obj).length() > 200:
-			return _build_rich_panel(runs, holder, local_pos, yaw, on_transition)
+			return _build_rich_panel(runs, holder, local_pos, yaw, on_transition, -1.0, obj["id"])
 
 	match obj.get("type", "text"):
 		"heading":
@@ -1163,7 +1163,7 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 			if _runs_have_links(hruns):
 				# Кликабельный заголовок (<h2><a>…</a>, «ENTER →»): RichPanel в кегле заголовка.
 				return _build_rich_panel(hruns, holder, local_pos, yaw, on_transition,
-					_px_to_m(_heading_css_px(obj)))
+					_px_to_m(_heading_css_px(obj)), obj["id"])
 			var level: int = int(obj.get("content", {}).get("level", 2))
 			var px: float = _base_px * float(HEADING_EM.get(level, 1.0))
 			return _build_panel(holder, local_pos, yaw, _obj_text(obj),
@@ -1176,12 +1176,14 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 				Color(0.5, 0.7, 0.5), _base_px)
 		"list":
 			if _list_has_links(obj) or _list_has_images(obj):
-				return _build_rich_panel(_list_runs(obj), holder, local_pos, yaw, on_transition)
+				return _build_rich_panel(_list_runs(obj), holder, local_pos, yaw, on_transition,
+					-1.0, obj["id"])
 			return _build_panel(holder, local_pos, yaw, _list_text(obj),
 				Color(0.6, 0.6, 0.65), _base_px)
 		"table":
 			if _table_has_links(obj) or _table_has_images(obj):
-				return _build_rich_panel(_table_runs(obj), holder, local_pos, yaw, on_transition)
+				return _build_rich_panel(_table_runs(obj), holder, local_pos, yaw, on_transition,
+					-1.0, obj["id"])
 			return _build_panel(holder, local_pos, yaw, _table_text(obj),
 				Color(0.55, 0.6, 0.6), _base_px * 0.9)
 		"code":
@@ -1191,7 +1193,7 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 		"quote":
 			var qruns: Array = obj.get("content", {}).get("runs", [])
 			if not qruns.is_empty() and _runs_have_links(qruns):
-				return _build_rich_panel(qruns, holder, local_pos, yaw, on_transition)
+				return _build_rich_panel(qruns, holder, local_pos, yaw, on_transition, -1.0, obj["id"])
 			return _build_panel(holder, local_pos, yaw, "« " + _obj_text(obj) + " »",
 				Color(0.38, 0.40, 0.5), _base_px)
 		_:
@@ -1256,10 +1258,12 @@ func _panel_height(text: String, glyph_m: float, width_m: float) -> float:
 
 ## font_world_m < 0 -> кегль базового текста; иначе заданный (для кликабельных заголовков).
 func _build_rich_panel(runs: Array, holder: Node3D, local_pos: Vector3, yaw: float,
-		on_transition: Callable, font_world_m: float = -1.0) -> Node3D:
+		on_transition: Callable, font_world_m: float = -1.0, obj_id: int = -1) -> Node3D:
 	var panel: RichPanel = RICH_PANEL_SCENE.instantiate()
 	panel.setup(runs, font_world_m if font_world_m > 0.0 else _px_to_m(_base_px),
 		_image_loader, _base_url)
+	if obj_id >= 0:
+		panel.size_changed.connect(func(size: Vector2): _on_object_size_changed(obj_id, size))
 	holder.add_child(panel)
 	panel.rotation.y = yaw
 	# Центр панели на уровне глаз; высота капнута в RichPanel, поэтому низ не уходит в пол.
@@ -1320,6 +1324,7 @@ func _build_video_screen(obj: Dictionary, holder: Node3D, local_pos: Vector3, ya
 	screen.setup("", url, Vector2(size.x, 0.0))
 	screen.autoplay = bool(content.get("autoplay", false))
 	screen.loop = bool(content.get("loop", false))
+	screen.size_changed.connect(func(new_size: Vector2): _on_object_size_changed(obj["id"], new_size))
 	holder.add_child(screen)
 	# Корень эктора на полу; центр квада поднимаем на уровень глаз (как ImagePanel/панели),
 	# чтобы низ высокого экрана не уходил под пол.
