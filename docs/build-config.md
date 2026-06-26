@@ -55,6 +55,13 @@ ice_servers={
 `ice_servers` — это `Dictionary` ровно той структуры, что ждёт
 `WebRTCPeerConnection.initialize()`.
 
+Для нативных клиентов указывайте UDP TURN/STUN. `webrtc-native` работает через libjuice, а
+TCP/TLS TURN для него не поддерживается: не добавляйте `turn:...?transport=tcp` и `turns:...`
+в продовый `ice_servers`. Если в логах клиента появляются `TURN transports TCP and TLS are not
+supported with libjuice`, `Got TURN CreatePermission error response`, `Received unexpected
+non-STUN datagram` или `ChannelData has invalid length`, сначала проверьте, что в конфиге
+остались только UDP TURN endpoint'ы и что учётка TURN активна для UDP-relay.
+
 ## Важно про «секретность»
 
 Значения **попадают внутрь `.pck`** собранного билда и извлекаемы оттуда. Это убирает их

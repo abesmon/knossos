@@ -53,6 +53,9 @@
   десятки пиров в комнате; дальше нужен SFU (далёкий этап, см. overview).
 - **Сигнальный сервер** в обмене данными не участвует: только присваивает peer_id,
   группирует по комнатам и пересылает offer/answer/ICE. См. [../signaling/](../signaling/).
+  Важно: `peer_joined` означает только «пир виден через сигналинг». RPC, карточка
+  идентичности и `user_id` доступны только после открытия p2p data-channel
+  (`p2p_peer_connected` / `multiplayer.peer_connected`).
 
 ## Клиентские компоненты
 
@@ -72,10 +75,13 @@
 исчезают сами, что и означает «вышел из комнаты». `RemotePlayersView` пересоздаётся в
 `main._rebuild_world` и заново читает текущих пиров.
 
-**RPC.** `multiplayer.multiplayer_peer` назначается mesh-пиром. Состояние —
+**RPC.** `multiplayer.multiplayer_peer` назначается mesh-пиром. Для нативного
+`webrtc-native` каждый `WebRTCPeerConnection` явно поллится в `NetworkManager._process`;
+без этого handshake может застрять на уровне SDP/ICE и пир будет виден по сигналингу, но
+не получит RPC-карточку идентичности. Состояние —
 `@rpc("any_peer","unreliable_ordered") _recv_state(pos, yaw, params)`, чат —
 `@rpc("any_peer","reliable") _recv_chat(text)`, карточка —
-`@rpc("any_peer","reliable") _recv_identity(nick, face_png, avatar_uri)`. Отправитель
+`@rpc("any_peer","reliable") _recv_identity(user_id, nick, face_png, avatar_uri)`. Отправитель
 определяется через `multiplayer.get_remote_sender_id()`, поэтому отдельный
 `MultiplayerSpawner`/авторитет на капсулу не нужен.
 
@@ -107,7 +113,8 @@ playing)` (heartbeat: позиция + состояние). Heartbeat шлёт *
 `Settings.set_face_from_file()` конвертирует в RGBA8, ресайзит до 256×256 и сохраняет —
 это и есть «всегда ресайз перед сохранением на устройство».
 
-**Передача.** Как только p2p-канал к пиру открывается (`multiplayer.peer_connected`),
+**Передача.** Как только p2p-канал к пиру открывается (`multiplayer.peer_connected`,
+наружу дополнительно эмитится `NetworkManager.p2p_peer_connected`),
 ему уходит «карточка» — ник, PNG-байты лица и идентификатор аватара (`Settings.avatar_uri`)
 одним reliable-RPC `_recv_identity` (`NetworkManager._on_mp_peer_connected`). Приёмник
 декодирует PNG в `ImageTexture` и эмитит `identity_received(id, nick, face, avatar_uri)`;
@@ -115,6 +122,10 @@ playing)` (heartbeat: позиция + состояние). Heartbeat шлёт *
 (см. [avatars.md](avatars.md) → «Выбор аватара»). До прихода карточки капсула показывает
 дефолтный аватар и лицо. Смена ника/лица/аватара в настройках рассылается уже подключённым
 пирам через `NetworkManager.broadcast_identity()`.
+
+Пока p2p не открылся, вкладка «Пользователи» может показывать ник из сигналинга, но вместо
+`user_id` будет статус «P2P подключается». Если p2p открылся, а карточка ещё не пришла,
+статус остаётся «ID ещё не получен».
 
 `_recv_state` синхронизирует позицию, yaw и словарь параметров аватара. Yaw разворачивает
 всю капсулу (тело `RemotePlayer`); остальные сигналы (наклон взгляда `LookPitch`, скорости,
@@ -146,12 +157,46 @@ WebRTC встроен в браузер — аддон там не нужен.
 приватные данные, их нет в репозитории; см. [build-config.md](build-config.md). Базовый
 STUN — публичный `stun.l.google.com:19302`; TURN-relay нужен для p2p сквозь симметричный NAT.
 
+Нативный `webrtc-native` использует libjuice; для него надо считать рабочим только UDP TURN
+(`turn:host:port` без `?transport=tcp`) и STUN. TCP/TLS TURN (`turn:...?transport=tcp`,
+`turns:`) libjuice не поддерживает: в логах это проявляется предупреждением `TURN transports
+TCP and TLS are not supported with libjuice`. Если после этого видны `Got TURN
+CreatePermission error response`, `Received unexpected non-STUN datagram` или `ChannelData has
+invalid length`, это признак проблем именно на TURN/ICE пути: клиент получает ответы/датаграммы,
+которые libjuice не может применить как валидный UDP TURN relay. Первый практический шаг —
+оставить в `ice_servers` только STUN и UDP TURN endpoint'ы провайдера, убрать TCP/TLS варианты
+и проверить, что TURN-учётка активна именно для UDP-relay.
+
 ## Протокол сигналинга
 
 JSON поверх WebSocket. Полное описание и таблицы — в [../signaling/README.md](../signaling/README.md).
 Кратко: сервер шлёт `welcome` (peer_id), `peers`/`peer_join`/`peer_leave` (состав
 комнаты) и релеит `offer`/`answer`/`candidate`. **Антиглар:** offer инициирует пир с
 меньшим id — ровно одна сторона начинает соединение.
+
+## Диагностика в проде
+
+Сейчас диагностика минимальная:
+
+- **Сигнальный сервер** пишет INFO в stdout: старт сервера, `peer connected`, `joined room`,
+  `left room`, `disconnected`. В Docker это читается через `docker logs` / `docker compose logs`,
+  в systemd — через `journalctl`. SDP/ICE-содержимое и причины WebRTC-фейла сервер сейчас не
+  логирует.
+- **Клиент** пишет стандартные сообщения Godot, `push_warning` и логи нативного WebRTC-аддона
+  в stdout/лог Godot. Полезные строки для ICE: `TURN transports TCP and TLS are not supported
+  with libjuice`, `STUN message send failed`, ошибки `WebSocketPeer`/TCP. В установленном
+  приложении логи Godot ищутся в user-data каталоге проекта `knossos`, обычно:
+  macOS `~/Library/Application Support/Godot/app_userdata/knossos/logs/`, Linux
+  `~/.local/share/godot/app_userdata/knossos/logs/`, Windows
+  `%APPDATA%\Godot\app_userdata\knossos\logs\`.
+- **UI вкладки “Пользователи”** различает два состояния: `P2P подключается` означает, что
+  пир виден через сигналинг, но WebRTC/RPC data-channel ещё не открылся; `ID ещё не получен`
+  означает, что p2p уже открылся, но карточка идентичности ещё не пришла.
+
+Для полноценного разбора продовых WebRTC-фейлов нужен отдельный net-debug лог в клиенте:
+события `welcome`/`join`/`peers`, `offer`/`answer`/`candidate` без полного SDP, счётчики ICE,
+`p2p_peer_connected/disconnected`, выбранные ICE-серверы без credentials и таймауты по пирам.
+Пока такого прикладного файла нет.
 
 ## Федерация (точка расширения, не в v1)
 

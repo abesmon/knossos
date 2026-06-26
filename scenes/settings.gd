@@ -127,6 +127,8 @@ func _ready() -> void:
 	# аргументы сигналов — нам нужен только факт изменения.
 	NetworkManager.peer_joined.connect(_users_dirty.unbind(2))
 	NetworkManager.peer_left.connect(_users_dirty.unbind(1))
+	NetworkManager.p2p_peer_connected.connect(_users_dirty.unbind(1))
+	NetworkManager.p2p_peer_disconnected.connect(_users_dirty.unbind(1))
 	NetworkManager.identity_received.connect(_users_dirty.unbind(4))
 	NetworkManager.ranks_changed.connect(_users_dirty)
 	NetworkManager.authority_changed.connect(_users_dirty.unbind(2))
@@ -333,7 +335,7 @@ func _refresh_users() -> void:
 	var shown_uids := {}
 	var rows := 0
 	# 1) Мы сами — первой строкой (только просмотр).
-	_add_user_row(Settings.nick, Settings.user_id, true, ranks, is_auth, authority_uid, true)
+	_add_user_row(Settings.nick, Settings.user_id, true, true, ranks, is_auth, authority_uid, true)
 	shown_uids[Settings.user_id] = true
 	rows += 1
 	# 2) Онлайн-пиры (у некоторых user_id может быть ещё не получен из карточки).
@@ -341,20 +343,21 @@ func _refresh_users() -> void:
 		var uid := NetworkManager.user_id_of(pid)
 		if uid != "":
 			shown_uids[uid] = true
-		_add_user_row(NetworkManager.nick_of(pid), uid, true, ranks, is_auth, authority_uid, false)
+		_add_user_row(NetworkManager.nick_of(pid), uid, true, NetworkManager.peer_p2p_connected(pid), ranks, is_auth, authority_uid, false)
 		rows += 1
 	# 3) Ранги без онлайн-пира: запись есть, человека нет.
 	for uid in ranks.keys():
 		if shown_uids.has(uid):
 			continue
-		_add_user_row("", uid, false, ranks, is_auth, authority_uid, false)
+		_add_user_row("", uid, false, false, ranks, is_auth, authority_uid, false)
 		rows += 1
 	_users_empty.visible = rows == 0
 
 
 ## Одна строка списка. uid == "" — карточка пира ещё не пришла (рангом управлять нельзя).
+## p2p_connected отличает «видим ник через сигналинг» от «RPC-канал реально открыт».
 ## is_self — это мы (только просмотр). authority_uid — user_id авторитета (для отметки «★»).
-func _add_user_row(nick: String, uid: String, online: bool, ranks: Dictionary, is_auth: bool, authority_uid: String, is_self: bool) -> void:
+func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool, ranks: Dictionary, is_auth: bool, authority_uid: String, is_self: bool) -> void:
 	var has_rank := uid != "" and ranks.has(uid)
 	var is_authority := uid != "" and uid == authority_uid
 	var row := HBoxContainer.new()
@@ -362,10 +365,12 @@ func _add_user_row(nick: String, uid: String, online: bool, ranks: Dictionary, i
 
 	var name_label := Label.new()
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_label.text = _user_display_name(nick, uid, online, is_self, is_authority)
+	name_label.text = _user_display_name(nick, uid, online, p2p_connected, is_self, is_authority)
 	var tip := "user_id: %s" % uid if uid != "" else ""
 	if is_authority:
 		tip = (tip + "\n" if tip != "" else "") + "★ — авторитет (раздаёт ранги)"
+	elif online and not p2p_connected:
+		tip = "Пир виден через сигналинг, но WebRTC/RPC-канал ещё не открылся"
 	name_label.tooltip_text = tip
 	if not online:
 		name_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
@@ -399,9 +404,9 @@ func _add_user_row(nick: String, uid: String, online: bool, ranks: Dictionary, i
 		del_btn.pressed.connect(_on_clear_rank.bind(uid))
 		row.add_child(del_btn)
 	else:
-		# Онлайн-пир без полученной карточки — рангом пока управлять нельзя.
+		# Онлайн-пир без p2p или без полученной карточки — рангом пока управлять нельзя.
 		var note := Label.new()
-		note.text = "ID ещё не получен"
+		note.text = "P2P подключается" if not p2p_connected else "ID ещё не получен"
 		note.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 		row.add_child(note)
 
@@ -410,12 +415,14 @@ func _add_user_row(nick: String, uid: String, online: bool, ranks: Dictionary, i
 
 ## Подпись строки: ник для онлайн-пира, короткий user_id для офлайн-записи, «(вы)» для себя,
 ## «★» для авторитета.
-func _user_display_name(nick: String, uid: String, online: bool, is_self: bool, is_authority: bool) -> String:
+func _user_display_name(nick: String, uid: String, online: bool, p2p_connected: bool, is_self: bool, is_authority: bool) -> String:
 	var base := ""
 	if online:
 		var who := nick if nick != "" else "Гость"
 		base = "● %s" % who
-		if uid == "":
+		if not p2p_connected:
+			base += " (P2P подключается)"
+		elif uid == "":
 			base += " (ID ещё не получен)"
 	else:
 		base = "○ ID %s… (офлайн)" % uid.substr(0, 8)

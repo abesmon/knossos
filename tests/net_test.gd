@@ -8,6 +8,7 @@ extends Node
 var _got_chat := false
 var _got_state := false
 var _got_face := false
+var _got_p2p := false
 var _nick := "t"
 
 
@@ -21,6 +22,11 @@ func _ready() -> void:
 
 	NetworkManager.peer_joined.connect(func(id, nick): print("[%s] PEER_JOINED %d %s" % [_nick, id, nick]))
 	NetworkManager.peer_left.connect(func(id): print("[%s] PEER_LEFT %d" % [_nick, id]))
+	NetworkManager.p2p_peer_connected.connect(func(id):
+		_got_p2p = true
+		print("[%s] P2P_CONNECTED %d" % [_nick, id])
+	)
+	NetworkManager.p2p_peer_disconnected.connect(func(id): print("[%s] P2P_DISCONNECTED %d" % [_nick, id]))
 	NetworkManager.connection_changed.connect(func(o): print("[%s] CONN online=%s" % [_nick, o]))
 	NetworkManager.chat_received.connect(_on_chat)
 	NetworkManager.state_received.connect(_on_state)
@@ -29,12 +35,18 @@ func _ready() -> void:
 	NetworkManager.connect_to_server()
 	NetworkManager.join_room("testroom")
 
-	await get_tree().create_timer(3.0).timeout
-	NetworkManager.send_chat("hello from %s" % _nick)
+	var waited := 0.0
+	while not _got_p2p and waited < 8.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+
+	await get_tree().create_timer(0.5).timeout
 
 	# Шлём позицию ~5 секунд, чтобы дать handshake завершиться.
 	for i in range(50):
-		NetworkManager.send_state(Vector3(i, 0, 0), 0.0, 0.3)
+		if i % 10 == 0:
+			NetworkManager.send_chat("hello from %s" % _nick)
+		NetworkManager.send_state(Vector3(i, 0, 0), 0.0, {"LookPitch": 0.3})
 		await get_tree().create_timer(0.1).timeout
 
 	await get_tree().create_timer(1.0).timeout
@@ -42,10 +54,10 @@ func _ready() -> void:
 	get_tree().quit(0 if (_got_chat and _got_state and _got_face) else 1)
 
 
-func _on_identity(id: int, nick: String, face: Texture2D) -> void:
+func _on_identity(id: int, nick: String, face: Texture2D, avatar_uri: String) -> void:
 	_got_face = face != null
-	print("[%s] IDENTITY from %d: nick=%s face=%s %s" % [
-		_nick, id, nick, face != null,
+	print("[%s] IDENTITY from %d: nick=%s face=%s avatar=%s %s" % [
+		_nick, id, nick, face != null, avatar_uri,
 		("%dx%d" % [face.get_width(), face.get_height()]) if face != null else "",
 	])
 
@@ -55,7 +67,7 @@ func _on_chat(id: int, text: String) -> void:
 	print("[%s] CHAT from %d: %s" % [_nick, id, text])
 
 
-func _on_state(id: int, pos: Vector3, _yaw: float, pitch: float) -> void:
+func _on_state(id: int, pos: Vector3, _yaw: float, params: Dictionary) -> void:
 	if not _got_state:
-		print("[%s] STATE from %d: %s pitch=%s" % [_nick, id, pos, pitch])
+		print("[%s] STATE from %d: %s params=%s" % [_nick, id, pos, params])
 		_got_state = true
