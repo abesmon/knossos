@@ -207,6 +207,7 @@ static func _collapse_ws(s: String) -> String:
 static func _decode_entities(s: String) -> String:
 	if not s.contains("&"):
 		return s
+	s = _decode_numeric_entities(s)
 	s = s.replace("&amp;", "&")
 	s = s.replace("&lt;", "<")
 	s = s.replace("&gt;", ">")
@@ -217,3 +218,56 @@ static func _decode_entities(s: String) -> String:
 	s = s.replace("&mdash;", "—")
 	s = s.replace("&ndash;", "–")
 	return s
+
+
+static func _decode_numeric_entities(s: String) -> String:
+	var out := ""
+	var i := 0
+	while i < s.length():
+		if s[i] == "&" and i + 2 < s.length() and s[i + 1] == "#":
+			var end := s.find(";", i + 2)
+			if end != -1:
+				var token := s.substr(i + 2, end - (i + 2))
+				var codepoint := _parse_entity_codepoint(token)
+				if _valid_codepoint(codepoint):
+					out += String.chr(codepoint)
+					i = end + 1
+					continue
+		out += s[i]
+		i += 1
+	return out
+
+
+static func _parse_entity_codepoint(token: String) -> int:
+	if token == "":
+		return -1
+	if token.begins_with("x") or token.begins_with("X"):
+		return _parse_hex_codepoint(token.substr(1))
+	if not token.is_valid_int():
+		return -1
+	return token.to_int()
+
+
+static func _parse_hex_codepoint(hex: String) -> int:
+	if hex == "":
+		return -1
+	var value := 0
+	for i in hex.length():
+		var c := hex[i]
+		var digit := -1
+		if c >= "0" and c <= "9":
+			digit = c.unicode_at(0) - "0".unicode_at(0)
+		elif c >= "a" and c <= "f":
+			digit = 10 + c.unicode_at(0) - "a".unicode_at(0)
+		elif c >= "A" and c <= "F":
+			digit = 10 + c.unicode_at(0) - "A".unicode_at(0)
+		else:
+			return -1
+		value = value * 16 + digit
+		if value > 0x10ffff:
+			return -1
+	return value
+
+
+static func _valid_codepoint(codepoint: int) -> bool:
+	return codepoint > 0 and codepoint <= 0x10ffff and not (codepoint >= 0xd800 and codepoint <= 0xdfff)
