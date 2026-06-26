@@ -187,9 +187,12 @@ func _rebuild() -> void:
 	var rooms: Dictionary = _layout.get("rooms", {})
 	var corridors: int = _layout.get("corridors", []).size()
 	var cells := 0
+	var virtual_walls := 0
 	for id in rooms:
 		cells += rooms[id].get("cells", []).size()
-	_set_status("seed=%d — %d комнат, %d клеток, %d коридоров, %d мс" % [_seed, rooms.size(), cells, corridors, dt])
+		virtual_walls += rooms[id].get("virtual_walls", []).size()
+	_set_status("seed=%d — %d комнат, %d клеток, %d коридоров, %d виртуальных стен, %d мс" %
+		[_seed, rooms.size(), cells, corridors, virtual_walls, dt])
 
 
 func _on_room_selected(room_id: int) -> void:
@@ -213,6 +216,7 @@ func _format_room(room_id: int) -> String:
 	s += "[b]потребность[/b]: %d слот(ов)\n" % rd.get("need", 0)
 	s += "[b]форма[/b]: %s\n" % rd.get("shape_kind", "")
 	s += "[b]деталей[/b]: %d  (клеток: %d)\n" % [pieces.size(), cells]
+	s += "[b]виртуальных стен[/b]: %d\n" % rd.get("virtual_walls", []).size()
 	s += "[b]прямоугольник[/b]: %d×%d = %d клеток\n" % [dims.x, dims.y, dims.x * dims.y]
 	if dims.x * dims.y > 0:
 		var fill := 100.0 * float(cells) / float(dims.x * dims.y)

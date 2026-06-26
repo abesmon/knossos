@@ -23,6 +23,7 @@ const COLOR_CORRIDOR := Color(1.0, 0.23, 0.74)        # ярко-розовый 
 const COLOR_CORRIDOR_FAR := Color(1.0, 0.55, 0.1)     # оранжевый — связь, которая не примкнула (запасной путь)
 const COLOR_UNROUTED := Color(1.0, 0.15, 0.15)        # красный — связь без прохода (маршрут не найден)
 const COLOR_ROUTE := Color(0.25, 0.95, 0.35)          # зелёный — внутренний маршрут движения сквозь комнату
+const COLOR_VIRTUAL_WALL := Color(0.0, 1.0, 1.0)      # cyan — виртуальные стены у внутренних маршрутов
 const COLOR_TEXT := Color(0.95, 0.97, 1.0)
 const COLOR_TEXT_DIM := Color(0.72, 0.76, 0.85)
 
@@ -112,6 +113,7 @@ func _draw() -> void:
 		_draw_room(id)
 
 	_draw_routes()
+	_draw_virtual_walls()
 	_draw_corridors()
 
 	# Подписи поверх всего.
@@ -184,6 +186,27 @@ func _draw_routes() -> void:
 				pts.append(_cell_center(c))
 			draw_polyline(pts, COLOR_ROUTE, w, true)
 			draw_circle(pts[0], w * 1.2, COLOR_ROUTE)   # старт маршрута (вход)
+
+
+## Виртуальные стены (cyan) — стороны клеток маршрута, которые алгоритм обхода считает полезными
+## для будущей упаковки объектов. Это debug-слой; фактические стены/двери не меняются.
+func _draw_virtual_walls() -> void:
+	var w := maxf(2.0 * _zoom, 1.5)
+	for id in _rooms:
+		for wall in _rooms[id].get("virtual_walls", []):
+			var pts := _edge_points(wall.get("cell", Vector2i.ZERO), wall.get("dir", Vector2i.ZERO))
+			draw_line(pts[0], pts[1], COLOR_VIRTUAL_WALL, w)
+
+
+func _edge_points(cell: Vector2i, dir: Vector2i) -> Array:
+	var p := Vector2(cell)
+	if dir == Vector2i(1, 0):
+		return [_cell_to_screen(p + Vector2(1, 0)), _cell_to_screen(p + Vector2(1, 1))]
+	if dir == Vector2i(-1, 0):
+		return [_cell_to_screen(p), _cell_to_screen(p + Vector2(0, 1))]
+	if dir == Vector2i(0, 1):
+		return [_cell_to_screen(p + Vector2(0, 1)), _cell_to_screen(p + Vector2(1, 1))]
+	return [_cell_to_screen(p), _cell_to_screen(p + Vector2(1, 0))]
 
 
 ## Пути связей родитель→ребёнок по ЦЕНТРАМ клеток, в обход комнат (см. SpaceLayout._route_corridor).

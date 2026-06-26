@@ -97,6 +97,8 @@ func build(space: Dictionary, seed_value: int) -> Dictionary:
 	_pull_to_parent(space, out_rooms, corridors)
 	# Внутренние маршруты движения сквозь каждую комнату (после финальных позиций и дверей).
 	_compute_routes(space, out_rooms, corridors)
+	# Отладочные "виртуальные стены" у маршрутов: кандидаты под более плотную упаковку объектов.
+	_compute_virtual_walls(out_rooms, corridors)
 	return {"root": root, "rooms": out_rooms, "corridors": corridors}
 
 
@@ -1197,6 +1199,109 @@ func _farthest(start: Vector2i, allowed: Dictionary) -> Vector2i:
 
 func _eccentricity(start: Vector2i, allowed: Dictionary) -> int:
 	return _bfs_dist(start, _farthest(start, allowed), allowed)
+
+
+# --- Фаза 8: виртуальные стены у внутренних маршрутов ---
+
+## Виртуальные стены — стороны клеток маршрута, которые оказываются слева от обходчика при обходе
+## дорожек туда-обратно и не ведут в другую дорожку или дверной проём. Это только debug-данные:
+## фактический layout, двери, стены и слоты объектов от этого поля не меняются.
+func _compute_virtual_walls(shapes: Dictionary, corridors: Array) -> void:
+	var door_edges := {}
+	for id in shapes:
+		door_edges[id] = {}
+	for corr in corridors:
+		var path: Array = corr.get("path", [])
+		if path.size() < 2:
+			continue
+		var f: int = corr.get("from", -1)
+		var t: int = corr.get("to", -1)
+		if shapes.has(f):
+			var d_from: Vector2i = path[1] - path[0]
+			if _is_unit(d_from):
+				door_edges[f][_edge_key(path[0], d_from)] = true
+		if shapes.has(t):
+			var last: int = path.size() - 1
+			var d_to: Vector2i = path[last - 1] - path[last]
+			if _is_unit(d_to):
+				door_edges[t][_edge_key(path[last], d_to)] = true
+
+	for id in shapes:
+		var route_set := {}
+		for route in shapes[id].get("routes", []):
+			for c in route:
+				route_set[c] = true
+		var wall_set := {}
+		var walls: Array = []
+		for route in shapes[id].get("routes", []):
+			if _route_closed(route):
+				var forward: Array = _collect_virtual_route(route, route_set, door_edges.get(id, {}))
+				var back: Array = route.duplicate()
+				back.reverse()
+				var backward: Array = _collect_virtual_route(back, route_set, door_edges.get(id, {}))
+				_append_virtual_walls(forward if forward.size() >= backward.size() else backward, wall_set, walls)
+			else:
+				_mark_virtual_route(route, route_set, door_edges.get(id, {}), wall_set, walls)
+				var back: Array = route.duplicate()
+				back.reverse()
+				_mark_virtual_route(back, route_set, door_edges.get(id, {}), wall_set, walls)
+		shapes[id]["virtual_walls"] = walls
+
+
+func _collect_virtual_route(route: Array, route_set: Dictionary, door_edges: Dictionary) -> Array:
+	var wall_set := {}
+	var walls: Array = []
+	_mark_virtual_route(route, route_set, door_edges, wall_set, walls)
+	return walls
+
+
+func _append_virtual_walls(source: Array, wall_set: Dictionary, walls: Array) -> void:
+	for wall in source:
+		var cell: Vector2i = wall["cell"]
+		var dir: Vector2i = wall["dir"]
+		var key := _edge_key(cell, dir)
+		if wall_set.has(key):
+			continue
+		wall_set[key] = true
+		walls.append(wall)
+
+
+func _mark_virtual_route(route: Array, route_set: Dictionary, door_edges: Dictionary, wall_set: Dictionary, walls: Array) -> void:
+	if route.size() < 2:
+		return
+	for i in range(route.size() - 1):
+		var a: Vector2i = route[i]
+		var b: Vector2i = route[i + 1]
+		var d: Vector2i = b - a
+		if not _is_unit(d):
+			continue
+		var left := Vector2i(d.y, -d.x)
+		_add_virtual_wall(a, left, route_set, door_edges, wall_set, walls)
+		_add_virtual_wall(b, left, route_set, door_edges, wall_set, walls)
+
+
+func _add_virtual_wall(cell: Vector2i, dir: Vector2i, route_set: Dictionary, door_edges: Dictionary, wall_set: Dictionary, walls: Array) -> void:
+	if route_set.has(cell + dir):
+		return
+	if door_edges.has(_edge_key(cell, dir)):
+		return
+	var key := _edge_key(cell, dir)
+	if wall_set.has(key):
+		return
+	wall_set[key] = true
+	walls.append({"cell": cell, "dir": dir})
+
+
+func _route_closed(route: Array) -> bool:
+	return route.size() > 2 and route[0] == route[route.size() - 1]
+
+
+func _is_unit(d: Vector2i) -> bool:
+	return absi(d.x) + absi(d.y) == 1
+
+
+func _edge_key(cell: Vector2i, d: Vector2i) -> String:
+	return "%d,%d:%d,%d" % [cell.x, cell.y, d.x, d.y]
 
 
 # --- Утилиты ---

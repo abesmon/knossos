@@ -591,10 +591,9 @@ func _add_wall_run(holder: Node3D, r: Dictionary, h: float, color: Color) -> voi
 		_add_box(holder, Vector3(length, h, WALL_THICK), Vector3(center, h * 0.5, r["wall_fixed"]), color, true)
 
 
-## Расставляет объекты ВДОЛЬ ВНУТРЕННИХ ДОРОЖЕК комнаты (маршруты `routes` из SpaceLayout),
-## лицом к дорожке, от входа (проёма от родителя) по часовой стрелке. Слоты считаются заранее
-## (`_object_slots`): для каждой клетки дорожки — клетка ПО ЛЕВУЮ РУКУ (рядом, не на дорожке),
-## а если она занята/недоступна — сама клетка дорожки. Объекты раскидываются по N слотам;
+## Расставляет объекты на виртуальные стены комнаты (`virtual_walls` из SpaceLayout), лицом
+## обратно к дорожке. Один слот = сторона клетки `{cell, pull}`; в углах одна клетка может дать
+## несколько слотов с разными сторонами. Объекты раскидываются по N слотам;
 ## если объектов больше слотов — лишние ставятся СТОПКОЙ (друг над другом) в передних слотах:
 ## слот i получает `base+(1 если i<rem)` объектов, base=M/N, rem=M%N (первый объект группы — сверху).
 func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, id: int, skip_obj = null) -> void:
@@ -661,44 +660,30 @@ func _place_stack(group: Array, slot: Dictionary, holder: Node3D, on_transition:
 		_build_object(obj, holder, base_world + Vector3(0, y, 0), yaw, on_transition)
 
 
-## Слоты под объекты вдоль дорожек комнаты. Обходим маршруты `routes` (от входа, по часовой
-## стрелке); для каждой клетки дорожки смотрим ПО ЛЕВУЮ РУКУ относительно направления движения.
-## Объект всегда притянут к краю клетки в сторону `left` (прочь от дороги / к стене) и смотрит
-## назад на дорогу. Выбор клетки:
-##  - клетка слева в комнате, не на дорожке и свободна — ставим объект В НЕЁ, притянув к её
-##    дальнему краю (рядом с дорогой, но через клетку — «по левую руку»);
-##  - иначе — на саму клетку дорожки, притянув к её левому краю (там обычно стена ⇒ «висит на
-##    стене, смотрит на дорогу», не загораживая центр дороги).
-## Каждая клетка — под слот не больше раза. Слот несёт клетку и направление притяжения `pull`.
+## Слоты под объекты из виртуальных стен комнаты. Каждая виртуальная стена — сторона клетки
+## маршрута; объект ставится в эту клетку, притягивается к стороне `pull` и смотрит назад к центру
+## клетки. Уникальность — по ребру клетки, а не по клетке: угловая клетка может дать несколько
+## полезных стен. Рёбра рядом с дверями отбрасываются через _wall_clear.
 func _object_slots(id: int) -> Array:
 	var rd: Dictionary = _layout.get("rooms", {}).get(id, {})
-	var routes: Array = rd.get("routes", [])
-	if routes.is_empty():
+	var virtual_walls: Array = rd.get("virtual_walls", [])
+	if virtual_walls.is_empty():
 		return []
 	var foot: Dictionary = _foot[id]
 	var door_cells: Dictionary = _door_cells.get(id, {})
-	var path_set := {}
-	for path in routes:
-		for c in path:
-			path_set[c] = true
 
 	var used := {}
 	var slots: Array = []
-	for path in _order_routes_clockwise(routes):
-		for i in path.size():
-			var c: Vector2i = path[i]
-			var d := _walk_dir(path, i)
-			var left := Vector2i(d.y, -d.x)   # по левую руку относительно направления движения
-			var cand: Vector2i = c + left
-			# Объект НИКОГДА не должен перекрывать проход: не ставим его на клетку-дверь и не
-			# притягиваем к стене у двери (даже широкая панель не нависает над проёмом, см. _wall_clear).
-			if (foot.has(cand) and not path_set.has(cand) and not used.has(cand)
-					and not door_cells.has(cand) and _wall_clear(id, cand, left)):
-				used[cand] = true
-				slots.append({"cell": cand, "pull": left})   # в клетке слева, притянут к её дальнему краю
-			elif not used.has(c) and not door_cells.has(c) and _wall_clear(id, c, left):
-				used[c] = true
-				slots.append({"cell": c, "pull": left})       # на дорожке, притянут к левой стене
+	for wall in virtual_walls:
+		var c: Vector2i = wall.get("cell", Vector2i.ZERO)
+		var pull: Vector2i = wall.get("dir", Vector2i.ZERO)
+		if not foot.has(c) or door_cells.has(c) or not _wall_clear(id, c, pull):
+			continue
+		var key := _edge_key(c, pull)
+		if used.has(key):
+			continue
+		used[key] = true
+		slots.append({"cell": c, "pull": pull})
 	return slots
 
 
@@ -711,29 +696,6 @@ func _wall_clear(id: int, cell: Vector2i, pull: Vector2i) -> bool:
 		if doors.has(_edge_key(cell + along * k, pull)):
 			return false
 	return true
-
-
-## Направление движения вдоль пути в клетке i (к следующей; для последней — от предыдущей).
-func _walk_dir(path: Array, i: int) -> Vector2i:
-	if i + 1 < path.size():
-		return path[i + 1] - path[i]
-	if i > 0:
-		return path[i] - path[i - 1]
-	return Vector2i(0, 1)
-
-
-## Маршруты в порядке обхода по часовой стрелке — по углу первого шага (север -Z = 0, далее по часовой).
-func _order_routes_clockwise(routes: Array) -> Array:
-	var arr: Array = routes.duplicate()
-	arr.sort_custom(func(a, b): return _route_angle(a) < _route_angle(b))
-	return arr
-
-
-func _route_angle(path: Array) -> float:
-	if path.size() < 2:
-		return 0.0
-	var d: Vector2i = path[1] - path[0]
-	return fposmod(atan2(float(d.x), -float(d.y)), TAU)
 
 
 ## Запасные слоты, если у комнаты нет маршрутов: по клеткам футпринта (кроме клеток-дверей),

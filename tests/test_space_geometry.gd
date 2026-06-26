@@ -134,24 +134,38 @@ func _check_case(name: String) -> void:
 	_expect(name, "стены у дорожек", corr_walls == expected_walls,
 		"стен=%d ожидалось=%d" % [corr_walls, expected_walls])
 
-	# 4b. Слоты объектов вдоль дорожек: внутри футпринта, без дублей, есть для комнат с объектами.
+	# 4b. Слоты объектов: внутри футпринта, без дублей по ребру, есть для комнат с объектами.
 	var bad_slots := 0
 	var empty_with_objs := 0
+	var non_virtual_slots := 0
 	for id in rooms:
 		if rooms[id].get("objects", []).is_empty():
 			continue
 		var slots: Array = _gen._object_slots(id)
+		var from_virtual := not slots.is_empty()
 		if slots.is_empty():
 			slots = _gen._fallback_slots(id)
+		var virtual_edges := {}
+		for wall in rooms[id].get("virtual_walls", []):
+			var wc: Vector2i = wall["cell"]
+			var wd: Vector2i = wall["dir"]
+			virtual_edges["%d,%d:%d,%d" % [wc.x, wc.y, wd.x, wd.y]] = true
 		var seen := {}
 		for s in slots:
 			var sc: Vector2i = s["cell"]
-			if not owner.has(sc) or seen.has(sc):
+			var pull: Vector2i = s["pull"]
+			var key := "%d,%d:%d,%d" % [sc.x, sc.y, pull.x, pull.y]
+			if not owner.has(sc) or seen.has(key):
 				bad_slots += 1
-			seen[sc] = true
+			if from_virtual and not virtual_edges.has(key):
+				non_virtual_slots += 1
+			seen[key] = true
 		if slots.is_empty():
 			empty_with_objs += 1
-	_expect(name, "слоты в футпринте, без дублей", bad_slots == 0, "плохих слотов: %d" % bad_slots)
+	_expect(name, "слоты в футпринте, без дублей по ребру", bad_slots == 0,
+		"плохих слотов: %d" % bad_slots)
+	_expect(name, "основные слоты стоят на виртуальных стенах", non_virtual_slots == 0,
+		"слотов вне виртуальных стен: %d" % non_virtual_slots)
 	_expect(name, "слоты есть у комнат с объектами", empty_with_objs == 0,
 		"комнат без слотов: %d" % empty_with_objs)
 
