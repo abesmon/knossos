@@ -134,50 +134,50 @@ func _check_case(name: String) -> void:
 	_expect(name, "стены у дорожек", corr_walls == expected_walls,
 		"стен=%d ожидалось=%d" % [corr_walls, expected_walls])
 
-	# 4b. Слоты объектов вдоль дорожек: внутри футпринта, без дублей, есть для комнат с объектами.
-	var bad_slots := 0
-	var empty_with_objs := 0
+	# 4b. Боксы-стены (развёртка): грани в футпринте и НЕ на дверях; у комнат с объектами и
+	#     маршрутами боксы есть (см. docs/wall-packing.md).
+	var bad_face := 0
+	var empty_boxes := 0
 	for id in rooms:
 		if rooms[id].get("objects", []).is_empty():
 			continue
-		var slots: Array = _gen._object_slots(id)
-		if slots.is_empty():
-			slots = _gen._fallback_slots(id)
-		var seen := {}
-		for s in slots:
-			var sc: Vector2i = s["cell"]
-			if not owner.has(sc) or seen.has(sc):
-				bad_slots += 1
-			seen[sc] = true
-		if slots.is_empty():
-			empty_with_objs += 1
-	_expect(name, "слоты в футпринте, без дублей", bad_slots == 0, "плохих слотов: %d" % bad_slots)
-	_expect(name, "слоты есть у комнат с объектами", empty_with_objs == 0,
-		"комнат без слотов: %d" % empty_with_objs)
-
-	# 4c. Объекты не перекрывают проходы: ни один слот не стоит на клетке-двери и не притянут
-	#     к ребру-двери.
-	var blocking := 0
-	for id in rooms:
-		var dcells: Dictionary = _gen._door_cells.get(id, {})
+		var routes: Array = layout["rooms"][id].get("routes", [])
+		var boxes: Array = _gen._wall_boxes(id)
+		if boxes.is_empty():
+			if not routes.is_empty():
+				empty_boxes += 1   # маршруты есть, а боксов нет — баг развёртки
+			continue
 		var dedges: Dictionary = _gen._door_edges.get(id, {})
-		var slots: Array = _gen._object_slots(id)
-		if slots.is_empty():
-			slots = _gen._fallback_slots(id)
-		for s in slots:
-			var sc: Vector2i = s["cell"]
-			var pull: Vector2i = s["pull"]
-			if dcells.has(sc):
-				blocking += 1
-				continue
-			# Стена со стороны притяжения (и ±1 клетка вдоль неё) не должна нести двери —
-			# иначе объект встанет в проёме или нависнет над ним.
-			var along := Vector2i(pull.y, -pull.x)
-			for k in [-1, 0, 1]:
-				var wc: Vector2i = sc + along * k
-				if dedges.has("%d,%d:%d,%d" % [wc.x, wc.y, pull.x, pull.y]):
-					blocking += 1
-	_expect(name, "объекты не перекрывают проходы", blocking == 0, "перекрытий: %d" % blocking)
+		for b in boxes:
+			var dir: Vector2i = b["dir"]
+			for c in b["cells"]:
+				if not owner.has(c):
+					bad_face += 1   # грань не в футпринте
+				if dedges.has("%d,%d:%d,%d" % [c.x, c.y, dir.x, dir.y]):
+					bad_face += 1   # грань на двери — объект перекрыл бы проход
+	_expect(name, "грани боксов в футпринте и не на дверях", bad_face == 0, "плохих граней: %d" % bad_face)
+	_expect(name, "боксы есть у комнат с объектами и маршрутами", empty_boxes == 0,
+		"комнат без боксов: %d" % empty_boxes)
+
+	# 4c. Упаковка: все объекты размещены, центры лежат в футпринте (висят у стены клетки маршрута).
+	var unplaced := 0
+	var outside := 0
+	for id in rooms:
+		var objs: Array = rooms[id].get("objects", [])
+		if objs.is_empty():
+			continue
+		var plan: Dictionary = _gen._plan_objects(id, objs)
+		if not plan.has("placements"):
+			continue   # запасная поклеточная раскладка — покрыта проверкой bodies>0
+		unplaced += objs.size() - plan["placements"].size()
+		for p in plan["placements"]:
+			var lp: Vector3 = p["local_pos"]
+			var cc := Vector2i(int(floor((lp.x - _gen._shift.x) / WorldGenerator.GRID)),
+				int(floor((lp.z - _gen._shift.z) / WorldGenerator.GRID)))
+			if not owner.has(cc):
+				outside += 1
+	_expect(name, "все объекты размещены", unplaced == 0, "не размещено: %d" % unplaced)
+	_expect(name, "центры объектов в футпринте", outside == 0, "вне футпринта: %d" % outside)
 
 	# 5. Спавн над клеткой пола.
 	var sp: Vector3 = _gen.spawn_point

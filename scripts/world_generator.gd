@@ -38,6 +38,11 @@ const WALL_THICK := 0.15        # тонкая стена, сдвинутая в
 const OBJECT_GAP := 0.6         # зазор между объектами в стопке (друг над другом), м
 const PULL_INSET := 0.3         # на сколько центр притянутого объекта отстоит от края клетки, м
                                 # (объект прижат к краю/стене и смотрит на центр клетки = на дорогу)
+# Упаковка объектов по непрерывным участкам стен (см. docs/wall-packing.md).
+const PACK_MARGIN := 0.4        # зазор между объектами на стене (по горизонтали и между рядами), м
+const PACK_PAD := 0.3           # отступ от концов бокса-стены до первого/последнего объекта, м
+# Отладка: рисовать виртуальные стены (грани развёртки) полупрозрачными красными слэбами.
+const SHOW_VIRTUAL_WALLS := true
 const HEAD_CLEARANCE := 0.8     # запас над самым высоким объектом до верха стены, м
 const EYE_LEVEL := 1.6          # высота центра текстовых/картиночных панелей, м (= высота камеры игрока)
 const PANEL_FLOOR_GAP := 0.3    # минимальный зазор от низа высокой панели до пола, м
@@ -500,18 +505,40 @@ func _build_room(id: int, parent: Node3D, on_transition: Callable) -> void:
 	for c in _foot_cells[id]:
 		_add_box(holder, Vector3(GRID, 0.4, GRID), _cell_world(c.x + 0.5, c.y + 0.5) + Vector3(0, -0.2, 0), floor_color, true)
 
+	# Заголовок секции (первый объект-heading комнаты) уходит вывеской над входным проёмом и из
+	# набора настенных объектов исключается; иначе (корень/нет входа) остаётся обычной табличкой.
+	var title_obj = _room_title_object(id)
+	var use_title: bool = title_obj != null and _title_eligible(id, title_obj)
+	var objs: Array = []
+	for obj in room["objects"]:
+		if use_title and obj["id"] == title_obj["id"]:
+			continue
+		objs.append(obj)
+
+	# Раскладка объектов по стенам считается ДО стен — её высота задаёт высоту стен (боксы-стены
+	# растут вверх под контент, см. docs/wall-packing.md).
+	var plan := _plan_objects(id, objs)
+	var packed: bool = plan.has("placements")
+	var h: float = maxf(_room_wall_h[id], plan.get("height", 0.0)) if packed else _room_wall_h[id]
+	_room_wall_h[id] = h
+
 	# Стены — по периметру футпринта, с проёмами на местах дверей.
-	var runs := _wall_runs(id)
-	var h: float = _room_wall_h[id]
-	for r in runs:
+	for r in _wall_runs(id):
 		_add_wall_run(holder, r, h, wall_color)
 
-	# Заголовок секции (первый объект-heading комнаты) — вывеска над входным проёмом, читаемая
-	# с обеих сторон. Удаётся только если у комнаты есть вход от родителя; иначе (корень)
-	# заголовок остаётся настенной табличкой, как обычный объект.
-	var title_obj = _room_title_object(id)
-	var titled: bool = title_obj != null and _build_room_title(holder, id, title_obj)
-	_place_objects(room, holder, on_transition, id, title_obj if titled else null)
+	if SHOW_VIRTUAL_WALLS:
+		_debug_draw_virtual_walls(holder, id, h)
+
+	if use_title:
+		_build_room_title(holder, id, title_obj)
+
+	if packed:
+		for p in plan["placements"]:
+			if p["obj"]["id"] == _first_obj_id:
+				_record_spawn(p["local_pos"], p["face"])
+			_build_object(p["obj"], holder, p["local_pos"], p["yaw"], on_transition)
+	else:
+		_place_objects_fallback(objs, holder, on_transition, id)
 
 
 ## Стены комнаты как набор прямых ПРОБЕГОВ по периметру футпринта. Граничное ребро — это
@@ -591,28 +618,23 @@ func _add_wall_run(holder: Node3D, r: Dictionary, h: float, color: Color) -> voi
 		_add_box(holder, Vector3(length, h, WALL_THICK), Vector3(center, h * 0.5, r["wall_fixed"]), color, true)
 
 
-## Расставляет объекты ВДОЛЬ ВНУТРЕННИХ ДОРОЖЕК комнаты (маршруты `routes` из SpaceLayout),
-## лицом к дорожке, от входа (проёма от родителя) по часовой стрелке. Слоты считаются заранее
-## (`_object_slots`): для каждой клетки дорожки — клетка ПО ЛЕВУЮ РУКУ (рядом, не на дорожке),
-## а если она занята/недоступна — сама клетка дорожки. Объекты раскидываются по N слотам;
-## если объектов больше слотов — лишние ставятся СТОПКОЙ (друг над другом) в передних слотах:
-## слот i получает `base+(1 если i<rem)` объектов, base=M/N, rem=M%N (первый объект группы — сверху).
-func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, id: int, skip_obj = null) -> void:
-	var objs: Array = []
-	for obj in room["objects"]:
-		# Заголовок, ушедший вывеской над входом, среди объектов не дублируем.
-		if skip_obj != null and obj["id"] == skip_obj["id"]:
-			continue
-		objs.append(obj)
+## Можно ли вынести заголовок комнаты вывеской над входом: есть вход от родителя и непустой текст
+## (повторяет предусловия _build_room_title, чтобы решить ДО его постройки — нужно для исключения
+## заголовка из набора настенных объектов).
+func _title_eligible(id: int, title_obj: Dictionary) -> bool:
+	if _room_entrance.get(id, null) == null:
+		return false
+	return _truncate(_obj_text(title_obj).strip_edges(), 80) != ""
+
+
+## Запасная раскладка для комнат БЕЗ маршрутов (нет боксов-стен): по клеткам футпринта, как раньше
+## (`_fallback_slots` + стопки). Объекты раскидываются по N слотам; лишние — стопкой в передних.
+func _place_objects_fallback(objs: Array, holder: Node3D, on_transition: Callable, id: int) -> void:
 	if objs.is_empty():
 		return
-
-	var slots := _object_slots(id)
-	if slots.is_empty():
-		slots = _fallback_slots(id)
+	var slots := _fallback_slots(id)
 	if slots.is_empty():
 		return
-
 	var n := slots.size()
 	var m := objs.size()
 	@warning_ignore("integer_division")
@@ -661,45 +683,302 @@ func _place_stack(group: Array, slot: Dictionary, holder: Node3D, on_transition:
 		_build_object(obj, holder, base_world + Vector3(0, y, 0), yaw, on_transition)
 
 
-## Слоты под объекты вдоль дорожек комнаты. Обходим маршруты `routes` (от входа, по часовой
-## стрелке); для каждой клетки дорожки смотрим ПО ЛЕВУЮ РУКУ относительно направления движения.
-## Объект всегда притянут к краю клетки в сторону `left` (прочь от дороги / к стене) и смотрит
-## назад на дорогу. Выбор клетки:
-##  - клетка слева в комнате, не на дорожке и свободна — ставим объект В НЕЁ, притянув к её
-##    дальнему краю (рядом с дорогой, но через клетку — «по левую руку»);
-##  - иначе — на саму клетку дорожки, притянув к её левому краю (там обычно стена ⇒ «висит на
-##    стене, смотрит на дорогу», не загораживая центр дороги).
-## Каждая клетка — под слот не больше раза. Слот несёт клетку и направление притяжения `pull`.
-func _object_slots(id: int) -> Array:
+# --- Упаковка объектов по стенам (развёртка стен, docs/wall-packing.md) ---
+
+## Планирует раскладку объектов комнаты по непрерывным участкам стен. Возвращает
+##   {placements: [{obj, local_pos: Vector3, yaw: float, face: Vector2i}], height: float}
+## где height — нужная высота стен (боксы растут вверх под контент). Если у комнаты нет маршрутов
+## (нет боксов) — возвращает {fallback: true}: зовётся запасная поклеточная раскладка.
+func _plan_objects(id: int, objs: Array) -> Dictionary:
+	if objs.is_empty():
+		return {"placements": [], "height": 0.0}
+	var boxes := _wall_boxes(id)
+	if boxes.is_empty():
+		return {"fallback": true}
+
+	var usable: Array = []
+	for b in boxes:
+		usable.append(maxf(0.1, float(b["len"]) - 2.0 * PACK_PAD))
+
+	# Высота боксов в РЯДАХ: старт 1, по кругу +1 с боксов 1, пока всё не уместится (см. док).
+	var heights: Array = []
+	for _i in boxes.size():
+		heights.append(1)
+	var grow := 0
+	var guard: int = objs.size() * boxes.size() + boxes.size() + 8
+	var res = null
+	while guard > 0:
+		res = _try_pack(objs, boxes, usable, heights)
+		if res != null:
+			break
+		heights[grow] += 1
+		grow = (grow + 1) % boxes.size()
+		guard -= 1
+	if res == null:
+		return {"fallback": true}
+	return _finalize_pack(res, boxes, usable)
+
+
+## Боксы-стены комнаты в порядке развёртки: непрерывные прямые участки стены, на которые садятся
+## объекты. Грани берём обходом маршрутов по левую руку (`_wall_walk` + извлечение граней), затем
+## режем на углах в боксы (`_group_faces`/`_make_box`). Грани-двери пропускаем (там проём).
+func _wall_boxes(id: int) -> Array:
 	var rd: Dictionary = _layout.get("rooms", {}).get(id, {})
 	var routes: Array = rd.get("routes", [])
 	if routes.is_empty():
 		return []
-	var foot: Dictionary = _foot[id]
-	var door_cells: Dictionary = _door_cells.get(id, {})
-	var path_set := {}
-	for path in routes:
-		for c in path:
-			path_set[c] = true
+	var doors: Dictionary = _door_edges.get(id, {})
+	var walk := _wall_walk(routes)
 
-	var used := {}
-	var slots: Array = []
+	# Упорядоченные грани (cell, dir): на каждой клетке маркируем стену по левую руку для входящего
+	# и исходящего направления (на углу это две разные грани — двойной счёт угла). Дедуп по ребру.
+	var faces: Array = []
+	var seen := {}
+	for i in walk.size():
+		var marks: Array = []
+		if i > 0 and walk[i] != walk[i - 1]:
+			var din: Vector2i = walk[i] - walk[i - 1]
+			if _is_unit(din):
+				marks.append(Vector2i(din.y, -din.x))
+		if i + 1 < walk.size() and walk[i + 1] != walk[i]:
+			var dout: Vector2i = walk[i + 1] - walk[i]
+			if _is_unit(dout):
+				marks.append(Vector2i(dout.y, -dout.x))
+		for dir in marks:
+			var key := _edge_key(walk[i], dir)
+			if seen.has(key) or doors.has(key):
+				continue
+			seen[key] = true
+			faces.append({"cell": walk[i], "dir": dir})
+	return _group_faces(faces)
+
+
+## Обход маршрутов комнаты в порядке развёртки (по часовой стрелке, см. docs/wall-packing.md).
+## Замкнутый маршрут-петля (тупик) проходится один раз; открытый маршрут вход→выход (проходная) —
+## «туда и обратно» (out-and-back), так левая рука покрывает обе стороны рукава. Несколько
+## маршрутов идут «звёздочкой» от входа, по часовому порядку. Соседние дубли клеток схлопываются.
+func _wall_walk(routes: Array) -> Array:
+	var walk: Array = []
 	for path in _order_routes_clockwise(routes):
-		for i in path.size():
-			var c: Vector2i = path[i]
-			var d := _walk_dir(path, i)
-			var left := Vector2i(d.y, -d.x)   # по левую руку относительно направления движения
-			var cand: Vector2i = c + left
-			# Объект НИКОГДА не должен перекрывать проход: не ставим его на клетку-дверь и не
-			# притягиваем к стене у двери (даже широкая панель не нависает над проёмом, см. _wall_clear).
-			if (foot.has(cand) and not path_set.has(cand) and not used.has(cand)
-					and not door_cells.has(cand) and _wall_clear(id, cand, left)):
-				used[cand] = true
-				slots.append({"cell": cand, "pull": left})   # в клетке слева, притянут к её дальнему краю
-			elif not used.has(c) and not door_cells.has(c) and _wall_clear(id, c, left):
-				used[c] = true
-				slots.append({"cell": c, "pull": left})       # на дорожке, притянут к левой стене
-	return slots
+		if path.size() < 2:
+			continue
+		if path[0] == path[path.size() - 1]:
+			_append_walk(walk, _orient_loop_outward(path))   # петля-тупик: один проход, по часовой
+		else:
+			var seg: Array = path.duplicate()
+			for k in range(path.size() - 2, -1, -1):
+				seg.append(path[k])               # назад до входа
+			_append_walk(walk, seg)
+	return walk
+
+
+func _append_walk(walk: Array, seg: Array) -> void:
+	for c in seg:
+		if walk.is_empty() or walk[walk.size() - 1] != c:
+			walk.append(c)
+
+
+## Ориентирует замкнутую петлю так, чтобы «левая рука» смотрела НАРУЖУ (к стене), а не внутрь
+## комнаты. У произвольной петли из SpaceLayout направление обхода случайно: при обходе против
+## часовой стрелки левая рука уходит в центр комнаты и виртуальные стены оказываются внутри (баг).
+## Тестируем по первому ребру: если левая нормаль смотрит к центроиду петли — разворачиваем.
+func _orient_loop_outward(path: Array) -> Array:
+	var n: int = path.size() - 1   # последняя клетка дублирует первую
+	if n < 2:
+		return path
+	var c := Vector2.ZERO
+	for i in n:
+		c += Vector2(path[i])
+	c /= float(n)
+	var d: Vector2i = path[1] - path[0]
+	var left := Vector2(float(d.y), float(-d.x))
+	var mid := Vector2(path[0]) + Vector2(d) * 0.5
+	if left.dot(c - mid) > 0.0:   # левая нормаль указывает к центру — обход «не той» руки
+		var rev: Array = path.duplicate()
+		rev.reverse()
+		return rev
+	return path
+
+
+## Режет упорядоченные грани на боксы: максимальный пробег граней одного направления по соседним
+## клеткам вдоль стены (шаг перпендикулярен нормали). Каждый разрыв направления/смежности — новый бокс.
+func _group_faces(faces: Array) -> Array:
+	var boxes: Array = []
+	var i := 0
+	while i < faces.size():
+		var dir: Vector2i = faces[i]["dir"]
+		var cells: Array = [faces[i]["cell"]]
+		var j := i + 1
+		while j < faces.size() and faces[j]["dir"] == dir:
+			var step: Vector2i = faces[j]["cell"] - faces[j - 1]["cell"]
+			if not _is_unit(step) or step == dir or step == -dir:
+				break   # не вдоль стены (разрыв/угол) — новый бокс
+			cells.append(faces[j]["cell"])
+			j += 1
+		boxes.append(_make_box(dir, cells))
+		i = j
+	return boxes
+
+
+## Геометрия бокса-стены: dir — внешняя нормаль; cells — клетки вдоль стены по порядку. Считает
+## точку старта стены (дальний край первой клетки, отступ внутрь на PULL_INSET), мировой вектор
+## вдоль стены, поворот объекта (лицом на дорогу = -dir) и длину. Объект на смещении s от старта:
+##   local_pos = start + along * s + (0, y, 0).
+func _make_box(dir: Vector2i, cells: Array) -> Dictionary:
+	var n: int = cells.size()
+	var along_cell: Vector2i = (cells[1] - cells[0]) if n >= 2 else Vector2i(dir.y, -dir.x)
+	var along_world := Vector3(along_cell.x, 0.0, along_cell.y)
+	var dir_world := Vector3(dir.x, 0.0, dir.y)
+	var c0: Vector3 = _cell_world(cells[0].x + 0.5, cells[0].y + 0.5)
+	var start: Vector3 = c0 + dir_world * (GRID * 0.5 - PULL_INSET) - along_world * (GRID * 0.5)
+	var face := -dir
+	return {
+		"dir": dir, "cells": cells, "len": float(n) * GRID,
+		"start": start, "along": along_world, "yaw": atan2(float(face.x), float(face.y)),
+		"face": face,
+	}
+
+
+## Жадная упаковка объектов по боксам (shelf packing) при заданных высотах `heights` (рядов на
+## бокс). Возвращает {placements, box_rows} или null, если не уместилось (ряды кончились → caller
+## растит высоту). Порядок чтения: заполняем бокс слева направо/сверху вниз, кончился — следующий.
+## Объект шире ВСЕХ боксов — отдельным рядом в самый длинный бокс (docs/wall-packing.md).
+func _try_pack(objs: Array, boxes: Array, usable: Array, heights: Array):
+	var box_rows: Array = []
+	for _i in boxes.size():
+		box_rows.append([])
+	var max_box: int = _argmax(usable)
+	var placements: Array = []
+	var cur := 0
+	for obj in objs:
+		var sz: Vector2 = _object_size.get(obj["id"], Vector2(PANEL_WIDTH_M, 1.0))
+		var w: float = sz.x
+		var oh: float = sz.y
+		# Не лезет по ширине ни в один бокс ВПЕРЕДИ курсора (включая «шире всех») — отдельным рядом
+		# в самый длинный бокс. Иначе объект, влезающий лишь в уже пройденный бокс, потерялся бы.
+		var fits_ahead := false
+		for b in range(cur, boxes.size()):
+			if float(usable[b]) >= w:
+				fits_ahead = true
+				break
+		if not fits_ahead:
+			var rows: Array = box_rows[max_box]
+			if rows.size() >= int(heights[max_box]):
+				return null
+			rows.append({"cursor": w, "height": oh, "count": 1})
+			placements.append({"bi": max_box, "ri": rows.size() - 1, "cx": w * 0.5, "obj": obj, "oh": oh})
+			continue
+		var placed := false
+		while cur < boxes.size():
+			var rows: Array = box_rows[cur]
+			var u: float = usable[cur]
+			if rows.is_empty():
+				rows.append({"cursor": 0.0, "height": 0.0, "count": 0})
+			var row: Dictionary = rows[rows.size() - 1]
+			if int(row["count"]) == 0:
+				if w <= u:
+					row["cursor"] = w
+					row["height"] = oh
+					row["count"] = 1
+					placements.append({"bi": cur, "ri": rows.size() - 1, "cx": w * 0.5, "obj": obj, "oh": oh})
+					placed = true
+					break
+				cur += 1   # не лезет даже соло — следующий бокс
+				continue
+			var startc: float = float(row["cursor"]) + PACK_MARGIN
+			if startc + w <= u:
+				row["cursor"] = startc + w
+				row["count"] = int(row["count"]) + 1
+				row["height"] = maxf(float(row["height"]), oh)
+				placements.append({"bi": cur, "ri": rows.size() - 1, "cx": startc + w * 0.5, "obj": obj, "oh": oh})
+				placed = true
+				break
+			if rows.size() < int(heights[cur]):
+				rows.append({"cursor": 0.0, "height": 0.0, "count": 0})   # новый ряд
+				continue
+			cur += 1   # ряды бокса кончились — следующий бокс
+		if not placed:
+			return null
+	return {"placements": placements, "box_rows": box_rows}
+
+
+## Переводит результат упаковки в мировые позиции. Ряды бокса стопкой по вертикали (ряд 0 — верх),
+## блок центрируется по EYE_LEVEL и приподнимается, чтобы низ не уходил под пол (PANEL_FLOOR_GAP).
+## Объект шире бокса центрируется по длине. Возвращает {placements, height} (height — для стен).
+func _finalize_pack(res: Dictionary, boxes: Array, usable: Array) -> Dictionary:
+	var box_rows: Array = res["box_rows"]
+	var row_cy := {}
+	var max_top := 0.0
+	for bi in boxes.size():
+		var rows: Array = box_rows[bi]
+		if rows.is_empty():
+			continue
+		var total_h := 0.0
+		for r in rows:
+			total_h += float(r["height"])
+		total_h += PACK_MARGIN * float(rows.size() - 1)
+		var top_edge: float = EYE_LEVEL + total_h * 0.5
+		var bottom_edge: float = EYE_LEVEL - total_h * 0.5
+		if bottom_edge < PANEL_FLOOR_GAP:
+			top_edge += PANEL_FLOOR_GAP - bottom_edge
+		var cum := 0.0
+		for ri in rows.size():
+			var rh: float = float(rows[ri]["height"])
+			var cy: float = top_edge - cum - rh * 0.5
+			row_cy["%d:%d" % [bi, ri]] = cy
+			cum += rh + PACK_MARGIN
+			max_top = maxf(max_top, cy + rh * 0.5)
+
+	var out: Array = []
+	for p in res["placements"]:
+		var bi: int = p["bi"]
+		var box: Dictionary = boxes[bi]
+		var sz: Vector2 = _object_size.get(p["obj"]["id"], Vector2(PANEL_WIDTH_M, 1.0))
+		var along: float = (float(box["len"]) * 0.5) if sz.x > float(usable[bi]) else (PACK_PAD + float(p["cx"]))
+		var cy: float = row_cy["%d:%d" % [bi, p["ri"]]]
+		var pos: Vector3 = box["start"] + box["along"] * along + Vector3(0, cy, 0)
+		out.append({"obj": p["obj"], "local_pos": pos, "yaw": box["yaw"], "face": box["face"]})
+	return {"placements": out, "height": maxf(WALL_HEIGHT, max_top + HEAD_CLEARANCE)}
+
+
+func _argmax(arr: Array) -> int:
+	var best := 0
+	for i in arr.size():
+		if float(arr[i]) > float(arr[best]):
+			best = i
+	return best
+
+
+## ОТЛАДКА: рисует виртуальные стены (грани развёртки) полупрозрачными красными слэбами на
+## поверхности соответствующего ребра клетки. Каждая грань (cell, dir) — отдельный слэб шириной в
+## клетку (GRID), чтобы был виден результат обхода и нарезки на боксы (соседние боксы — разный тон).
+func _debug_draw_virtual_walls(holder: Node3D, id: int, h: float) -> void:
+	var boxes := _wall_boxes(id)
+	for bi in boxes.size():
+		var box: Dictionary = boxes[bi]
+		var dir: Vector2i = box["dir"]
+		var tint: float = 0.0 if bi % 2 == 0 else 0.5
+		var color := Color(1.0, tint, tint, 0.35)
+		for c in box["cells"]:
+			var center: Vector3 = _cell_world(c.x + 0.5, c.y + 0.5) \
+				+ Vector3(dir.x, 0.0, dir.y) * (GRID * 0.5) + Vector3(0, h * 0.5, 0)
+			var size: Vector3 = Vector3(0.2, h, GRID) if dir.x != 0 else Vector3(GRID, h, 0.2)
+			_add_debug_box(holder, size, center, color)
+
+
+## Полупрозрачный безколлизийный бокс (для отладочной визуализации). Материал создаётся на месте
+## (кэш _shared_material — непрозрачный), shading off, грани с обеих сторон.
+func _add_debug_box(holder: Node3D, size: Vector3, pos: Vector3, color: Color) -> void:
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = _shared_box_mesh(size)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh.material_override = mat
+	mesh.position = pos
+	holder.add_child(mesh)
 
 
 ## Свободна ли стена (сторона `pull` клетки `cell`) от дверей — у самой клетки и у соседних вдоль
@@ -711,15 +990,6 @@ func _wall_clear(id: int, cell: Vector2i, pull: Vector2i) -> bool:
 		if doors.has(_edge_key(cell + along * k, pull)):
 			return false
 	return true
-
-
-## Направление движения вдоль пути в клетке i (к следующей; для последней — от предыдущей).
-func _walk_dir(path: Array, i: int) -> Vector2i:
-	if i + 1 < path.size():
-		return path[i + 1] - path[i]
-	if i > 0:
-		return path[i] - path[i - 1]
-	return Vector2i(0, 1)
 
 
 ## Маршруты в порядке обхода по часовой стрелке — по углу первого шага (север -Z = 0, далее по часовой).
