@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build: All (Win + Mac)",
+            "label": "Build: All (Win + Mac + Linux)",
             "type": "shell",
             "command": "${workspaceFolder}/build.sh all",
             "group": { "kind": "build", "isDefault": true },
@@ -21,6 +21,14 @@
             "label": "Build: Windows",
             "type": "shell",
             "command": "${workspaceFolder}/build.sh win",
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build: Linux",
+            "type": "shell",
+            "command": "${workspaceFolder}/build.sh linux",
             "group": "build",
             "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
             "problemMatcher": []

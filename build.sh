@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# build.sh — собирает релизные билды knossos для Windows и macOS.
+# build.sh — собирает релизные билды knossos для Windows, macOS и Linux.
 #
-#   ./build.sh all      собрать обе платформы (по умолчанию)
+#   ./build.sh all       собрать все платформы (по умолчанию)
 #   ./build.sh mac       только macOS
 #   ./build.sh win       только Windows
+#   ./build.sh linux     только Linux x86_64
 #   ./build.sh --clean   удалить каталог build/ (кэш шаблонов сохраняется)
 #   ./build.sh --help
 #
@@ -44,19 +45,27 @@ find_godot() {
   die "Не найден бинарь Godot. Установите его или задайте переменную GODOT=/path/to/godot"
 }
 
+godot_templates_dir() {
+  case "$(uname -s)" in
+    Darwin) echo "$HOME/Library/Application Support/Godot/export_templates/$TPL_DIR_NAME" ;;
+    Linux)  echo "${XDG_DATA_HOME:-$HOME/.local/share}/godot/export_templates/$TPL_DIR_NAME" ;;
+    *)      echo "$HOME/.local/share/godot/export_templates/$TPL_DIR_NAME" ;;
+  esac
+}
+
 GODOT="$(find_godot)"
 VERSION_FULL="$("$GODOT" --version 2>/dev/null | tail -1)"   # напр. 4.6.3.stable.official.7d41c59c4
 # каталог шаблонов = major.minor[.patch].status, как ждёт Godot
 TPL_DIR_NAME="$(echo "$VERSION_FULL" | awk -F. '{
   if ($3 ~ /^[0-9]+$/) printf "%s.%s.%s.%s", $1,$2,$3,$4;
   else printf "%s.%s.%s", $1,$2,$3 }')"
-TPL_DEST="$HOME/Library/Application Support/Godot/export_templates/$TPL_DIR_NAME"
+TPL_DEST="$(godot_templates_dir)"
 TPZ_URL="https://github.com/godotengine/godot/releases/download/${TPL_DIR_NAME%.*}-${TPL_DIR_NAME##*.}/Godot_v${TPL_DIR_NAME%.*}-${TPL_DIR_NAME##*.}_export_templates.tpz"
 TPZ_CACHE="$CACHE/templates-${TPL_DIR_NAME%.stable}.tpz"
 
 # --- проверка / установка export templates ----------------------------------
 ensure_templates() {
-  if [[ -f "$TPL_DEST/macos.zip" && -f "$TPL_DEST/windows_release_x86_64.exe" ]]; then
+  if [[ -f "$TPL_DEST/macos.zip" && -f "$TPL_DEST/windows_release_x86_64.exe" && -f "$TPL_DEST/linux_release.x86_64" ]]; then
     ok "Export templates $TPL_DIR_NAME на месте"
     return
   fi
@@ -73,7 +82,7 @@ ensure_templates() {
   mkdir -p "$TPL_DEST"
   cp -f "$tmp/templates/"* "$TPL_DEST/" || die "Не удалось разложить шаблоны"
   rm -rf "$tmp"
-  [[ -f "$TPL_DEST/macos.zip" ]] || die "После установки шаблоны не на месте"
+  [[ -f "$TPL_DEST/macos.zip" && -f "$TPL_DEST/windows_release_x86_64.exe" && -f "$TPL_DEST/linux_release.x86_64" ]] || die "После установки шаблоны не на месте"
   ok "Шаблоны установлены в $TPL_DEST"
 }
 
@@ -98,7 +107,7 @@ project_version() {
 
 # --- номер билда ------------------------------------------------------------
 # Локальный автоинкрементный счётчик в build/.build_number (build/ в .gitignore).
-# Инкрементируется один раз за запуск — mac и win в одной сборке делят номер.
+# Инкрементируется один раз за запуск — mac, win и linux в одной сборке делят номер.
 next_build_number() {
   local n=0
   [[ -f "$BUILD_NUMBER_FILE" ]] && n="$(tr -dc '0-9' < "$BUILD_NUMBER_FILE")"
@@ -123,7 +132,10 @@ restore_presets() {
 }
 set_preset_key() {  # $1 = ключ (как в cfg), $2 = значение
   local esc_key="${1//\//\\/}"
-  sed -i '' -E "s/^${esc_key}=.*/${esc_key}=\"$2\"/" "$PRESETS"
+  local tmp
+  tmp="$(mktemp)"
+  sed -E "s/^${esc_key}=.*/${esc_key}=\"$2\"/" "$PRESETS" > "$tmp"
+  mv "$tmp" "$PRESETS"
 }
 stamp_versions() {  # $1 = semver, $2 = build number
   PRESETS_BACKUP="$(mktemp)"
@@ -213,13 +225,43 @@ build_win() {
   ok "Windows готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
 }
 
+# --- сборка Linux -----------------------------------------------------------
+build_linux() {
+  ensure_templates
+  local dir="$BUILD/linux" bin
+  rm -rf "$dir"; mkdir -p "$dir"
+  bin="$dir/$NAME"
+  export_preset "Linux" "$bin"
+
+  [[ -f "$bin" ]] || die "Не создан $NAME"
+  chmod +x "$bin" || true
+
+  # проверка, что рядом легли ffmpeg .so и GDExtension-библиотеки
+  if ls "$dir"/libgdffmpeg.linux*.so >/dev/null 2>&1 && ls "$dir"/libavcodec.so.* >/dev/null 2>&1; then
+    ok "FFmpeg so рядом с бинарём"
+  else
+    warn "Не нашёл ffmpeg so рядом с бинарём — видеоплеер может не работать"
+  fi
+  if ls "$dir"/libwebrtc_native.linux*.so >/dev/null 2>&1 && ls "$dir"/libtwovoip.linux*.so >/dev/null 2>&1; then
+    ok "WebRTC/TwoVoIP so рядом с бинарём"
+  else
+    warn "Не нашёл WebRTC/TwoVoIP so рядом с бинарём — мультиплеер/голос могут не работать"
+  fi
+
+  step "Упаковка в zip"
+  local zip="$BUILD/$NAME-$ARCHIVE_TAG-linux-x86_64.zip"
+  rm -f "$zip"
+  ( cd "$dir" && zip -qr "$zip" . )
+  ok "Linux готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
+}
+
 # --- main -------------------------------------------------------------------
 usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
 
 target="${1:-all}"
 case "$target" in
   -h|--help) usage; exit 0 ;;
-  --clean)   rm -rf "$BUILD/macos" "$BUILD/windows" "$BUILD/$NAME-"*.zip; ok "build/ очищен (кэш шаблонов сохранён)"; exit 0 ;;
+  --clean)   rm -rf "$BUILD/macos" "$BUILD/windows" "$BUILD/linux" "$BUILD/$NAME-"*.zip; ok "build/ очищен (кэш шаблонов сохранён)"; exit 0 ;;
 esac
 
 step "Godot: $GODOT ($VERSION_FULL)"
@@ -237,7 +279,8 @@ stamp_versions "$SEMVER" "$BUILD_NUMBER"
 case "$target" in
   mac|macos)        build_mac ;;
   win|windows)      build_win ;;
-  all)              build_mac; build_win ;;
+  linux|lin)        build_linux ;;
+  all)              build_mac; build_win; build_linux ;;
   *)                die "Неизвестная цель: $target (см. --help)" ;;
 esac
 
