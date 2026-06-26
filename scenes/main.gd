@@ -23,7 +23,8 @@ var _player: Player
 # старый — его корутина увидит снесённый контейнер и сама прекратится.
 var _world_gen: WorldGenerator = null
 var _status: Label
-var _cross: Label
+@onready var _passive_cursor: TextureRect = $UI/PassiveCursor
+@onready var _active_cursor: TextureRect = $UI/ActiveCursor
 var _current_url: String = ""
 # База для относительных URL (учитывает <base href>); по умолчанию = _current_url.
 var _base_url: String = ""
@@ -757,14 +758,9 @@ func _setup_environment() -> void:
 
 func _setup_ui_extras() -> void:
 	var ui: Control = $UI
-	# Прицел по центру экрана. Внешний вид меняется при наведении на активный объект
-	# (см. _on_aim_target_changed).
-	_cross = Label.new()
-	_cross.set_anchors_preset(Control.PRESET_CENTER)
-	_cross.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_cross.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(_cross)
+	# Прицел по центру экрана. В сцене лежат две готовые картинки: пассивная и активная.
+	_passive_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_active_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_on_aim_target_changed(false, "")
 
 	# Строка статуса внизу.
@@ -821,29 +817,17 @@ func _on_debug_probed(text: String) -> void:
 		_debug_label.text = text if text != "" else "Наведи прицел на объект…"
 
 
-## Подсветка прицела: над кликабельным/портальным объектом он становится кружком
-## (акцентный цвет и крупнее), иначе — нейтральный плюс. hint — «куда ведёт» объект под
+## Подсветка прицела: над кликабельным/портальным объектом включается активная нода курсора,
+## иначе — пассивная. hint — «куда ведёт» объект под
 ## прицелом: пишем его в строку статуса (превью ссылки, как в углу браузера), а как только
 ## прицел уходит «в никуда» — очищаем поле.
 func _on_aim_target_changed(active: bool, hint: String) -> void:
 	if _status != null:
 		_status.text = hint
-	if _cross == null:
-		return
-	if active:
-		# Яркий magenta + крупнее + тёмная обводка — чтобы прицел над активным объектом
-		# был заметен на любом фоне (тёмном тексте, светлой картинке).
-		_cross.text = "○"
-		_cross.add_theme_color_override("font_color", Color(1.0, 0.15, 0.9))
-		_cross.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-		_cross.add_theme_constant_override("outline_size", 6)
-		_cross.add_theme_font_size_override("font_size", 40)
-	else:
-		_cross.text = "+"
-		_cross.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
-		_cross.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
-		_cross.add_theme_constant_override("outline_size", 3)
-		_cross.add_theme_font_size_override("font_size", 18)
+	if _passive_cursor != null:
+		_passive_cursor.visible = not active
+	if _active_cursor != null:
+		_active_cursor.visible = active
 
 
 func _set_status(text: String) -> void:
