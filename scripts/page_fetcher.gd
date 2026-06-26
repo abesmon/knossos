@@ -94,7 +94,7 @@ static func resolve_url(url: String, base_url: String = "") -> String:
 		return ""
 
 	if url.begins_with("http://") or url.begins_with("https://"):
-		return url
+		return _escape_http_url(url)
 	# Локальные схемы абсолютны сами по себе, независимо от base.
 	if is_local(url):
 		return _normalize_local(url)
@@ -105,7 +105,7 @@ static func resolve_url(url: String, base_url: String = "") -> String:
 		var scheme := "https:"
 		if base_url.begins_with("http://"):
 			scheme = "http:"
-		return scheme + url
+		return _escape_http_url(scheme + url)
 
 	if base_url == "":
 		# Нет базы — трактуем ввод как домен.
@@ -118,10 +118,10 @@ static func resolve_url(url: String, base_url: String = "") -> String:
 	var dir: String = base["dir"]
 
 	if url.begins_with("/"):
-		return origin + url
+		return _escape_http_url(origin + url)
 	if url.begins_with("#"):
 		return base_url.get_slice("#", 0) + url
-	return _normalize_path(origin + dir + url)
+	return _escape_http_url(_normalize_path(origin + dir + url))
 
 
 # --- Локальные схемы (vrweblocal / vrwebresource) ---
@@ -241,6 +241,14 @@ static func _normalize_path(url: String) -> String:
 			continue
 		out.append(p)
 	return origin + host + "/" + "/".join(out)
+
+
+## HTML допускает пробелы в атрибутах URL, браузер перед запросом кодирует их.
+## Godot HTTPRequest ожидает уже корректный URL, поэтому делаем минимальную нормализацию здесь.
+static func _escape_http_url(url: String) -> String:
+	if not (url.begins_with("http://") or url.begins_with("https://")):
+		return url
+	return url.replace(" ", "%20")
 
 
 ## Канонический ключ страницы для сидирования генерации.
