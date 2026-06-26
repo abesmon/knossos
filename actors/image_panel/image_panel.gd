@@ -9,17 +9,20 @@ extends StaticBody3D
 ## лучом игрока так же, как Portal/RichPanel — через общий интерфейс interact_at.
 
 signal link_activated(transition: Dictionary)
+signal size_changed(size: Vector2)
 
 const GROUP := "image_panel"
-# Единая метрика мира: 1 м = 128 пикселей. Размеры картинки из HTML (width/height) и её
-# собственное разрешение текстуры переводятся в метры через неё — та же линейка, что у
-# текста и ширин панелей (WorldGenerator.PX_PER_METER, docs/html-to-3d-topology.md §13).
+# Единая метрика мира: 1 м = 128 пикселей. Размеры картинки из HTML (width/height)
+# переводятся в метры через неё — та же линейка, что у текста и ширин панелей.
+# Если HTML-размера нет, стартует BASE_WIDTH; после прихода текстуры размер уточняется по
+# натуральным пикселям с cap'ом, а WorldGenerator пересчитывает packing комнаты.
 const PX_PER_METER := 128.0
-const BASE_WIDTH := 2.6        # запасная ширина квада, если мир не задал свою, м
+const BASE_WIDTH := 1.2        # запасная ширина квада, если мир не задал свою, м
 # Потолки не ограничивают картинку (она занимает свой реальный размер), но нужны как
 # дефолт-капы для экрана <video> в WorldGenerator._measure_video.
 const MAX_WIDTH := 6.3
 const MAX_HEIGHT := 3.0
+const NATURAL_MAX_WIDTH := 6.3 # cap для картинок без HTML-размера после прихода текстуры
 const DEFAULT_RATIO := 0.66    # стартовые пропорции заглушки до загрузки
 const EYE_LEVEL := 1.6         # высота центра картинки, м (= высота камеры игрока)
 const FLOOR_GAP := 0.1         # минимальный зазор от низа высокой картинки до пола, м
@@ -124,8 +127,8 @@ func _on_texture(tex: Texture2D) -> void:
 	var size := tex.get_size()
 	var aspect: float = 1.0 if size.y <= 0 else float(size.x) / float(size.y)
 	# Размеры из HTML главнее: оба заданы -> берём как есть; один -> второй из пропорций
-	# реальной текстуры; ничего нет -> собственное разрешение картинки в масштабе
-	# PX_PER_METER (1024px = 1м), без привязки к запасной ширине.
+	# реальной текстуры; ничего нет -> натуральные пиксели текстуры в общей метрике, но с cap'ом.
+	# WorldGenerator слушает size_changed и перепаковывает комнату после позднего уточнения.
 	var w: float
 	var h: float
 	if _want_w > 0.0 and _want_h > 0.0:
@@ -140,6 +143,15 @@ func _on_texture(tex: Texture2D) -> void:
 	else:
 		w = float(size.x) / PX_PER_METER
 		h = float(size.y) / PX_PER_METER
+		if w > NATURAL_MAX_WIDTH:
+			var k := NATURAL_MAX_WIDTH / w
+			w *= k
+			h *= k
+		if h > MAX_HEIGHT:
+			var k2 := MAX_HEIGHT / h
+			w *= k2
+			h *= k2
+	var old_size := _quad.size
 	_quad.size = _clamp_size(Vector2(w, h))
 
 	_mat.albedo_texture = tex
@@ -154,6 +166,8 @@ func _on_texture(tex: Texture2D) -> void:
 		_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_label.visible = false
 	_update_layout()
+	if old_size.distance_to(_quad.size) > 0.01:
+		size_changed.emit(_quad.size)
 
 
 ## true, если у текстуры есть альфа-канал (значит, может быть прозрачность).

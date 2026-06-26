@@ -34,8 +34,20 @@ const RICH := """
 """
 
 const SMALL := "<html><body><div><p>только текст</p><p>и ещё немного</p></div></body></html>"
+const DENSE := """
+<html><body>
+  <button>A</button><button>B</button><button>C</button><button>D</button>
+  <button>E</button><button>F</button><button>G</button><button>H</button>
+</body></html>
+"""
+const DENSE_IMAGES := """
+<html><body>
+  <img src="a.png" alt="A"><img src="b.png" alt="B"><img src="c.png" alt="C"><img src="d.png" alt="D">
+  <img src="e.png" alt="E"><img src="f.png" alt="F">
+</body></html>
+"""
 
-var _cases := [["RICH", RICH], ["SMALL", SMALL]]
+var _cases := [["RICH", RICH], ["SMALL", SMALL], ["DENSE", DENSE], ["DENSE_IMAGES", DENSE_IMAGES]]
 var _ci := 0
 var _holder: Node3D
 var _gen
@@ -169,28 +181,89 @@ func _check_case(name: String) -> void:
 	_expect(name, "слоты есть у комнат с объектами", empty_with_objs == 0,
 		"комнат без слотов: %d" % empty_with_objs)
 
-	# 4c. Объекты не перекрывают проходы: ни один слот не стоит на клетке-двери и не притянут
+	# 4c. Новая развёртка: каждый объект имеет placement в валидном wall-box или fallback slot.
+	var missing_placements := 0
+	var bad_placements := 0
+	var below_floor_offset := 0
+	for id in rooms:
+		var placements: Dictionary = _gen._object_placements.get(id, {})
+		var boxes: Array = _gen._wall_boxes.get(id, [])
+		for obj in rooms[id].get("objects", []):
+			if not placements.has(obj["id"]):
+				missing_placements += 1
+				continue
+			var p: Dictionary = placements[obj["id"]]
+			if p.has("box"):
+				var bi: int = int(p["box"])
+				if bi < 0 or bi >= boxes.size():
+					bad_placements += 1
+					continue
+				if float(p.get("along", -1.0)) < 0.0 or float(p.get("along", 0.0)) > float(boxes[bi].get("length", 0.0)):
+					bad_placements += 1
+			elif p.has("slot"):
+				var slot: Dictionary = p["slot"]
+				if not owner.has(slot["cell"]):
+					bad_placements += 1
+			else:
+				bad_placements += 1
+			if WorldGenerator.OBJECT_FLOOR_OFFSET + float(p.get("y", 0.0)) < WorldGenerator.OBJECT_FLOOR_OFFSET:
+				below_floor_offset += 1
+	_expect(name, "объекты имеют placement на развёртке", missing_placements == 0,
+		"объектов без placement: %d" % missing_placements)
+	_expect(name, "placements валидны", bad_placements == 0,
+		"плохих placements: %d" % bad_placements)
+	_expect(name, "placements подняты над полом", below_floor_offset == 0,
+		"placements ниже offset: %d" % below_floor_offset)
+	if name == "DENSE" or name == "DENSE_IMAGES":
+		var compact_widths := 0
+		var row_counts := {}
+		for obj_id in _gen._object_size:
+			var sz: Vector2 = _gen._object_size[obj_id]
+			if sz.x <= 1.25:
+				compact_widths += 1
+		for id in rooms:
+			for obj_id in _gen._object_placements.get(id, {}):
+				var p: Dictionary = _gen._object_placements[id][obj_id]
+				if not p.has("box"):
+					continue
+				var key := "%d:%d:%.2f" % [id, int(p["box"]), float(p["y"])]
+				row_counts[key] = int(row_counts.get(key, 0)) + 1
+		var max_row := 0
+		for key in row_counts:
+			max_row = maxi(max_row, int(row_counts[key]))
+		_expect(name, "малые объекты имеют компактный футпринт", compact_widths >= 6,
+			"компактных объектов: %d" % compact_widths)
+		_expect(name, "жадная упаковка кладёт несколько объектов в один ряд", max_row >= 2,
+			"максимум объектов в ряду: %d" % max_row)
+
+	# 4d. Объекты не перекрывают проходы: ни один слот не стоит на клетке-двери и не притянут
 	#     к ребру-двери.
 	var blocking := 0
 	for id in rooms:
 		var dcells: Dictionary = _gen._door_cells.get(id, {})
 		var dedges: Dictionary = _gen._door_edges.get(id, {})
-		var slots: Array = _gen._object_slots(id)
-		if slots.is_empty():
-			slots = _gen._fallback_slots(id)
-		for s in slots:
-			var sc: Vector2i = s["cell"]
-			var pull: Vector2i = s["pull"]
-			if dcells.has(sc):
-				blocking += 1
-				continue
-			# Стена со стороны притяжения (и ±1 клетка вдоль неё) не должна нести двери —
-			# иначе объект встанет в проёме или нависнет над ним.
-			var along := Vector2i(pull.y, -pull.x)
-			for k in [-1, 0, 1]:
-				var wc: Vector2i = sc + along * k
-				if dedges.has("%d,%d:%d,%d" % [wc.x, wc.y, pull.x, pull.y]):
+		for obj_id in _gen._object_placements.get(id, {}):
+			var p: Dictionary = _gen._object_placements[id][obj_id]
+			var cells: Array = []
+			var pull: Vector2i = p["pull"]
+			if p.has("box"):
+				var boxes: Array = _gen._wall_boxes.get(id, [])
+				var bi: int = int(p["box"])
+				if bi >= 0 and bi < boxes.size():
+					cells = boxes[bi].get("cells", [])
+			elif p.has("slot"):
+				cells = [p["slot"]["cell"]]
+			for sc in cells:
+				if dcells.has(sc):
 					blocking += 1
+					continue
+				# Стена со стороны притяжения (и ±1 клетка вдоль неё) не должна нести двери —
+				# иначе объект встанет в проёме или нависнет над ним.
+				var along := Vector2i(pull.y, -pull.x)
+				for k in [-1, 0, 1]:
+					var wc: Vector2i = sc + along * k
+					if dedges.has("%d,%d:%d,%d" % [wc.x, wc.y, pull.x, pull.y]):
+						blocking += 1
 	_expect(name, "объекты не перекрывают проходы", blocking == 0, "перекрытий: %d" % blocking)
 
 	# 5. Спавн над клеткой пола.

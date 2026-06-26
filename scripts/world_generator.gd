@@ -35,7 +35,9 @@ const WALL_HEIGHT := 3.2        # минимальная высота стен, 
 const WALL_THICK := 0.15        # тонкая стена, сдвинутая внутрь комнаты на полтолщины (см. _add_wall_run): у вплотную стоящих комнат стены стыкуются грань-в-грань, без z-fight
 
 # --- Расстановка объектов вдоль дорожек ---
-const OBJECT_GAP := 0.6         # зазор между объектами в стопке (друг над другом), м
+const OBJECT_GAP := 0.2         # зазор между объектами внутри wall-box, м
+const OBJECT_BOX_EDGE_PAD := 0.15 # отступ объектов от краёв непрерывного wall-box, м
+const OBJECT_FLOOR_OFFSET := 1.0 # общий подъём визуального низа объектов над полом, м
 const PULL_INSET := 0.3         # на сколько центр притянутого объекта отстоит от края клетки, м
                                 # (объект прижат к краю/стене и смотрит на центр клетки = на дорогу)
 const HEAD_CLEARANCE := 0.8     # запас над самым высоким объектом до верха стены, м
@@ -62,6 +64,7 @@ const PX_PER_METER := 128.0
 const LABEL_RASTER_SCALE := 1.875
 const LABEL_PIXEL_SIZE := 1.0 / (PX_PER_METER * LABEL_RASTER_SCALE)
 const PANEL_WIDTH_M := 2.2      # ширина текстовой таблички-Label3D, м
+const PANEL_MIN_WIDTH_M := 0.6  # короткие подписи не должны занимать полный настенный блок
 const VIDEO_FALLBACK_EM := 26.0 # ширина <video> без размеров в HTML, в «эмах» базы (экран крупнее картинки)
 const HEADING_EM := {1: 2.0, 2: 1.5, 3: 1.17, 4: 1.0, 5: 0.83, 6: 0.67}
 
@@ -91,6 +94,9 @@ var _dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 var _object_size: Dictionary = {} # objectId -> Vector2(w, h), м
 var _room_wall_h: Dictionary = {} # roomId -> высота стен, м
 var _object_room: Dictionary = {} # objectId -> roomId
+var _object_nodes: Dictionary = {} # objectId -> Node3D уже созданного объекта
+var _wall_boxes: Dictionary = {}  # roomId -> Array[{pull, vary0, vary1, cells, length}]
+var _object_placements: Dictionary = {} # roomId -> { objectId -> {box, along, y, pull} }
 
 # Раскладка из SpaceLayout (клетки, двери, коридоры) -> абсолютные клетки на общей сетке.
 var _layout: Dictionary = {}      # сырой результат SpaceLayout.build
@@ -166,6 +172,7 @@ func _build(space: Dictionary, parent: Node3D, seed_value: int, on_transition: C
 
 	_measure_objects()                       # фаза 1: размеры объектов (нужны для стен/панелей)
 	_consume_layout()                        # фаза 2: раскладка от SpaceLayout -> абс. клетки
+	_compute_object_layouts()                # фаза 2b: wall-boxes + упаковка объектов по ним
 
 	_first_obj_id = _find_first_object_id()
 	for id in _rooms.keys():
@@ -305,8 +312,7 @@ func _measure_panel(obj: Dictionary) -> Vector2:
 		_:
 			text = _obj_text(obj)
 	var glyph_m := _px_to_m(px)
-	var h := _panel_height(_truncate(text, 220), glyph_m)
-	return Vector2(PANEL_WIDTH_M, h)
+	return _panel_size(_truncate(text, 220), glyph_m)
 
 
 func _measure_image(obj: Dictionary) -> Vector2:
@@ -422,15 +428,207 @@ func _consume_layout() -> void:
 
 	for id in rooms:
 		_positions[id] = _foot_centroid_world(id)
-		_room_wall_h[id] = _wall_height(id)
 
 
 ## Высота стен комнаты: не ниже WALL_HEIGHT, с запасом над самым высоким объектом.
 func _wall_height(id: int) -> float:
-	var max_h := 0.0
-	for obj in _rooms[id]["objects"]:
-		max_h = maxf(max_h, _object_size.get(obj["id"], Vector2.ZERO).y)
-	return maxf(WALL_HEIGHT, max_h + HEAD_CLEARANCE)
+	var top := 0.0
+	var placements: Dictionary = _object_placements.get(id, {})
+	for obj_id in placements:
+		var p: Dictionary = placements[obj_id]
+		var size: Vector2 = _object_size.get(obj_id, Vector2(PANEL_WIDTH_M, 1.0))
+		top = maxf(top, OBJECT_FLOOR_OFFSET + float(p.get("y", 0.0)) + size.y)
+	if top <= 0.0:
+		for obj in _rooms[id]["objects"]:
+			var size: Vector2 = _object_size.get(obj["id"], Vector2.ZERO)
+			top = maxf(top, OBJECT_FLOOR_OFFSET + _object_root_top_y(obj, size))
+	return maxf(WALL_HEIGHT, top + HEAD_CLEARANCE)
+
+
+func _object_root_top_y(obj: Dictionary, size: Vector2) -> float:
+	return _object_root_bottom_y(obj, size) + size.y
+
+
+func _object_root_bottom_y(obj: Dictionary, size: Vector2) -> float:
+	if obj.get("function", null) != null and typeof(obj.get("function", null)) == TYPE_DICTIONARY:
+		return 0.0
+	if obj.get("type", "") == "media" and obj.get("content", {}).get("media_tag", "") == "video":
+		var center_video := maxf(EYE_LEVEL, size.y * 0.5 + PANEL_FLOOR_GAP)
+		return center_video - size.y * 0.5
+	if obj.get("type", "") == "image" or obj.get("type", "") == "figure":
+		var center_img := maxf(ImagePanel.EYE_LEVEL, size.y * 0.5 + ImagePanel.FLOOR_GAP)
+		return center_img - size.y * 0.5
+	var center_y := maxf(EYE_LEVEL, size.y * 0.5 + PANEL_FLOOR_GAP)
+	return center_y - size.y * 0.5
+
+
+## Строит "развёртку" виртуальных стен комнаты: смежные коллинеарные рёбра склеиваются в
+## непрерывные wall-boxes, а углы и разрывы остаются разрезами. Затем реальные размеры объектов
+## жадно пакуются в эти боксы. Если суммарной площади не хватает, боксы по очереди растут вверх
+## на одну клетку, и layout полностью пересчитывается.
+func _compute_object_layouts() -> void:
+	_wall_boxes.clear()
+	_object_placements.clear()
+	for id in _rooms.keys():
+		var boxes := _object_boxes(id)
+		_wall_boxes[id] = boxes
+		_object_placements[id] = _pack_room_objects(id, boxes)
+	for id in _rooms.keys():
+		_room_wall_h[id] = _wall_height(id)
+
+
+func _object_boxes(id: int) -> Array:
+	var rd: Dictionary = _layout.get("rooms", {}).get(id, {})
+	var virtual_walls: Array = rd.get("virtual_walls", [])
+	if virtual_walls.is_empty():
+		return []
+
+	var foot: Dictionary = _foot.get(id, {})
+	var door_cells: Dictionary = _door_cells.get(id, {})
+	var groups := {}
+	for wall in virtual_walls:
+		var c: Vector2i = wall.get("cell", Vector2i.ZERO)
+		var pull: Vector2i = wall.get("dir", Vector2i.ZERO)
+		if not foot.has(c) or door_cells.has(c) or not _wall_clear(id, c, pull):
+			continue
+		var fixed: int = c.x if pull.x != 0 else c.y
+		var vary: int = c.y if pull.x != 0 else c.x
+		var key := "%d,%d:%d" % [pull.x, pull.y, fixed]
+		if not groups.has(key):
+			groups[key] = {"pull": pull, "fixed": fixed, "values": {}}
+		groups[key]["values"][vary] = c
+
+	var boxes: Array = []
+	for key in groups:
+		var g: Dictionary = groups[key]
+		var vals: Array = g["values"].keys()
+		vals.sort()
+		var i := 0
+		while i < vals.size():
+			var a: int = vals[i]
+			var b: int = a
+			var cells: Array = [g["values"][a]]
+			while i + 1 < vals.size() and int(vals[i + 1]) == b + 1:
+				i += 1
+				b = int(vals[i])
+				cells.append(g["values"][b])
+			i += 1
+			boxes.append({
+				"pull": g["pull"],
+				"fixed": int(g["fixed"]),
+				"vary0": a,
+				"vary1": b + 1,
+				"cells": cells,
+				"length": float(b - a + 1) * GRID,
+				"height_cells": 1,
+			})
+	boxes.sort_custom(Callable(self, "_sort_object_boxes"))
+	return boxes
+
+
+func _sort_object_boxes(a: Dictionary, b: Dictionary) -> bool:
+	var ac: Vector2i = a["cells"][0]
+	var bc: Vector2i = b["cells"][0]
+	if ac.y == bc.y:
+		return ac.x < bc.x
+	return ac.y < bc.y
+
+
+func _pack_room_objects(id: int, boxes: Array) -> Dictionary:
+	var objs: Array = _rooms[id].get("objects", [])
+	if objs.is_empty():
+		return {}
+	if boxes.is_empty():
+		return _fallback_object_placements(id, objs)
+
+	var heights: Array = []
+	for _i in boxes.size():
+		heights.append(1)
+	var grow_idx := 0
+	var guard := 0
+	while guard < boxes.size() * 64:
+		guard += 1
+		var packed := _try_pack_objects(objs, boxes, heights)
+		if not packed.is_empty():
+			for i in boxes.size():
+				boxes[i]["height_cells"] = int(heights[i])
+			return packed
+		heights[grow_idx] = int(heights[grow_idx]) + 1
+		grow_idx = (grow_idx + 1) % boxes.size()
+	return _fallback_object_placements(id, objs)
+
+
+func _try_pack_objects(objs: Array, boxes: Array, heights: Array) -> Dictionary:
+	var state: Array = []
+	for i in boxes.size():
+		state.append({"x": 0.0, "y": 0.0, "row_h": 0.0})
+
+	var placements := {}
+	var box_i := 0
+	for obj in objs:
+		var obj_id: int = obj["id"]
+		var size: Vector2 = _object_size.get(obj_id, Vector2(PANEL_WIDTH_M, 1.0))
+		var placed := false
+		while box_i < boxes.size():
+			var box: Dictionary = boxes[box_i]
+			var st: Dictionary = state[box_i]
+			var inner_w := maxf(0.0, float(box.get("length", GRID)) - OBJECT_BOX_EDGE_PAD * 2.0)
+			var inner_h := float(heights[box_i]) * GRID - OBJECT_BOX_EDGE_PAD * 2.0
+			var need_w := size.x
+			var need_h := size.y
+			if inner_w <= 0.0 or inner_h <= 0.0:
+				box_i += 1
+				continue
+			if float(st["x"]) > 0.0 and float(st["x"]) + need_w > inner_w:
+				st["x"] = 0.0
+				st["y"] = float(st["y"]) + float(st["row_h"]) + OBJECT_GAP
+				st["row_h"] = 0.0
+			if float(st["y"]) + need_h <= inner_h:
+				var along_x := float(st["x"]) + need_w * 0.5
+				if need_w > inner_w:
+					along_x = inner_w * 0.5
+				placements[obj_id] = {
+					"box": box_i,
+					"along": OBJECT_BOX_EDGE_PAD + along_x,
+					"y": OBJECT_BOX_EDGE_PAD + float(st["y"]),
+					"pull": box["pull"],
+				}
+				st["x"] = minf(inner_w + OBJECT_GAP, float(st["x"]) + need_w + OBJECT_GAP)
+				st["row_h"] = maxf(float(st["row_h"]), need_h)
+				placed = true
+				break
+			box_i += 1
+		if not placed:
+			return {}
+	return placements
+
+
+func _fallback_object_placements(id: int, objs: Array) -> Dictionary:
+	var slots := _fallback_slots(id)
+	var placements := {}
+	if slots.is_empty():
+		return placements
+	var y_by_slot: Array = []
+	var prev_half_by_slot: Array = []
+	for _i in slots.size():
+		y_by_slot.append(0.0)
+		prev_half_by_slot.append(0.0)
+	for i in objs.size():
+		var slot_i := i % slots.size()
+		var slot: Dictionary = slots[slot_i]
+		var size: Vector2 = _object_size.get(objs[i]["id"], Vector2(PANEL_WIDTH_M, 1.0))
+		var y := float(y_by_slot[slot_i])
+		if i >= slots.size():
+			y += float(prev_half_by_slot[slot_i]) + size.y * 0.5 + OBJECT_GAP
+		placements[objs[i]["id"]] = {
+			"slot": slot,
+			"along": GRID * 0.5,
+			"y": y,
+			"pull": slot["pull"],
+		}
+		y_by_slot[slot_i] = y
+		prev_half_by_slot[slot_i] = size.y * 0.5
+	return placements
 
 
 ## Описывающий прямоугольник футпринта комнаты (в клетках).
@@ -591,73 +789,58 @@ func _add_wall_run(holder: Node3D, r: Dictionary, h: float, color: Color) -> voi
 		_add_box(holder, Vector3(length, h, WALL_THICK), Vector3(center, h * 0.5, r["wall_fixed"]), color, true)
 
 
-## Расставляет объекты на виртуальные стены комнаты (`virtual_walls` из SpaceLayout), лицом
-## обратно к дорожке. Один слот = сторона клетки `{cell, pull}`; в углах одна клетка может дать
-## несколько слотов с разными сторонами. Объекты раскидываются по N слотам;
-## если объектов больше слотов — лишние ставятся СТОПКОЙ (друг над другом) в передних слотах:
-## слот i получает `base+(1 если i<rem)` объектов, base=M/N, rem=M%N (первый объект группы — сверху).
+## Расставляет объекты по заранее посчитанной развёртке виртуальных стен комнаты. Placement
+## хранит box + координату вдоль стены + вертикальный offset; старый fallback по клеткам остаётся
+## только для комнат без виртуальных стен.
 func _place_objects(room: Dictionary, holder: Node3D, on_transition: Callable, id: int, skip_obj = null) -> void:
-	var objs: Array = []
+	var placements: Dictionary = _object_placements.get(id, {})
 	for obj in room["objects"]:
 		# Заголовок, ушедший вывеской над входом, среди объектов не дублируем.
 		if skip_obj != null and obj["id"] == skip_obj["id"]:
 			continue
-		objs.append(obj)
-	if objs.is_empty():
-		return
-
-	var slots := _object_slots(id)
-	if slots.is_empty():
-		slots = _fallback_slots(id)
-	if slots.is_empty():
-		return
-
-	var n := slots.size()
-	var m := objs.size()
-	@warning_ignore("integer_division")
-	var base: int = m / n
-	var rem: int = m % n
-	var oi := 0
-	for i in n:
-		var count: int = base + (1 if i < rem else 0)
-		if count == 0:
+		if not placements.has(obj["id"]):
 			continue
-		_place_stack(objs.slice(oi, oi + count), slots[i], holder, on_transition)
-		oi += count
+		_place_object_at(obj, placements[obj["id"]], id, holder, on_transition)
 
 
-## Ставит группу объ­ектов в один слот: один объект — на уровне глаз (как обычно), несколько —
-## СТОПКОЙ снизу вверх (первый в группе — самый верхний). Объект ПРИТЯНУТ к краю клетки в сторону
-## `pull` (к стене/прочь от дороги) и смотрит на центр клетки = на дорогу (yaw из face = -pull).
-## Подъём по Y задаётся через y координаты local_pos — сами панели поднимают геометрию от своего
-## узла, поэтому стопка растёт вверх от уровня глаз без правок классов панелей.
-func _place_stack(group: Array, slot: Dictionary, holder: Node3D, on_transition: Callable) -> void:
-	var cell: Vector2i = slot["cell"]
-	var pull: Vector2i = slot["pull"]
+func _place_object_at(obj: Dictionary, placement: Dictionary, id: int, holder: Node3D, on_transition: Callable) -> void:
+	var pull: Vector2i = placement["pull"]
 	var face := -pull
 	var yaw := atan2(float(face.x), float(face.y))
-	var pull_off := Vector3(pull.x, 0.0, pull.y) * (GRID * 0.5 - PULL_INSET)
-	var base_world := _cell_world(cell.x + 0.5, cell.y + 0.5) + pull_off
+	var size: Vector2 = _object_size.get(obj["id"], Vector2(PANEL_WIDTH_M, 1.0))
+	var base_world := _placement_world(id, placement, obj, size)
+	if obj["id"] == _first_obj_id:
+		_record_spawn(Vector3(base_world.x, 0.0, base_world.z), face)
+	_build_object(obj, holder, base_world, yaw, on_transition)
 
-	if group.size() == 1:
-		var obj: Dictionary = group[0]
-		if obj["id"] == _first_obj_id:
-			_record_spawn(base_world, face)
-		_build_object(obj, holder, base_world, yaw, on_transition)
-		return
 
-	# Снизу вверх: последний объект группы — низ (на уровне глаз), первый — верх.
-	var y := 0.0
-	var prev_half := 0.0
-	for k in group.size():
-		var obj: Dictionary = group[group.size() - 1 - k]
-		var oh: float = _object_size.get(obj["id"], Vector2(PANEL_WIDTH_M, 1.0)).y
-		if k > 0:
-			y += prev_half + oh * 0.5 + OBJECT_GAP
-		prev_half = oh * 0.5
-		if obj["id"] == _first_obj_id:
-			_record_spawn(base_world + Vector3(0, y, 0), face)
-		_build_object(obj, holder, base_world + Vector3(0, y, 0), yaw, on_transition)
+func _placement_world(id: int, placement: Dictionary, obj: Dictionary, size: Vector2) -> Vector3:
+	var root_y := _placement_floor_y(placement) - _object_root_bottom_y(obj, size)
+	if placement.has("slot"):
+		var slot: Dictionary = placement["slot"]
+		var cell: Vector2i = slot["cell"]
+		var pull: Vector2i = slot["pull"]
+		var pull_off := Vector3(pull.x, 0.0, pull.y) * (GRID * 0.5 - PULL_INSET)
+		return _cell_world(cell.x + 0.5, cell.y + 0.5) + pull_off + Vector3(0, root_y, 0)
+
+	var boxes: Array = _wall_boxes.get(id, [])
+	var box_i: int = int(placement.get("box", -1))
+	if box_i < 0 or box_i >= boxes.size():
+		return _positions.get(id, Vector3.ZERO)
+	var box: Dictionary = boxes[box_i]
+	var pull: Vector2i = box["pull"]
+	var along: float = float(placement.get("along", GRID * 0.5))
+	if pull.x != 0:
+		var x := _cell_world(float(box["fixed"]) + 0.5, 0).x + float(pull.x) * (GRID * 0.5 - PULL_INSET)
+		var z := _cell_world(0, float(box["vary0"])).z + along
+		return Vector3(x, root_y, z)
+	var z2 := _cell_world(0, float(box["fixed"]) + 0.5).z + float(pull.y) * (GRID * 0.5 - PULL_INSET)
+	var x2 := _cell_world(float(box["vary0"]), 0).x + along
+	return Vector3(x2, root_y, z2)
+
+
+func _placement_floor_y(placement: Dictionary) -> float:
+	return OBJECT_FLOOR_OFFSET + float(placement.get("y", 0.0))
 
 
 ## Слоты под объекты из виртуальных стен комнаты. Каждая виртуальная стена — сторона клетки
@@ -876,10 +1059,69 @@ func _add_corr_wall(holder: Node3D, d: Vector2i, color: Color) -> void:
 
 func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> void:
 	var node := _spawn_object(obj, holder, local_pos, yaw, on_transition)
+	if node != null:
+		_object_nodes[obj["id"]] = node
 	# Провенанс объекта вешаем на его корневой узел: отладочный пробник прицела поднимается
 	# от коллайдера к ближайшему предку с метаданными (см. Player._find_debug_meta).
 	if _debug and node != null:
 		_attach_debug(node, _object_debug_text(obj))
+
+
+func _on_object_size_changed(obj_id: int, size: Vector2) -> void:
+	if not _object_room.has(obj_id):
+		return
+	var old: Vector2 = _object_size.get(obj_id, Vector2.ZERO)
+	if old.distance_to(size) <= 0.01:
+		return
+	_object_size[obj_id] = size
+	var room_id: int = _object_room[obj_id]
+	var boxes := _object_boxes(room_id)
+	_wall_boxes[room_id] = boxes
+	_object_placements[room_id] = _pack_room_objects(room_id, boxes)
+	_room_wall_h[room_id] = _wall_height(room_id)
+	_reposition_room_objects(room_id)
+
+
+func _reposition_room_objects(room_id: int) -> void:
+	var placements: Dictionary = _object_placements.get(room_id, {})
+	for obj in _rooms[room_id].get("objects", []):
+		var obj_id: int = obj["id"]
+		if not placements.has(obj_id) or not _object_nodes.has(obj_id):
+			continue
+		var node: Node3D = _object_nodes[obj_id]
+		if not is_instance_valid(node):
+			continue
+		var placement: Dictionary = placements[obj_id]
+		var size: Vector2 = _object_size.get(obj_id, Vector2(PANEL_WIDTH_M, 1.0))
+		var pull: Vector2i = placement["pull"]
+		var face := -pull
+		node.position = _object_node_position(room_id, placement, obj, size)
+		node.rotation.y = atan2(float(face.x), float(face.y))
+		if obj_id == _first_obj_id:
+			_record_spawn(Vector3(node.position.x, 0.0, node.position.z), face)
+
+
+func _object_node_position(room_id: int, placement: Dictionary, obj: Dictionary, size: Vector2) -> Vector3:
+	var base := _placement_world(room_id, placement, obj, size)
+	if _object_node_is_centered(obj):
+		return Vector3(base.x, _placement_floor_y(placement) + size.y * 0.5, base.z)
+	return base
+
+
+func _object_node_is_centered(obj: Dictionary) -> bool:
+	var type: String = obj.get("type", "")
+	if type == "media" and obj.get("content", {}).get("media_tag", "") == "video":
+		return true
+	if type == "text":
+		var runs: Array = obj.get("content", {}).get("runs", [])
+		return not runs.is_empty() and (_runs_have_links(runs) or _obj_text(obj).length() > 200)
+	if type == "heading":
+		return _runs_have_links(obj.get("content", {}).get("runs", []))
+	if type == "list":
+		return _list_has_links(obj) or _list_has_images(obj)
+	if type == "table":
+		return _table_has_links(obj) or _table_has_images(obj)
+	return false
 
 
 ## Создаёт 3D-представление объекта и возвращает его корневой узел (для привязки провенанса).
@@ -965,17 +1207,19 @@ func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, 
 	var font := _godot_font(font_css_px)
 	var glyph_m := _px_to_m(font_css_px)
 	var clipped := _truncate(text, 220)
-	var height := _panel_height(clipped, glyph_m)
+	var size := _panel_size(clipped, glyph_m)
+	var width := size.x
+	var height := size.y
 	# Центр панели — на уровне глаз (а не низом на полу): мелкие таблички висят перед
 	# лицом, высокие приподняты так, чтобы низ не вжимался в пол (PANEL_FLOOR_GAP).
 	var center_y := maxf(EYE_LEVEL, height * 0.5 + PANEL_FLOOR_GAP)
-	_add_box(node, Vector3(PANEL_WIDTH_M, height, 0.15), Vector3(0, center_y, 0), color, false)
+	_add_box(node, Vector3(width, height, 0.15), Vector3(0, center_y, 0), color, false)
 	var label := Label3D.new()
 	label.text = clipped
 	label.font_size = font
 	label.outline_size = max(8, int(font * 0.25))
 	label.pixel_size = LABEL_PIXEL_SIZE
-	label.width = int(PANEL_WIDTH_M / LABEL_PIXEL_SIZE)
+	label.width = int(width / LABEL_PIXEL_SIZE)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.position = Vector3(0, center_y, 0.1)
@@ -983,9 +1227,25 @@ func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, 
 	return node
 
 
-func _panel_height(text: String, glyph_m: float) -> float:
+func _panel_size(text: String, glyph_m: float) -> Vector2:
+	var width := _panel_width(text, glyph_m)
+	return Vector2(width, _panel_height(text, glyph_m, width))
+
+
+func _panel_width(text: String, glyph_m: float) -> float:
+	var char_w: float = max(0.001, glyph_m * 0.55)
+	var max_line := 0
+	for line in text.split("\n"):
+		max_line = maxi(max_line, line.length())
+	var by_longest := float(max_line) * char_w + 0.45
+	if text.length() > 80:
+		return PANEL_WIDTH_M
+	return clampf(by_longest, PANEL_MIN_WIDTH_M, PANEL_WIDTH_M)
+
+
+func _panel_height(text: String, glyph_m: float, width_m: float) -> float:
 	var char_w: float = max(0.001, glyph_m * 0.5)
-	var per_line: float = max(1.0, PANEL_WIDTH_M / char_w)
+	var per_line: float = max(1.0, width_m / char_w)
 	var explicit := 1 + text.count("\n")
 	var wrapped := int(ceil(text.length() / per_line))
 	var lines: int = max(explicit, wrapped)
@@ -1033,13 +1293,14 @@ func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw
 	holder.add_child(panel)
 	panel.position = local_pos
 	panel.rotation.y = yaw
+	panel.size_changed.connect(func(size: Vector2): _on_object_size_changed(obj["id"], size))
 	if transition != null and on_transition.is_valid():
 		panel.link_activated.connect(on_transition)
 
 	var src: String = str(content.get("src", ""))
 	if src != "" and _image_loader != null:
 		var url := PageFetcher.resolve_url(src, _base_url)
-		panel.request_load(url, _image_loader)
+		panel.call_deferred("request_load", url, _image_loader)
 	return panel
 
 
