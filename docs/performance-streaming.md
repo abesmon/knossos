@@ -22,8 +22,8 @@
 `WorldGenerator._build` разбит на **синхронную** и **стримящуюся** части:
 
 - **Синхронно** (до возврата из `generate()`): раскладка, позиции якорей (`_resolve_labels`),
-  атмосфера (свет/небо — чтобы мир был освещён сразу) и **комната спавна** (чтобы `spawn_point`
-  был готов и игроку было куда встать). Комната спавна = `_object_room[_first_obj_id]`.
+  атмосфера (свет/небо — чтобы мир был освещён сразу) и **root-комната спавна** (чтобы
+  `spawn_point` по `rooms[root].routes` был готов и игроку было куда встать).
 - **Порциями по кадрам** (`_stream_remaining`): все остальные комнаты и полы-коридоров. Строим
   узлы, пока не выйдет бюджет кадра `BUILD_BUDGET_MS` (6 мс), затем `await tree.process_frame`
   и продолжаем со следующего кадра.
@@ -124,7 +124,7 @@
 | `ImageLoader._start` / `DOWNLOAD_CHUNK_SIZE` | крупный чанк чтения (1 МБ) — скачивание в скорость сети, а не 64 КБ-итерациями |
 | `ImageLoader._deliver_gif_async` / `_gif_prepare` | тяжёлый декод GIF в `WorkerThreadPool` — главный поток не морозится |
 | `WorldGenerator._apply_sky_image` | подмена неба панорамой; `Sky.PROCESS_MODE_INCREMENTAL` против просадки radiance на слабом GPU |
-| `WorldGenerator._build` | синхронная часть: раскладка + атмосфера + комната спавна + `_compute_spawn` |
+| `WorldGenerator._build` | синхронная часть: раскладка + атмосфера + root-комната спавна + `_compute_spawn` |
 | `WorldGenerator._stream_remaining` | достройка остальных комнат порциями по кадрам, `build_finished` |
 | `WorldGenerator._add_box` / `_shared_*` | шеринг `BoxMesh`/`BoxShape3D`/материала через кэши |
 | `WorldGenerator.build_complete` / `build_finished` | флаг + сигнал «мир достроен» (для main) |
