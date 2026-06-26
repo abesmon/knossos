@@ -117,6 +117,29 @@ static func _is_gif(body: PackedByteArray) -> bool:
 	return body.size() >= 3 and body[0] == 0x47 and body[1] == 0x49 and body[2] == 0x46
 
 
+## true, если байты начинаются с RIFF WEBP. MIME и расширение в вебе часто врут.
+static func _is_webp(body: PackedByteArray) -> bool:
+	return body.size() >= 12 \
+			and body[0] == 0x52 and body[1] == 0x49 and body[2] == 0x46 and body[3] == 0x46 \
+			and body[8] == 0x57 and body[9] == 0x45 and body[10] == 0x42 and body[11] == 0x50
+
+
+## Animated WebP содержит RIFF WEBP с чанками ANIM/ANMF. Встроенный Image-декодер Godot
+## статичный WebP тянет, но animated WebP возвращает ERR_PARSE_ERROR; текущий FFmpeg-аддон
+## тоже не умеет этот контейнер (пропускает ANIM/ANMF). Пока используем только для диагностики.
+static func _is_animated_webp(body: PackedByteArray) -> bool:
+	if not _is_webp(body):
+		return false
+	var i := 12
+	while i + 8 <= body.size():
+		var chunk_size := body[i + 4] | (body[i + 5] << 8) | (body[i + 6] << 16) | (body[i + 7] << 24)
+		if (body[i] == 0x41 and body[i + 1] == 0x4E and body[i + 2] == 0x49 and body[i + 3] == 0x4D) \
+				or (body[i] == 0x41 and body[i + 1] == 0x4E and body[i + 2] == 0x4D and body[i + 3] == 0x46):
+			return true
+		i += 8 + chunk_size + (chunk_size & 1)
+	return false
+
+
 ## Кэширует готовую текстуру, будит ожидающих и подкручивает очередь. Освобождает один
 ## активный слот. Общая точка выхода для сетевых и локальных загрузок.
 func _deliver(url: String, tex: Texture2D) -> void:
@@ -129,12 +152,15 @@ func _deliver(url: String, tex: Texture2D) -> void:
 	_pump()
 
 
-## Декодирует байты в текстуру строго по типу (Content-Type, иначе расширение url).
-## Перебор кодеков НЕ делаем — это лишь засыпало бы консоль ошибками декодера на
-## каждой картинке; не распознали тип -> отдаём null, и картинка получит заглушку.
-## SVG поддерживаем, если в сборке Godot есть кодек.
+## Декодирует байты в текстуру. Сначала доверяем сигнатурам контейнеров, которые точно умеем
+## распознать (например, WebP может прийти как .gif с Content-Type: image/gif), затем
+## Content-Type и расширению url. Перебор кодеков НЕ делаем — это лишь засыпало бы консоль
+## ошибками декодера на каждой картинке; не распознали тип -> отдаём null, и картинка получит
+## заглушку. SVG поддерживаем, если в сборке Godot есть кодек.
 func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> Texture2D:
-	var hint := _content_type(headers)
+	var hint := _signature_image_type(body)
+	if hint == "":
+		hint = _content_type(headers)
 	if hint == "":
 		hint = url.get_extension().to_lower()
 
@@ -151,6 +177,8 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 			return null
 		err = img.load_jpg_from_buffer(body)
 	elif hint.contains("webp"):
+		if _is_animated_webp(body):
+			return null
 		err = img.load_webp_from_buffer(body)
 	elif hint.contains("svg") and img.has_method("load_svg_from_buffer"):
 		err = img.load_svg_from_buffer(body, 1.0)
@@ -167,6 +195,14 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 		img.resize(int(w * scale), int(h * scale), Image.INTERPOLATE_BILINEAR)
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
+
+
+## Возвращает формат по сигнатуре байтов для контейнеров, где ошибочный MIME/расширение
+## встречаются в вебе. Пока нужен WebP: RIFF .... WEBP, в том числе animated WebP.
+static func _signature_image_type(body: PackedByteArray) -> String:
+	if _is_webp(body):
+		return "webp"
+	return ""
 
 
 ## Декод GIF без фриза: тяжёлую часть (самописный LZW-декод + ресайз кадров, потокобезопасная
