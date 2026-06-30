@@ -76,6 +76,7 @@ func _ready() -> void:
 	_player.aim_target_changed.connect(_on_aim_target_changed)
 	_player.debug_toggled.connect(_on_debug_toggled)
 	_player.debug_probed.connect(_on_debug_probed)
+	_player.tool_changed.connect(_on_tool_changed)
 	# Браузинг мира и UI взаимоисключающи: пока мышь захвачена, элементы навбара/чата
 	# делаем нефокусируемыми, чтобы их нельзя было активировать с клавиатуры (Tab/Space/Enter).
 	_player.mouse_capture_changed.connect(_on_mouse_capture_changed)
@@ -856,6 +857,15 @@ func _on_debug_toggled(on: bool) -> void:
 			_debug_label.text = "Наведи прицел на объект…"
 	else:
 		_set_status("Отладка OFF")
+
+
+## Сменился инструмент рисования (кнопка 2): подсказка в статус-строке. См. ToolController.
+func _on_tool_changed(tool_name: String) -> void:
+	if tool_name == "":
+		_set_status("Инструмент убран — ЛКМ снова взаимодействует с порталами")
+	else:
+		_set_status("Инструмент: %s — зажмите ЛКМ, чтобы %s" % [
+			tool_name, "рисовать" if tool_name == "карандаш" else "стирать"])
 
 
 func _on_debug_probed(text: String) -> void:

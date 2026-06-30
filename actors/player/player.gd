@@ -23,6 +23,10 @@ signal chat_requested
 ## В браузинге мира тот же Esc сначала отпускает мышь (см. _unhandled_input).
 signal settings_requested
 
+## Сменился инструмент рисования (кнопка 2): "" — убран, иначе имя ("карандаш"/"ластик").
+## main показывает подсказку в строке статуса. См. ToolController и docs/pencil-tool.md.
+signal tool_changed(tool_name: String)
+
 ## Отладочный режим инспектора провенанса (F3) включён/выключен. main показывает/прячет оверлей.
 signal debug_toggled(on: bool)
 ## Текст провенанса узла под прицелом в отладочном режиме (пустой — под прицелом ничего).
@@ -62,11 +66,13 @@ const DEBUG_REACH := 50.0    # дальность луча инспектора,
 @onready var _avatar_source: AvatarParameterSource = $AvatarParameterSource
 
 var _local_avatar: LocalAvatar
+var _tool: ToolController
 
 
 func _ready() -> void:
 	capture_mouse(true)
 	_setup_local_avatar()
+	_setup_tools()
 
 
 ## Видимое тело игрока — чтобы видеть себя в зеркалах (как в VRChat). Тело висит на слое
@@ -80,6 +86,16 @@ func _setup_local_avatar() -> void:
 	_local_avatar.name = "LocalAvatar"
 	_local_avatar.setup(_avatar_source)
 	add_child(_local_avatar)
+
+
+## Слой инструментов рисования (карандаш/ластик): держит визуал в руке (под камерой) и логику
+## ведения. Кнопка 2 циклит инструмент, ЛКМ маршрутится сюда (_unhandled_input). Штрихи вешаются
+## в корень мира (наш родитель — он же переживает навигацию). См. ToolController.
+func _setup_tools() -> void:
+	_tool = ToolController.new()
+	_tool.name = "ToolController"
+	add_child(_tool)
+	_tool.setup(_camera, get_parent())
 
 
 ## Телепортирует игрока и запоминает точку как новый респаун. Если задан look_at —
@@ -164,9 +180,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		_camera.rotate_x(-event.relative.y * mouse_sensitivity)
 		_camera.rotation.x = clamp(_camera.rotation.x, -1.4, 1.4)
-	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _looking:
-			_try_interact()
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if not event.pressed:
+			# Отпускание ЛКМ — завершить штрих, если рисуем (иначе ни на что не влияет).
+			if _looking and _tool != null and _tool.is_armed():
+				_tool.release()
+		elif _looking:
+			# С активным инструментом ЛКМ рисует/стирает, иначе — взаимодействие с порталом.
+			if _tool != null and _tool.is_armed():
+				_tool.press()
+			else:
+				_try_interact()
 		else:
 			capture_mouse(true)
 	elif event is InputEventMouseButton and event.pressed and _looking \
@@ -190,6 +214,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 			KEY_E:
 				_try_interact()
+			KEY_2:
+				# Цикл инструмента рисования: нет → карандаш → ластик → нет.
+				if _tool != null:
+					tool_changed.emit(_tool.cycle())
 			KEY_F3:
 				_toggle_debug()
 			KEY_SPACE:

@@ -9,10 +9,11 @@ extends Node3D
 ## Реагирует на ГРАНУЛЯРНЫЕ сигналы транспорта (add/update/remove/reset) — не пересобирает всё на
 ## каждое изменение. Объекты — плоские данные { id, kind, parent, author, ts, ttl, props };
 ## вьюха материализует их по kind, не зная транспорта. Вложенность: объект с parent=<id> другого
-## объекта монтируется как ребёнок его узла (наследует трансформ). Сейчас единственный kind —
-## "bubble". Подробно — в docs/ephemeral-changes.md.
+## объекта монтируется как ребёнок его узла (наследует трансформ). Поддержанные kind: "bubble"
+## (портал-метка) и "stroke" (штрих карандаша). Подробно — в docs/ephemeral-changes.md.
 
 const BUBBLE := preload("res://actors/bubble/bubble.tscn")
+const STROKE := preload("res://actors/stroke/stroke.tscn")
 
 var _activate_cb: Callable
 var _nodes := {}   # id (String) -> Node3D
@@ -146,6 +147,10 @@ func _make_node(object: Dictionary) -> Node3D:
 			if _activate_cb.is_valid():
 				bubble.activated.connect(_activate_cb)
 			return bubble
+		"stroke":
+			# Штрих карандаша: один меш-труба по точкам (см. StrokeActor). Не кликабелен —
+			# колбэк активации не нужен; данные ставит вьюха через setup_object в _apply.
+			return STROKE.instantiate()
 	return null
 
 

@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0vrwebstroke01"]
+
+[ext_resource type="Script" path="res://actors/stroke/stroke.gd" id="1_stroke"]
+
+[node name="Stroke" type="Node3D"]
+script = ExtResource("1_stroke")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
