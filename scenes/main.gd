@@ -7,6 +7,10 @@ extends Node
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 const SETTINGS_SCENE := preload("res://scenes/settings.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
+const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
+
+## TTL пузыря — временного портала «ушёл сюда» (см. docs/ephemeral-changes.md).
+const BUBBLE_TTL := 30.0
 
 @onready var _world: Node3D = $world
 @onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/address bar"
@@ -162,6 +166,11 @@ func _set_ui_focusable(focusable: bool) -> void:
 
 
 func _navigate(url: String, base: String, push_history: bool) -> void:
+	# Уходя на ДРУГУЮ страницу, роняем «пузырь» — временный портал «ушёл сюда» в покидаемой
+	# комнате. Делаем это ДО фетча, пока меш старой комнаты ещё жив и поллится: между запросом и
+	# сносом меша (в _on_fetched) проходит асинхронный фетч — reliable-пакет успеет уйти. См.
+	# docs/ephemeral-changes.md.
+	_drop_leave_bubble(url, base)
 	_loading = true
 	_set_status("Загрузка %s …" % url)
 	if push_history:
@@ -174,6 +183,34 @@ func _navigate(url: String, base: String, push_history: bool) -> void:
 		_history_index = _history.size() - 1
 	_update_nav_buttons()
 	_fetcher.fetch(url, base)
+
+
+## Запрашивает эфемерное изменение kind="bubble" в покидаемой комнате: временный портал в точке,
+## где стоит игрок, указывающий на URL назначения. Только онлайн, находясь в комнате, и только
+## если целевая комната (seed_key) отличается от текущей (иначе это reload/переход внутри той же
+## страницы — пузырь не нужен). Позиция хранится как [x,y,z] ради JSON-сериализуемости журнала.
+## См. docs/ephemeral-changes.md.
+func _drop_leave_bubble(url: String, base: String) -> void:
+	if not (Settings.online_enabled and NetworkManager.in_room()) or _current_url == "" or _player == null:
+		return
+	var target := PageFetcher.resolve_url(url, base if base != "" else _current_url)
+	if target == "" or PageFetcher.seed_key(target) == PageFetcher.seed_key(_current_url):
+		return
+	var p := _player.global_position
+	# Действие add: инициатор описывает только нужную мутацию. id — наш адрес объекта (для будущих
+	# правок/удаления своего пузыря). parent="" — корень мира (детерминированные координаты).
+	NetworkManager.request_scene_action({
+		"op": "add",
+		"id": NetworkManager.new_object_id(),
+		"kind": "bubble",
+		"parent": "",
+		"ttl": BUBBLE_TTL,
+		"props": {
+			"url": target,
+			"position": [p.x, p.y, p.z],
+			"label": Settings.nick,
+		},
+	})
 
 
 func _on_fetched(html: String, final_url: String) -> void:
@@ -333,6 +370,15 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	_remote_view.name = "RemotePlayersView"
 	_world.add_child(_remote_view)
 	_remote_view.setup(_player)
+
+	# Вьюха эфемерных изменений: материализует журнал NetworkManager (пузыри и будущие
+	# инструменты) в объекты мира. Тоже живёт в world — при навигации сносится и пересоздаётся
+	# для новой комнаты. Клики кликабельных объектов идут в тот же _activate_transition, что и
+	# порталы. См. docs/ephemeral-changes.md.
+	var ephemeral_view := EPHEMERAL_VIEW_SCRIPT.new()
+	ephemeral_view.name = "EphemeralView"
+	_world.add_child(ephemeral_view)
+	ephemeral_view.setup(_activate_transition)
 
 	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
 	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).

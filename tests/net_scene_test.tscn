@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://b1lrwrfgq7ofg"]
+
+[ext_resource type="Script" path="res://tests/net_scene_test.gd" id="1_scenetest"]
+
+[node name="NetSceneTest" type="Node"]
+script = ExtResource("1_scenetest")

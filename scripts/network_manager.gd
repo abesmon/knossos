@@ -42,6 +42,15 @@ signal authority_changed(new_authority: int, is_me: bool)
 ## принимают только от авторитета. Консьюмеры (проверки действий, UI) перечитывают ранги.
 ## Подробно — в docs/ranks.md.
 signal ranks_changed()
+## Эфемерные изменения сцены (action/event-протокол, см. docs/ephemeral-changes.md). Авторитет —
+## единственная точка коммита: валидирует действия и рассылает события. Сигналы несут плоский
+## объект состояния { id, kind, parent, author, ts, ttl, props } — консьюмер (EphemeralView)
+## материализует его по kind, не зная транспорта.
+signal scene_object_added(id: String, object: Dictionary)
+signal scene_object_updated(id: String, object: Dictionary)
+signal scene_object_removed(id: String)
+## Состояние перезагружено снимком (вход в комнату / смена авторитета) — консьюмер пересобирает всё.
+signal scene_reset()
 
 ## Жёсткий лимит длины сообщения чата — режем и на отправке, и на приёме, чтобы нигде
 ## (лог, бабл) не отрисовывалось больше.
@@ -50,6 +59,10 @@ const MAX_CHAT_CHARS := 280
 ## Ранг по умолчанию для тех, кого нет в таблице. Чем МЕНЬШЕ ранг — тем больше прав (0 ≈ админ),
 ## поэтому дефолт берём заведомо «далеко от нуля» — практически без прав. См. docs/ranks.md.
 const DEFAULT_RANK := 1 << 30
+
+## Ранг, при котором (и меньше) пир считается «админом» эфемерного слоя — может править/удалять
+## ЧУЖИЕ объекты (обход проверки владения). 0 ≈ админ/авторитет. Фундамент под систему прав.
+const EPHEMERAL_ADMIN_RANK := 0
 
 ## ICE/TURN-серверы берём из приватного конфига сборки (BuildConfig), а не зашиваем сюда —
 ## адреса и учётка TURN не должны жить в коде/репозитории. См. config/build_config.gd.
@@ -69,6 +82,10 @@ var _nicks := {}           # peer_id -> String
 var _authority := 0        # последний вычисленный авторитет (для детекта смены) — см. authority_id
 var _ranks := {}           # user_id (String) -> rank (int); владелец — авторитет, см. docs/ranks.md
 var _user_ids := {}        # peer_id (int) -> user_id (String); из карточки идентичности
+var _scene := SceneChanges.new()  # машина состояний эфемерного слоя (чистая, см. scene_changes.gd)
+var _obj_seq := 0          # счётчик для генерации id наших объектов (new_object_id)
+var _scene_resync := false # ждём снимок состояния (был GAP / смена авторитета) — не спамим запросом
+var _expire_accum := 0.0   # аккумулятор throttle-сканирования TTL в _process
 
 
 func _ready() -> void:
@@ -163,9 +180,11 @@ func _on_mp_peer_connected(id: int) -> void:
 	# Отдаём новому пиру свою карточку: user_id, ник, лицо (PNG-байты) и идентификатор аватара.
 	if _can_rpc():
 		rpc_id(id, "_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
-	# Если мы авторитет — новичку сразу полную таблицу рангов (чтобы он знал ранги всех, см. docs/ranks.md).
+	# Если мы авторитет — новичку сразу полную таблицу рангов (чтобы он знал ранги всех, см. docs/ranks.md)
+	# и снимок эфемерной сцены (чтобы он сразу увидел живые объекты, см. docs/ephemeral-changes.md).
 	if has_authority() and _can_rpc():
 		rpc_id(id, "_recv_ranks", _ranks)
+		rpc_id(id, "_recv_scene_snapshot", _scene.snapshot())
 
 
 func _on_mp_peer_disconnected(id: int) -> void:
@@ -268,11 +287,17 @@ func _refresh_authority() -> void:
 			# так он унаследуется пирами и переживёт наш перезаход, даже когда авторитетом
 			# станет кто-то другой. И сразу рассылаем таблицу (мы — её новый владелец).
 			_claim_authority_rank()
+			# Эфемерный слой: поднимаем эпоху строго выше виденного, чтобы наши события были
+			# заведомо новее экс-авторитетских (см. docs/ephemeral-changes.md). Состояние — тёплая копия.
+			_scene.begin_authority()
 		elif a != 0 and _can_rpc():
-			# Авторитет сменился на другого пира — подтягиваем у него таблицу (pull). Закрывает
-			# гонку: его push мог прийти по мешу раньше, чем мы обработали peer_leave старого
-			# авторитета (peer_leave идёт через сигналинг) и потому отвергли бы его. См. docs/ranks.md.
+			# Авторитет сменился на другого пира — подтягиваем у него таблицу рангов и снимок
+			# эфемерной сцены (pull). Закрывает гонку: его push мог прийти по мешу раньше, чем мы
+			# обработали peer_leave старого авторитета (он идёт через сигналинг) и потому отвергли
+			# бы его. См. docs/ranks.md и docs/ephemeral-changes.md.
 			rpc_id(a, "_request_ranks")
+			_scene_resync = true
+			rpc_id(a, "_request_scene_snapshot")
 
 
 # --- Ранги (таблица user_id -> rank; владелец — авторитет). См. docs/ranks.md. ---
@@ -343,6 +368,123 @@ func _broadcast_ranks() -> void:
 		rpc("_recv_ranks", _ranks)
 
 
+# --- Эфемерные изменения сцены (action/event-протокол; машина состояний — SceneChanges). ---
+# Контракт: инициатор шлёт ДЕЙСТВИЕ (намерение) авторитету; авторитет — единственная точка
+# коммита: валидирует против своего состояния и прав, рассылает СОБЫТИЯ с порядковым (epoch,seq).
+# NetworkManager — чистый транспорт поверх SceneChanges, не знает kind/3D. См. docs/ephemeral-changes.md.
+
+## Запросить изменение сцены. action — плоское намерение { op, id, kind?, parent?, props?, ttl? }
+## (см. SceneChanges.OP_*). Описывает ТОЛЬКО нужную мутацию, состояние не заявляет. Если мы
+## авторитет — коммитим и рассылаем сразу; иначе шлём действие авторитету, он решает.
+func request_scene_action(action: Dictionary) -> void:
+	if typeof(action) != TYPE_DICTIONARY:
+		return
+	if has_authority():
+		_authority_handle_action(action, Settings.user_id, my_rank() <= EPHEMERAL_ADMIN_RANK)
+	elif _can_rpc():
+		var a := authority_id()
+		if a != 0:
+			rpc_id(a, "_recv_scene_action", action)
+
+
+## Сгенерировать id для нового объекта (для op=add). Префикс из нашего user_id + счётчик —
+## адрес, по которому МЫ потом сможем править/удалять свой объект. Уникальность гарантирует
+## префикс (владение проверяется по author, а не по префиксу). Чистый адрес, без доверия.
+func new_object_id() -> String:
+	_obj_seq += 1
+	var uid := Settings.user_id
+	var prefix := uid.substr(0, 8) if uid.length() >= 8 else ("p%d" % _my_id)
+	return "%s.%d" % [prefix, _obj_seq]
+
+
+## Снимок эфемерной сцены (id -> object). Для вьюхи/отладки/будущей выгрузки на сервер.
+func scene_objects() -> Dictionary:
+	return _scene.objects()
+
+
+## Один объект эфемерной сцены по id ({} если нет).
+func scene_object(id: String) -> Dictionary:
+	return _scene.get_object(id)
+
+
+## Авторитет: применить действие и разослать получившиеся события. sender_user_id/sender_is_admin —
+## кто и с какими правами (авторитет доверяет себе как источнику расчёта).
+func _authority_handle_action(action: Dictionary, sender_user_id: String, sender_is_admin: bool) -> void:
+	var events := _scene.authority_commit(action, sender_user_id, sender_is_admin, Time.get_unix_time_from_system())
+	_commit_scene_events(events)
+
+
+## Авторитет: для каждого события — применить локально (эмитнуть сигнал) и разослать остальным.
+## Состояние на авторитете уже мутировано authority_commit/expire, поэтому здесь не apply_event,
+## а только эмит + рассылка.
+func _commit_scene_events(events: Array) -> void:
+	for e in events:
+		_emit_scene_event(e)
+		if _can_rpc():
+			rpc("_recv_scene_event", e)
+
+
+## Эмит прикладного сигнала по событию (читая текущее состояние объекта). Общий для авторитета
+## (после commit) и followers (после apply_event).
+func _emit_scene_event(event: Dictionary) -> void:
+	var id := str(event.get("id", ""))
+	match str(event.get("op", "")):
+		SceneChanges.OP_ADD:
+			scene_object_added.emit(id, _scene.get_object(id))
+		SceneChanges.OP_UPDATE, SceneChanges.OP_REPARENT:
+			scene_object_updated.emit(id, _scene.get_object(id))
+		SceneChanges.OP_REMOVE:
+			scene_object_removed.emit(id)
+
+
+## Действие от пира — обрабатывает только авторитет (он адресат rpc_id). Если роль уже сменилась —
+## дроп (заказчик может повторить). sender_user_id/админство берём из ПРИВЯЗКИ авторитета
+## (peer_id->user_id, ранг) — заказчик их не задаёт. См. docs/ephemeral-changes.md.
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_scene_action(action: Dictionary) -> void:
+	if not has_authority():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	_authority_handle_action(action, _user_ids.get(sender, ""), rank_of_peer(sender) <= EPHEMERAL_ADMIN_RANK)
+
+
+## Событие от авторитета. ДОВЕРИЕ: только если отправитель — авторитет по нашему расчёту
+## (sender_is_authority). Применяем по порядку (epoch,seq); при пропуске/новой эпохе — ресинк снимком.
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_scene_event(event: Dictionary) -> void:
+	if not sender_is_authority():
+		return
+	match _scene.apply_event(event):
+		SceneChanges.Apply.APPLIED:
+			_emit_scene_event(event)
+		SceneChanges.Apply.GAP:
+			# Пропустили событие / увидели новую эпоху — состояние неконсистентно, тянем снимок.
+			if not _scene_resync and _can_rpc():
+				var a := authority_id()
+				if a != 0:
+					_scene_resync = true
+					rpc_id(a, "_request_scene_snapshot")
+
+
+## Снимок состояния от авторитета (push новичку / ответ на pull). ДОВЕРИЕ: только от авторитета.
+## Замещает состояние целиком, консьюмер пересобирает (scene_reset).
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_scene_snapshot(snap: Dictionary) -> void:
+	if not sender_is_authority():
+		return
+	_scene.load_snapshot(snap)
+	_scene_resync = false
+	scene_reset.emit()
+
+
+## Пир просит снимок (вход / ресинк / смена авторитета). Отвечаем только если мы и правда
+## авторитет — иначе ответ всё равно отвергнут получателем (sender_is_authority).
+@rpc("any_peer", "reliable", "call_remote")
+func _request_scene_snapshot() -> void:
+	if has_authority() and _can_rpc():
+		rpc_id(multiplayer.get_remote_sender_id(), "_recv_scene_snapshot", _scene.snapshot())
+
+
 func nick_of(id: int) -> String:
 	return _nicks.get(id, "Guest-%d" % id)
 
@@ -392,6 +534,15 @@ func _process(_delta: float) -> void:
 	elif state == WebSocketPeer.STATE_CLOSED:
 		# Сокет закрылся (сервер недоступен/упал) — сбрасываемся в офлайн.
 		disconnect_from_server()
+		return
+	# Истечение TTL эфемерных объектов — обязанность авторитета (единый владелец состояния и
+	# источник времени). Throttle ~4 Гц, чтобы не сканировать состояние каждый кадр. См.
+	# docs/ephemeral-changes.md.
+	_expire_accum += _delta
+	if _expire_accum >= 0.25:
+		_expire_accum = 0.0
+		if has_authority():
+			_commit_scene_events(_scene.expire(Time.get_unix_time_from_system()))
 
 
 func _on_ws_message(raw: String) -> void:
@@ -457,6 +608,11 @@ func _teardown_mesh() -> void:
 	# авторитет пришлёт актуальную таблицу заново (а наш ранг хранится в ЕГО копии). См. docs/ranks.md.
 	_user_ids.clear()
 	_ranks.clear()
+	# Эфемерная сцена — тоже состояние комнаты: уходя, сбрасываем (при перезаходе авторитет
+	# пришлёт снимок). Свежая машина обнуляет epoch/seq/объекты. См. docs/ephemeral-changes.md.
+	_scene = SceneChanges.new()
+	_scene_resync = false
+	scene_reset.emit()
 	if _mesh != null:
 		if multiplayer.multiplayer_peer == _mesh:
 			multiplayer.multiplayer_peer = null
