@@ -281,3 +281,38 @@ static func seed_key(url: String) -> String:
 	while url.ends_with("/"):
 		url = url.substr(0, url.length() - 1)
 	return url + query
+
+
+## Глобальный сид сети knossos. Общая основа всей генерации: подмешивается в сид каждого
+## пространства, так что «форма мира» у всех клиентов одна. Смена этого числа перекраивает
+## ВСЕ миры сразу (namespace/версия генерации). На то, кто с кем встречается (инстанс
+## мультиплеера = seed_key(url)), он не влияет — это отдельная ось.
+const GLOBAL_SEED := 0x6B6E6F73  # "knos"
+
+
+## Хост страницы (basepath) в нижнем регистре, без схемы/пути/query/фрагмента. Один хост —
+## одна «палитра» пространств; путь и query на сид пространства НЕ влияют (в отличие от
+## seed_key, который различает страницы для инстансов мультиплеера).
+static func host_key(url: String) -> String:
+	url = url.strip_edges()
+	var hash_pos := url.find("#")
+	if hash_pos != -1:
+		url = url.substr(0, hash_pos)
+	var q_pos := url.find("?")
+	if q_pos != -1:
+		url = url.substr(0, q_pos)
+	var scheme_end := url.find("://")
+	if scheme_end != -1:
+		url = url.substr(scheme_end + 3)
+	var slash := url.find("/")
+	if slash != -1:
+		url = url.substr(0, slash)
+	return url.to_lower()
+
+
+## Сид ПРОСТРАНСТВА (геометрии) = f(глобальный сид, host, подпись топологии). Топологически
+## одинаковые страницы одного хоста дают идентичный мир; разная топология или другой хост —
+## другой мир. См. TopologyBuilder.signature и docs/geometry-lab.md.
+##   hostA + топология1 → мир A;  hostA + топология2 → мир B;  hostB + топология1 → мир C.
+static func space_seed(url: String, topology_signature: String) -> int:
+	return int(hash("%d|%s|%s" % [GLOBAL_SEED, host_key(url), topology_signature]))

@@ -466,7 +466,10 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	if exclusive:
 		_label_positions = {}
 	else:
-		var seed_value := int(hash(PageFetcher.seed_key(url)))
+		# Сид пространства — от хоста (base_url) и ПОДПИСИ ТОПОЛОГИИ, а не от полного URL:
+		# топологически одинаковые страницы одного сайта дают идентичный мир. Инстанс
+		# мультиплеера остаётся по seed_key(url) — это отдельная ось (см. _join_current_room).
+		var seed_value := PageFetcher.space_seed(url, TopologyBuilder.signature(space))
 		gen = WorldGenerator.generate(space, _world, seed_value, _activate_transition, base_url, image_loader)
 		_label_positions = gen.label_positions
 	# Держим генератор живым на время потоковой достройки (см. поле _world_gen). exclusive — null.

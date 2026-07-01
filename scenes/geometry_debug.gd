@@ -158,7 +158,9 @@ func _on_fetched(html: String, final_url: String) -> void:
 	_address.text = final_url
 	var doc := HtmlParser.parse(html)
 	_space = TopologyBuilder.build(doc, true)
-	_seed = hash(final_url)
+	# Как в проде (main.gd): сид от хоста + подписи топологии, а не от полного URL —
+	# одинаковая топология одного сайта даёт тот же мир. Кнопка ⟳ дальше крутит seed вручную.
+	_seed = PageFetcher.space_seed(final_url, TopologyBuilder.signature(_space))
 	_rebuild()
 
 

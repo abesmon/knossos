@@ -80,6 +80,37 @@ static func build(root: HtmlNode, debug: bool = false) -> Dictionary:
 	return b._build(root)
 
 
+## Структурная подпись топологии — канонический отпечаток ФОРМЫ пространства без его
+## содержимого. Две страницы одного шаблона (напр. разные статьи новостника) с одинаковым
+## деревом комнат и одинаковой последовательностью объектов дают одну подпись, даже если
+## текст/ссылки/картинки внутри разные. Влияет: дерево комнат (порядок детей), kind комнаты,
+## тип каждого объекта и вид его перехода (navigate/teleport/back/external). НЕ влияет:
+## текст, href/target перехода, src картинки, css-хинты, id. Подпись — сид ПРОСТРАНСТВА
+## (геометрии), см. PageFetcher.space_seed: одинаковая топология на одном хосте → один мир.
+static func signature(space: Dictionary) -> String:
+	var rooms: Dictionary = space.get("rooms", {})
+	var root: int = space.get("root", -1)
+	var parts := PackedStringArray()
+	_sig_walk(root, rooms, parts)
+	return "|".join(parts)
+
+
+static func _sig_walk(id: int, rooms: Dictionary, parts: PackedStringArray) -> void:
+	var room = rooms.get(id, null)
+	if room == null:
+		parts.append("_")
+		return
+	parts.append("(" + str(room.get("kind", "room")))
+	for obj in room.get("objects", []):
+		var fn = obj.get("function", null)
+		var fk: String = "" if fn == null else str(fn.get("kind", ""))
+		parts.append(str(obj.get("type", "")) + ":" + fk)
+	parts.append("[")
+	for child in room.get("children", []):
+		_sig_walk(int(child), rooms, parts)
+	parts.append("])")
+
+
 func _build(root: HtmlNode) -> Dictionary:
 	var body := _find_body(root)
 	# Типографику считаем ПЕРВОЙ: базовый кегль нужен детектору визуальных заголовков
