@@ -12,7 +12,7 @@ signal home_requested
 const THRESH_MAX := 0.15
 
 @onready var _online: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Online
-@onready var _voice: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Voice
+@onready var _mode: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ModeRow/Mode
 @onready var _denoise: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Denoise
 @onready var _device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Device
 @onready var _device_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Refresh
@@ -91,6 +91,10 @@ func _ready() -> void:
 	_setup_tabs()
 	_save.pressed.connect(_on_save)
 	_cancel.pressed.connect(_close)
+	# Режим микрофона (PTT / голосовая активация) — применяем живьём, как усиление/порог.
+	_mode.add_item("Push-to-talk (зажать V)", 0)
+	_mode.add_item("Голосовая активация (V — mute)", 1)
+	_mode.item_selected.connect(_on_mode_selected)
 	# Вкладка «Мир»: сделать инстанс домашним и вернуться домой.
 	_world_make_home.pressed.connect(_on_make_home)
 	_world_go_home.pressed.connect(_on_go_home)
@@ -142,7 +146,7 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_instance_url = instance_url
 	_page_meta = page_meta
 	_online.button_pressed = Settings.online_enabled
-	_voice.button_pressed = Settings.voice_enabled
+	_mode.select(_mode_to_index(Settings.voice_mode))
 	_denoise.button_pressed = Settings.voice_denoise
 	_home.text = Settings.home_page
 	_url.text = Settings.signaling_url
@@ -444,6 +448,22 @@ func _on_clear_rank(uid: String) -> void:
 	NetworkManager.clear_rank(uid)
 
 
+## Индекс пункта селектора режима (0 — PTT, 1 — VAD) по строковому режиму Settings.
+func _mode_to_index(mode: String) -> int:
+	return 1 if mode == Settings.VOICE_MODE_VAD else 0
+
+
+## Строковый режим Settings по индексу пункта селектора.
+func _index_to_mode(idx: int) -> String:
+	return Settings.VOICE_MODE_VAD if idx == 1 else Settings.VOICE_MODE_PTT
+
+
+## Смена режима микрофона — применяем к VoiceManager живьём (персистится по «Сохранить»).
+func _on_mode_selected(idx: int) -> void:
+	Settings.voice_mode = _index_to_mode(idx)
+	VoiceManager.set_mode(Settings.voice_mode)
+
+
 ## Заполняет список входных устройств и выделяет текущее (по Settings.input_device).
 func _populate_devices() -> void:
 	_device.clear()
@@ -607,7 +627,8 @@ func _on_user_id_reissue() -> void:
 
 func _on_save() -> void:
 	Settings.online_enabled = _online.button_pressed
-	Settings.voice_enabled = _voice.button_pressed
+	# Режим микрофона уже применён живьём (_on_mode_selected) — здесь только фиксируем на сохранение.
+	Settings.voice_mode = _index_to_mode(_mode.selected)
 	# Денойз применяем живьём (пересоберёт энкодер), чтобы изменение действовало сразу.
 	Settings.voice_denoise = _denoise.button_pressed
 	VoiceManager.set_denoise(Settings.voice_denoise)

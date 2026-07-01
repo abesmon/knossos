@@ -29,6 +29,26 @@ var _world_gen: WorldGenerator = null
 var _status: Label
 @onready var _passive_cursor: TextureRect = $UI/PassiveCursor
 @onready var _active_cursor: TextureRect = $UI/ActiveCursor
+
+# Индикаторы голоса (низ экрана): два стека — «звук идёт» (micon) и «заглушено» (micoff, красный),
+# в каждом — иконка PTT (видна только в режиме push-to-talk) и иконка микрофона. Активный стек
+# выбирается по политике режима, активная иконка «дышит» прозрачностью по силе голоса.
+@onready var _indicators: Control = $UI/Indicators
+@onready var _micon_stack: Control = $UI/Indicators/miconstack
+@onready var _micoff_stack: Control = $UI/Indicators/micoffstack
+@onready var _micon_ptt: CanvasItem = $UI/Indicators/miconstack/ptt
+@onready var _micoff_ptt: CanvasItem = $UI/Indicators/micoffstack/ptt
+
+## Индикатор голоса: не прозрачнее этого, пока есть речь; после SILENCE_HIDE тишины — 0 (исчезает).
+const VOICE_INDICATOR_MIN_ALPHA := 0.25
+const VOICE_INDICATOR_SILENCE_HIDE := 3.0
+## Постоянная времени сглаживания прозрачности (с): индикатор «дышит» с запаздыванием/буфером,
+## тянется к цели экспоненциально, а не повторяет силу голоса кадр-в-кадр.
+const VOICE_INDICATOR_TAU := 0.25
+## Сколько времени VAD не видит речи (с). Копится, пока молчим; при речи сбрасывается.
+var _voice_silence := VOICE_INDICATOR_SILENCE_HIDE
+## Сглаженная (с запаздыванием) прозрачность активной иконки индикатора [0..1].
+var _voice_indicator_alpha := 0.0
 var _current_url: String = ""
 # База для относительных URL (учитывает <base href>); по умолчанию = _current_url.
 var _base_url: String = ""
@@ -114,6 +134,59 @@ func _ready() -> void:
 		_navigate(start_url, "", true)
 	else:
 		_address.grab_focus()
+
+
+func _process(delta: float) -> void:
+	_update_voice_indicators(delta)
+
+
+## Индикаторы голоса внизу экрана (см. поля выше). Показываем только онлайн (микрофон работает
+## лишь тогда). Выбираем стек по политике режима (micon — звук идёт, micoff — заглушено), в PTT
+## дополнительно светим иконку PTT. Активную иконку «дышим» прозрачностью по силе голоса: не
+## прозрачнее VOICE_INDICATOR_MIN_ALPHA, пока идёт речь; после VOICE_INDICATOR_SILENCE_HIDE секунд
+## тишины — полностью прозрачной. micoff подсвечиваем ТОЙ ЖЕ логикой (на мьюте видно, что «звук
+## есть, но ты заглушён»).
+## Имитация «чуть звука прошло» на взаимодействие с голосом: сбрасываем таймер тишины — индикатор
+## всплывает как минимум до VOICE_INDICATOR_MIN_ALPHA (даже без реального сигнала) и, как обычно,
+## гаснет через VOICE_INDICATOR_SILENCE_HIDE секунд, если нового сигнала не будет.
+func _on_voice_nudge() -> void:
+	_voice_silence = 0.0
+
+
+func _update_voice_indicators(delta: float) -> void:
+	if _indicators == null:
+		return
+	var online := NetworkManager.is_online()
+	_indicators.visible = online
+	if not online:
+		_voice_silence = VOICE_INDICATOR_SILENCE_HIDE
+		_voice_indicator_alpha = 0.0
+		return
+
+	if VoiceManager.is_speaking():
+		_voice_silence = 0.0
+	else:
+		_voice_silence += delta
+	var target := 0.0
+	if _voice_silence < VOICE_INDICATOR_SILENCE_HIDE:
+		target = clampf(VoiceManager.input_level() * AvatarParams.VOICE_RMS_GAIN,
+			VOICE_INDICATOR_MIN_ALPHA, 1.0)
+	# «Дышим» с запаздыванием/буфером: тянемся к цели экспоненциально, а не повторяем силу 1:1.
+	_voice_indicator_alpha = lerpf(_voice_indicator_alpha, target, 1.0 - exp(-delta / VOICE_INDICATOR_TAU))
+
+	var sound_on := VoiceManager.is_sound_on()
+	var ptt := VoiceManager.is_ptt()
+	# Активный стек по политике режима; при полной тишине (альфа спала к нулю) скрываем стек
+	# ЦЕЛИКОМ, а не гасим отдельную иконку. Прозрачность задаём модуляцией стека — красный
+	# micoffstack сохраняет RGB, меняется только alpha; иконка PTT «дышит» вместе со стеком.
+	var shown := _voice_indicator_alpha > 0.01
+	_micon_stack.visible = sound_on and shown
+	_micoff_stack.visible = not sound_on and shown
+	_micon_stack.modulate.a = _voice_indicator_alpha
+	_micoff_stack.modulate.a = _voice_indicator_alpha
+	# Иконка PTT — только в режиме push-to-talk (в активном, видимом стеке).
+	_micon_ptt.visible = ptt
+	_micoff_ptt.visible = ptt
 
 
 func _on_go() -> void:
@@ -533,6 +606,8 @@ func _setup_net() -> void:
 	Settings.changed.connect(_on_settings_changed)
 	NetworkManager.connection_changed.connect(_on_connection_changed)
 	NetworkManager.chat_received.connect(_on_chat_received)
+	# Взаимодействие с голосом (смена режима / нажатие V) — мигаем индикатором даже без сигнала.
+	VoiceManager.indicator_nudge.connect(_on_voice_nudge)
 
 	# Применяем сохранённый режим (online_enabled мог остаться с прошлой сессии).
 	_sync_online()

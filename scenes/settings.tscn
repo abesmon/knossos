@@ -202,10 +202,18 @@ layout_mode = 2
 metadata/_tab_index = 2
 metadata/_tab_name = "Звук"
 
-[node name="Voice" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1321079378]
+[node name="ModeRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1321079378]
 layout_mode = 2
-tooltip_text = "Передавать голос с микрофона другим в комнате (работает только онлайн)"
-text = "Голосовой чат (микрофон)"
+theme_override_constants/separation = 8
+
+[node name="ModeLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ModeRow" unique_id=1321079380]
+layout_mode = 2
+text = "Режим микрофона"
+
+[node name="Mode" type="OptionButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ModeRow" unique_id=1321079381]
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "Как голос уходит в сеть. Микрофон при этом работает всегда (когда онлайн)."
 
 [node name="Denoise" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1321079379]
 layout_mode = 2

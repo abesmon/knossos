@@ -13,12 +13,18 @@ extends Node
 ## сам ресемплит к VoiceCodec.OPUS_RATE) → NetworkManager.send_voice. Энкодер stateful и принимает
 ## кадры порциями фиксированного размера (calc_audio_chunk_size), поэтому моно копится в
 ## _enc_accum и скармливается ровно по чанку: process_pre_encoded_chunk (ресемпл+буфер), затем —
-## пока открыт VAD — encode_chunk. Приём и пространственное воспроизведение — на капсулах
-## (RemotePlayer/VoicePlayback, через AudioStreamOpus). Подробно — docs/voice-chat.md.
+## пока открыт клапан передачи is_voicing() — encode_chunk. Захват идёт ВСЕГДА (онлайн), а что
+## уходит в сеть, решает режим (PTT — зажата V; voice-activated — VAD без мьюта; см. is_voicing).
+## Приём и пространственное воспроизведение — на капсулах (RemotePlayer/VoicePlayback, через
+## AudioStreamOpus). Подробно — docs/voice-chat.md.
 ## Есть режим МОНИТОРИНГА (проверка микрофона в настройках): уровень входа + опциональный loopback.
 
 ## Локальная речь открылась/закрылась (по VAD) — для индикации в UI.
 signal local_speaking_changed(speaking: bool)
+
+## Пользователь взаимодействовал с голосом (сменил режим / нажал V) — просим UI на миг подсветить
+## индикатор по минимуму, даже без реального сигнала (имитация «чуть звука прошло»). См. main.
+signal indicator_nudge
 
 ## Только что выбранный вход не отдаёт звук: за INPUT_CHECK_GRACE при активном микрофоне не
 ## пришло ни кадра захвата. Признак бага драйвера CoreAudio на macOS (краш -10863: входной
@@ -46,11 +52,16 @@ const LEVEL_DECAY := 6.0
 ## Bluetooth-устройства, чтобы не было ложного срабатывания на медленном подключении.
 const INPUT_CHECK_GRACE := 2.0
 
-var muted := false:
-	set(value):
-		muted = value
-		if value and _speaking:
-			_set_speaking(false)
+## Режим передачи: Settings.VOICE_MODE_PTT (push-to-talk) или VOICE_MODE_VAD (voice-activated).
+## Микрофон захватывается всегда (когда онлайн) — режим определяет лишь, что уходит в сеть.
+var _mode := Settings.VOICE_MODE_PTT
+## Заглушено ли в режиме VAD (переключается клавишей V). В PTT не используется.
+var muted := false
+## Зажата ли клавиша V в режиме PTT (голос идёт, только пока true). В VAD не используется.
+var _ptt_active := false
+## Открыт ли «клапан» передачи на прошлом кадре — для сброса энкодера в начале каждого спурта
+## (см. _feed_encoder: приёмник начинает декодировать поток «с чистого листа»).
+var _voicing_prev := false
 
 ## Тюнинг входа (из Settings, регулируется в настройках живьём — см. set_input_gain/set_vad_threshold).
 var _input_gain := DEFAULT_INPUT_GAIN
@@ -93,6 +104,77 @@ func _ready() -> void:
 	_setup_capture()
 	apply_input_device(Settings.input_device)
 	apply_tuning()
+	_mode = Settings.voice_mode
+
+
+# --- Режим передачи (PTT / voice-activated) и управление клавишей V ---
+
+## Текущий режим (Settings.VOICE_MODE_PTT / VOICE_MODE_VAD).
+func voice_mode() -> String:
+	return _mode
+
+
+func is_ptt() -> bool:
+	return _mode == Settings.VOICE_MODE_PTT
+
+
+## Сменить режим живьём (из настроек). Сбрасываем PTT-удержание — старое нажатие к новому
+## режиму не относится.
+func set_mode(mode: String) -> void:
+	_mode = mode if mode == Settings.VOICE_MODE_PTT else Settings.VOICE_MODE_VAD
+	_ptt_active = false
+	indicator_nudge.emit()   # мигнём индикатором — видимая реакция на смену режима
+
+
+## Клавиша V доступна ВСЕГДА (а не только в режиме перемещения): ловим её здесь, в autoload,
+## который получает _input при любом состоянии UI — в настройках, чате и т.п. Исключение — когда
+## фокус в текстовом поле (LineEdit/TextEdit): там V должна печататься, поэтому нажатие пропускаем.
+## Отпускание обрабатываем всегда (даже поверх поля ввода) — иначе PTT-удержание залипнет, если
+## клавишу отпустили, уже перейдя в поле. _input идёт ДО GUI, поэтому перехват (set_input_as_handled)
+## надёжно забирает V у контролов, когда мы её обрабатываем.
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.keycode == KEY_V and not event.echo):
+		return
+	if event.pressed:
+		if _is_text_editing():
+			return   # печатаем 'v' в поле ввода — не перехватываем
+		handle_voice_key(true)
+		get_viewport().set_input_as_handled()
+	else:
+		handle_voice_key(false)
+
+
+## Редактируется ли сейчас текст (фокус на поле ввода) — тогда V должна печататься, а не рулить голосом.
+func _is_text_editing() -> bool:
+	var focus := get_viewport().gui_get_focus_owner()
+	return focus is LineEdit or focus is TextEdit
+
+
+## Нажатие/отпускание клавиши голоса (V). В PTT — удержание открывает передачу; в VAD — нажатие
+## переключает mute (отпускание игнорируем). Отпускание всегда снимает PTT-удержание — чтобы
+## передача не «залипла», если клавишу отпустили вне режима перемещения.
+func handle_voice_key(pressed: bool) -> void:
+	if is_ptt():
+		_ptt_active = pressed
+	elif pressed:
+		muted = not muted
+	indicator_nudge.emit()   # мигнём индикатором — видимая реакция на нажатие/отпускание V
+
+
+## «Клапан» передачи открыт (пользователь сейчас голосит): в PTT — зажата V; в VAD — не заглушено
+## И VAD зафиксировал речь. Гейт для кодирования/отправки и для «рта» аватара в зеркале.
+func is_voicing() -> bool:
+	if is_ptt():
+		return _ptt_active
+	return not muted and _speaking
+
+
+## Включён ли звук по политике режима (для индикатора вкл/выкл, БЕЗ требования речи): в PTT —
+## зажата V; в VAD — не заглушено.
+func is_sound_on() -> bool:
+	if is_ptt():
+		return _ptt_active
+	return not muted
 
 
 # --- Тюнинг входа (усиление и порог активации) ---
@@ -219,13 +301,12 @@ func _setup_capture() -> void:
 	_monitor_pb = _monitor_player.get_stream_playback()
 
 
-## Нужно ли вообще захватывать микрофон: онлайн, голос включён, не заглушены. БЕЗ требования
-## пира — захват нужен и в одиночку, чтобы VAD и уровень входа кормили «рот» аватара в зеркале
-## (LocalAvatar). В эфир при этом не шлём (см. _want_send).
+## Нужно ли вообще захватывать микрофон. Теперь микрофон работает ВСЕГДА, когда онлайн (галочки
+## «включить голос» больше нет) — что уходит в сеть, решает политика режима (см. is_voicing).
+## Захват нужен и в одиночку, и на мьюте: VAD и уровень входа кормят «рот» аватара в зеркале и
+## индикаторы (в т.ч. micoff на мьюте — «звук есть, но ты заглушён»). В эфир — только по is_voicing.
 func _want_capture() -> bool:
-	return Settings.voice_enabled \
-		and not muted \
-		and NetworkManager.is_online()
+	return NetworkManager.is_online()
 
 
 ## Нужно ли слать кадры в сеть: захват плюс есть кому слать. В одиночку захватываем (для
@@ -246,6 +327,8 @@ func _process(delta: float) -> void:
 			_mic_player.stop()
 			_enc_accum.clear()
 			_set_speaking(false)
+			_voicing_prev = false
+			_ptt_active = false   # захват отпущен — снимаем возможное залипшее PTT-удержание
 			_level = 0.0
 			_check_device = ""   # захват остановлен — проверку входа отменяем
 	if not want or _capture == null:
@@ -275,6 +358,7 @@ func _process(delta: float) -> void:
 		_feed_encoder(mono)
 	else:
 		_enc_accum.clear()
+		_voicing_prev = false
 
 
 ## Кормит Opus-энкодер моно-кадрами захвата (как Vector2(m,m) на _rate — усиление уже в mono).
@@ -283,13 +367,19 @@ func _process(delta: float) -> void:
 ## и lead-in), а encode_chunk/отправку делаем только пока открыт VAD. Перед первым кадром речи
 ## энкодер сброшен в _set_speaking — приёмник начинает поток «с чистого листа».
 func _feed_encoder(mono: PackedFloat32Array) -> void:
+	# Клапан передачи по политике режима (PTT-удержание / VAD-речь без мьюта). На фронте открытия
+	# сбрасываем энкодер — каждый спурт уходит самостоятельным Opus-потоком (см. reset ниже).
+	var voicing := is_voicing()
+	if voicing and not _voicing_prev:
+		_encoder.reset_opus_encoder()
+	_voicing_prev = voicing
 	for s in mono:
 		_enc_accum.push_back(Vector2(s, s))
 	while _enc_accum.size() >= _enc_chunk_in:
 		var chunk := _enc_accum.slice(0, _enc_chunk_in)
 		_enc_accum = _enc_accum.slice(_enc_chunk_in)
 		_encoder.process_pre_encoded_chunk(chunk, VoiceCodec.OPUS_CHUNK_SIZE, _denoise, false)
-		if _speaking:
+		if voicing:
 			var pkt: PackedByteArray = _encoder.encode_chunk(_OPUS_PREFIX, 1.0)
 			if not pkt.is_empty():
 				NetworkManager.send_voice(pkt)
@@ -371,8 +461,6 @@ func _set_speaking(value: bool) -> void:
 	if _speaking == value:
 		return
 	_speaking = value
-	# На старте речи сбрасываем энкодер: каждый «спурт» уходит в эфир самостоятельным Opus-потоком
-	# (приёмник AudioStreamOpus начинает декод с чистого состояния, без хвостов прошлой фразы).
-	if value and _encoder != null:
-		_encoder.reset_opus_encoder()
+	# _speaking — это чистый VAD (есть речь), он же гейт передачи в режиме VAD. Сброс энкодера на
+	# старте спурта теперь висит на фронте is_voicing (см. _feed_encoder) — он общий для VAD и PTT.
 	local_speaking_changed.emit(value)

@@ -23,8 +23,14 @@ const DEFAULT_AVATAR_URI := "vrwebavatar://1"
 const AUDIO_BUSES := ["Master", "World", "Voice"]
 
 var online_enabled: bool = false
-## Голосовой чат (микрофон). Захват идёт только когда онлайн И это включено — см. VoiceManager.
-var voice_enabled: bool = false
+## Режим микрофона. Микрофон захватывается всегда (когда онлайн), а в сеть звук уходит по политике
+## режима — см. VoiceManager:
+##   VOICE_MODE_PTT — push-to-talk: голос идёт, только пока зажата клавиша V;
+##   VOICE_MODE_VAD — voice-activated: голос идёт по детектору речи (VAD), пока не заглушено (V — mute).
+## По умолчанию PTT.
+const VOICE_MODE_PTT := "ptt"
+const VOICE_MODE_VAD := "vad"
+var voice_mode: String = VOICE_MODE_PTT
 ## Имя входного аудиоустройства (как в AudioServer.get_input_device_list()). "Default" —
 ## следовать системному выбору. Явный выбор помогает обойти кривые маршруты (например,
 ## Bluetooth-микрофон в HFP-режиме на macOS — см. docs/voice-chat.md).
@@ -166,7 +172,9 @@ func load_settings() -> void:
 	if cfg.load(_path) != OK:
 		return
 	online_enabled = cfg.get_value("net", "online_enabled", online_enabled)
-	voice_enabled = cfg.get_value("net", "voice_enabled", voice_enabled)
+	voice_mode = cfg.get_value("voice", "mode", voice_mode)
+	if voice_mode != VOICE_MODE_PTT and voice_mode != VOICE_MODE_VAD:
+		voice_mode = VOICE_MODE_PTT
 	input_device = cfg.get_value("voice", "input_device", input_device)
 	mic_gain = maxf(0.0, cfg.get_value("voice", "mic_gain", mic_gain))
 	vad_threshold = maxf(0.0, cfg.get_value("voice", "vad_threshold", vad_threshold))
@@ -187,7 +195,7 @@ func load_settings() -> void:
 func save() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("net", "online_enabled", online_enabled)
-	cfg.set_value("net", "voice_enabled", voice_enabled)
+	cfg.set_value("voice", "mode", voice_mode)
 	cfg.set_value("voice", "input_device", input_device)
 	cfg.set_value("voice", "mic_gain", mic_gain)
 	cfg.set_value("voice", "vad_threshold", vad_threshold)
