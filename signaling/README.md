@@ -1,4 +1,8 @@
-# VRWeb — сигнальный сервер
+# VRWeb — сигнальный сервер (standalone)
+
+> Тот же протокол встроен в монолит домашнего сервера ([../homeserver/](../homeserver/),
+> эндпоинт `/signal`; см. [docs/home-server.md](../docs/home-server.md)). Этот standalone —
+> для деплоя сигналинга отдельно, без идентичности.
 
 Минимальный WebSocket-релей для WebRTC-handshake. Группирует подключения по комнатам
 (комната = страница, ключ — `PageFetcher.seed_key(url)` на клиенте) и пересылает между

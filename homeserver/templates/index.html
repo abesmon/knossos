@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Домашний сервер VRWeb</h1>
+<p>Это домашний сервер <b>{{ cfg.domain }}</b> — центр идентичности VRWeb.
+Пользователи этого сервера получают адрес вида <code>nickname@{{ cfg.domain }}</code>.</p>
+
+<div class="card">
+  <p><b>Функционал сервера</b> <span class="muted">(features из <a href="/.well-known/vrweb">/.well-known/vrweb</a>)</span></p>
+  <ul class="features">
+    {% for f in features %}<li><code>{{ f }}</code></li>{% endfor %}
+  </ul>
+  <p class="muted">Сигнальный сервер: <code>{{ cfg.effective_signaling_url() }}</code><br>
+  Версия: knossos-homeserver {{ version }}</p>
+</div>
+
+{% if not user %}
+<p><a href="/register">Зарегистрироваться</a> или <a href="/login">войти</a>.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ cfg.name }}{% endblock %}</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: -apple-system, "Segoe UI", sans-serif; background: #14141c; color: #e8e8f0;
+           max-width: 640px; margin: 0 auto; padding: 1rem 1.5rem 3rem; line-height: 1.5; }
+    a { color: #8ab4ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header { display: flex; justify-content: space-between; align-items: baseline;
+             border-bottom: 1px solid #2c2c3a; padding: .75rem 0; margin-bottom: 1.5rem; }
+    header .brand { font-weight: 700; font-size: 1.1rem; color: #e8e8f0; }
+    nav a { margin-left: 1rem; }
+    h1 { font-size: 1.4rem; }
+    form.card, .card { background: #1c1c28; border: 1px solid #2c2c3a; border-radius: 10px;
+                       padding: 1.25rem; margin: 1rem 0; }
+    label { display: block; margin: .75rem 0 .25rem; color: #a0a0b8; font-size: .9rem; }
+    input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: .55rem .7rem;
+        border-radius: 8px; border: 1px solid #3a3a4c; background: #12121a; color: inherit; font-size: 1rem; }
+    button { margin-top: 1rem; padding: .55rem 1.4rem; border-radius: 8px; border: none;
+             background: #4a6cf7; color: white; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #5d7cf9; }
+    .error { background: #3a1c22; border: 1px solid #7a2c3a; border-radius: 8px;
+             padding: .6rem .9rem; margin: 1rem 0; }
+    .muted { color: #8a8aa0; font-size: .9rem; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
+                  background: #12121a; padding: .1em .35em; border-radius: 5px; word-break: break-all; }
+    ul.features { padding-left: 1.2rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
+    td, th { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #2c2c3a; font-size: .9rem; }
+  </style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">{{ cfg.name }}</a>
+  <nav>
+    {% if user %}
+      <a href="/account">{{ user['nickname'] }}@{{ cfg.domain }}</a>
+    {% else %}
+      <a href="/login">Войти</a>
+      <a href="/register">Регистрация</a>
+    {% endif %}
+  </nav>
+</header>
+{% block content %}{% endblock %}
+</body>
+</html>

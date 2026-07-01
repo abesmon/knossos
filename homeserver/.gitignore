@@ -1,0 +1,5 @@
+.venv/
+data/
+homeserver.cfg
+__pycache__/
+.pytest_cache/

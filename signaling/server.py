@@ -78,7 +78,8 @@ async def _join(peer: Peer, room: str, nick: str) -> None:
 async def _leave(peer: Peer) -> None:
     if peer.room is None:
         return
-    members = rooms.get(peer.room)
+    room = peer.room
+    members = rooms.get(room)
     peer.room = None
     if members is None:
         return
@@ -87,7 +88,7 @@ async def _leave(peer: Peer) -> None:
         await other.send({"type": "peer_leave", "id": peer.id})
     log.info("peer %d left room (%d remain)", peer.id, len(members))
     if not members:
-        rooms.pop(peer.room, None)
+        rooms.pop(room, None)
 
 
 async def _relay(peer: Peer, msg: dict) -> None:

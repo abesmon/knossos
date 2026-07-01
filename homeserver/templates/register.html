@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Регистрация — {{ cfg.name }}{% endblock %}
+{% block content %}
+<h1>Регистрация</h1>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<form class="card" method="post" action="/register">
+  <label for="nickname">Никнейм <span class="muted">(станет адресом nickname@{{ cfg.domain }})</span></label>
+  <input type="text" id="nickname" name="nickname" required autofocus
+         pattern="[A-Za-z0-9._\-]{3,32}" title="3–32 символа: a-z, 0-9, точка, дефис, подчёркивание">
+  <label for="password">Пароль <span class="muted">(минимум 8 символов)</span></label>
+  <input type="password" id="password" name="password" required minlength="8">
+  <button type="submit">Создать аккаунт</button>
+</form>
+<p class="muted">Уже есть аккаунт? <a href="/login">Войти</a>.</p>
+{% endblock %}

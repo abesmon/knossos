@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Аккаунт — {{ cfg.name }}{% endblock %}
+{% block content %}
+<h1>Аккаунт</h1>
+<div class="card">
+  <p>Адрес: <code>{{ user['nickname'] }}@{{ cfg.domain }}</code></p>
+  <p class="muted">Зарегистрирован: {{ user['created_at'] | timestamp }}</p>
+</div>
+
+<div class="card">
+  <p><b>Сертифицированные ключи</b> <span class="muted">— публичные ключи клиентов,
+  для которых сервер выдавал сертификат идентичности</span></p>
+  {% if keys %}
+  <table>
+    <tr><th>Публичный ключ (Ed25519, base64)</th><th>Выдан</th></tr>
+    {% for k in keys %}
+    <tr><td class="mono">{{ k['public_key'] }}</td><td>{{ k['created_at'] | timestamp }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Пока нет — клиент запросит сертификат при первом логине.</p>
+  {% endif %}
+</div>
+
+<form method="post" action="/logout"><button type="submit">Выйти</button></form>
+{% endblock %}
