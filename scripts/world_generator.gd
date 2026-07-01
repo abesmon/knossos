@@ -460,7 +460,7 @@ func _wall_height(id: int) -> float:
 	var placements: Dictionary = _object_placements.get(id, {})
 	for obj_id in placements:
 		var p: Dictionary = placements[obj_id]
-		var size: Vector2 = _object_size.get(obj_id, Vector2(PANEL_WIDTH_M, 1.0))
+		var size: Vector2 = p.get("size", _object_size.get(obj_id, Vector2(PANEL_WIDTH_M, 1.0)))
 		top = maxf(top, OBJECT_FLOOR_OFFSET + float(p.get("y", 0.0)) + size.y)
 	if top <= 0.0:
 		for obj in _rooms[id]["objects"]:
@@ -598,24 +598,26 @@ func _try_pack_objects(objs: Array, boxes: Array, heights: Array) -> Dictionary:
 			var st: Dictionary = state[box_i]
 			var inner_w := maxf(0.0, float(box.get("length", GRID)) - OBJECT_BOX_EDGE_PAD * 2.0)
 			var inner_h := float(heights[box_i]) * GRID - OBJECT_BOX_EDGE_PAD * 2.0
-			var need_w := size.x
-			var need_h := size.y
 			if inner_w <= 0.0 or inner_h <= 0.0:
 				box_i += 1
 				continue
+			# Объект шире доступной части стены ужимаем под неё (с сохранением пропорций): так он
+			# не вылезет за края стены, а safe-area OBJECT_BOX_EDGE_PAD остаётся с обеих сторон.
+			var fit := _fit_to_width(size, inner_w)
+			var need_w := fit.x
+			var need_h := fit.y
 			if float(st["x"]) > 0.0 and float(st["x"]) + need_w > inner_w:
 				st["x"] = 0.0
 				st["y"] = float(st["y"]) + float(st["row_h"]) + OBJECT_GAP
 				st["row_h"] = 0.0
 			if float(st["y"]) + need_h <= inner_h:
-				var along_x := float(st["x"]) + need_w * 0.5
-				if need_w > inner_w:
-					along_x = inner_w * 0.5
 				placements[obj_id] = {
 					"box": box_i,
-					"along": OBJECT_BOX_EDGE_PAD + along_x,
+					"along": OBJECT_BOX_EDGE_PAD + float(st["x"]) + need_w * 0.5,
 					"y": OBJECT_BOX_EDGE_PAD + float(st["y"]),
 					"pull": box["pull"],
+					"size": fit,
+					"max_w": inner_w,
 				}
 				st["x"] = minf(inner_w + OBJECT_GAP, float(st["x"]) + need_w + OBJECT_GAP)
 				st["row_h"] = maxf(float(st["row_h"]), need_h)
@@ -627,11 +629,20 @@ func _try_pack_objects(objs: Array, boxes: Array, heights: Array) -> Dictionary:
 	return placements
 
 
+## Ужимает размер объекта под доступную ширину inner_w с сохранением пропорций (если он шире).
+## Так объект гарантированно вписывается в свой wall-box и не вылезает за края стены.
+func _fit_to_width(size: Vector2, inner_w: float) -> Vector2:
+	if inner_w > 0.0 and size.x > inner_w:
+		return size * (inner_w / size.x)
+	return size
+
+
 func _fallback_object_placements(id: int, objs: Array) -> Dictionary:
 	var slots := _fallback_slots(id)
 	var placements := {}
 	if slots.is_empty():
 		return placements
+	var slot_inner := GRID - OBJECT_BOX_EDGE_PAD * 2.0
 	var y_by_slot: Array = []
 	var prev_half_by_slot: Array = []
 	for _i in slots.size():
@@ -641,17 +652,20 @@ func _fallback_object_placements(id: int, objs: Array) -> Dictionary:
 		var slot_i := i % slots.size()
 		var slot: Dictionary = slots[slot_i]
 		var size: Vector2 = _object_size.get(objs[i]["id"], Vector2(PANEL_WIDTH_M, 1.0))
+		var fit := _fit_to_width(size, slot_inner)
 		var y := float(y_by_slot[slot_i])
 		if i >= slots.size():
-			y += float(prev_half_by_slot[slot_i]) + size.y * 0.5 + OBJECT_GAP
+			y += float(prev_half_by_slot[slot_i]) + fit.y * 0.5 + OBJECT_GAP
 		placements[objs[i]["id"]] = {
 			"slot": slot,
 			"along": GRID * 0.5,
 			"y": y,
 			"pull": slot["pull"],
+			"size": fit,
+			"max_w": slot_inner,
 		}
 		y_by_slot[slot_i] = y
-		prev_half_by_slot[slot_i] = size.y * 0.5
+		prev_half_by_slot[slot_i] = fit.y * 0.5
 	return placements
 
 
@@ -875,11 +889,17 @@ func _place_object_at(obj: Dictionary, placement: Dictionary, id: int, holder: N
 	var pull: Vector2i = placement["pull"]
 	var face := -pull
 	var yaw := atan2(float(face.x), float(face.y))
-	var size: Vector2 = _object_size.get(obj["id"], Vector2(PANEL_WIDTH_M, 1.0))
+	var size := _placement_size(placement, obj)
 	var base_world := _placement_world(id, placement, obj, size)
 	if obj["id"] == _first_obj_id:
 		_record_spawn(id, Vector3(base_world.x, 0.0, base_world.z), face)
-	_build_object(obj, holder, base_world, yaw, on_transition)
+	_build_object(obj, holder, base_world, yaw, on_transition, size, float(placement.get("max_w", 0.0)))
+
+
+## Размер, под который объект реально рендерится в этом месте: ужатый под ширину стены (см.
+## _fit_to_width), посчитанный при упаковке. Fallback — натуральный размер (комнаты без стен).
+func _placement_size(placement: Dictionary, obj: Dictionary) -> Vector2:
+	return placement.get("size", _object_size.get(obj["id"], Vector2(PANEL_WIDTH_M, 1.0)))
 
 
 func _placement_world(id: int, placement: Dictionary, obj: Dictionary, size: Vector2) -> Vector3:
@@ -1128,8 +1148,8 @@ func _add_corr_wall(holder: Node3D, d: Vector2i, color: Color) -> void:
 
 # --- Объекты комнаты ---
 
-func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> void:
-	var node := _spawn_object(obj, holder, local_pos, yaw, on_transition)
+func _build_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable, size: Vector2, max_w: float) -> void:
+	var node := _spawn_object(obj, holder, local_pos, yaw, on_transition, size, max_w)
 	if node != null:
 		_object_nodes[obj["id"]] = node
 	# Провенанс объекта вешаем на его корневой узел: отладочный пробник прицела поднимается
@@ -1163,7 +1183,7 @@ func _reposition_room_objects(room_id: int) -> void:
 		if not is_instance_valid(node):
 			continue
 		var placement: Dictionary = placements[obj_id]
-		var size: Vector2 = _object_size.get(obj_id, Vector2(PANEL_WIDTH_M, 1.0))
+		var size := _placement_size(placement, obj)
 		var pull: Vector2i = placement["pull"]
 		var face := -pull
 		node.position = _object_node_position(room_id, placement, obj, size)
@@ -1196,19 +1216,19 @@ func _object_node_is_centered(obj: Dictionary) -> bool:
 
 
 ## Создаёт 3D-представление объекта и возвращает его корневой узел (для привязки провенанса).
-func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable) -> Node3D:
+func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable, size: Vector2, max_w: float) -> Node3D:
 	var fn = obj.get("function", null)
 	var is_link: bool = fn != null and typeof(fn) == TYPE_DICTIONARY
 
 	if obj.get("type", "") == "image":
-		return _build_image_panel(obj, holder, local_pos, yaw, fn if is_link else null, on_transition)
+		return _build_image_panel(obj, holder, local_pos, yaw, fn if is_link else null, on_transition, max_w)
 
 	# <figure> рендерим как картину (alt = подпись из <figcaption>).
 	if obj.get("type", "") == "figure":
-		return _build_image_panel(obj, holder, local_pos, yaw, null, on_transition)
+		return _build_image_panel(obj, holder, local_pos, yaw, null, on_transition, max_w)
 
 	if obj.get("type", "") == "media" and obj.get("content", {}).get("media_tag", "") == "video":
-		var screen := _build_video_screen(obj, holder, local_pos, yaw)
+		var screen := _build_video_screen(obj, holder, local_pos, yaw, size)
 		if screen != null:
 			return screen
 		# Нет src или аддон FFmpeg недоступен — падаем на статичную заглушку-панель ниже.
@@ -1357,14 +1377,16 @@ func _heading_rich_px(obj: Dictionary) -> int:
 
 
 func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float,
-		transition, on_transition: Callable) -> Node3D:
+		transition, on_transition: Callable, max_w: float) -> Node3D:
 	var content: Dictionary = obj.get("content", {})
 	var alt: String = str(content.get("alt", content.get("text", "")))
 	var want_w := _img_px_to_m(float(content.get("width_px", 0.0)))
 	var want_h := _img_px_to_m(float(content.get("height_px", 0.0)))
 	var fallback_w := ImagePanel.BASE_WIDTH
 	var panel := ImagePanel.new()
-	panel.setup(alt, transition, want_w, want_h, fallback_w)
+	# max_w — доступная ширина стены (за вычетом safe-area): картинка не вылезет за её края даже
+	# после позднего уточнения размера по натуральной текстуре (ImagePanel ужмёт себя под этот кап).
+	panel.setup(alt, transition, want_w, want_h, fallback_w, max_w)
 	holder.add_child(panel)
 	panel.position = local_pos
 	panel.rotation.y = yaw
@@ -1382,13 +1404,12 @@ func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw
 ## Строит экран для HTML-тега <video>: тот же VrwebVideoScreen, что и кастомный VRWeb-тег
 ## (см. docs/video-player.md). Привязку к (неявному) плееру и докачку делает VrwebVideoManager
 ## при scan. Возвращает null, если нет src или недоступен аддон FFmpeg — тогда рисуем заглушку.
-func _build_video_screen(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float) -> Node3D:
+func _build_video_screen(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, size: Vector2) -> Node3D:
 	var content: Dictionary = obj.get("content", {})
 	var src: String = str(content.get("src", ""))
 	if src == "" or not VrwebVideoPlayer.is_available():
 		return null
 	var url := PageFetcher.resolve_url(src, _base_url)
-	var size: Vector2 = _object_size.get(obj["id"], _measure_video(obj))
 	var screen := VrwebVideoScreen.new()
 	# Ширину фиксируем под раскладку комнаты, высоту 0 — экран сам подгонит её под пропорции
 	# кадра (как ImagePanel под текстуру). Неявный плеер ключуется по url в менеджере.

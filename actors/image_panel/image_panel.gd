@@ -34,6 +34,10 @@ var _transition = null
 var _want_w := 0.0
 var _want_h := 0.0
 var _fallback_w := BASE_WIDTH
+# Максимальная ширина квада (метры, 0 = без ограничения): доступная ширина стены за вычетом
+# safe-area. Картинка ужимается под неё с сохранением пропорций, чтобы не вылезти за края стены —
+# даже если натуральная текстура/HTML-размер шире. Задаёт мир из раскладки комнаты.
+var _max_w := 0.0
 
 var _mesh: MeshInstance3D
 var _mesh_back: MeshInstance3D   # изнанка: тот же квад, развёрнутый на 180° вокруг Y
@@ -47,13 +51,14 @@ var _height_m := BASE_WIDTH * DEFAULT_RATIO
 
 ## Вызывается ДО add_child. transition (если есть) делает картинку кликабельной ссылкой.
 ## want_w/want_h — размеры из HTML в метрах (0 = неизвестно); fallback_w — ширина по умолчанию.
-func setup(alt: String, transition = null, want_w: float = 0.0, want_h: float = 0.0, fallback_w: float = BASE_WIDTH) -> void:
+func setup(alt: String, transition = null, want_w: float = 0.0, want_h: float = 0.0, fallback_w: float = BASE_WIDTH, max_w: float = 0.0) -> void:
 	_alt = alt
 	_transition = transition
 	_want_w = want_w
 	_want_h = want_h
 	if fallback_w > 0.0:
 		_fallback_w = fallback_w
+	_max_w = max_w
 
 
 func get_height_m() -> float:
@@ -220,11 +225,17 @@ func _initial_size() -> Vector2:
 	return _clamp_size(Vector2(w, h))
 
 
-## Размер квада берётся как есть — без пола и потолков: картинка занимает ровно свой
-## размер по метрике 1м=512px, хоть крошечная, хоть огромная. Только страхуемся от
-## вырожденного нуля, чтобы квад не схлопнулся.
+## Размер квада берётся как есть — без пола и потолков: картинка занимает ровно свой размер по
+## метрике 1м=512px, хоть крошечная, хоть огромная. Единственный кап — _max_w (ширина стены за
+## вычетом safe-area): шире неё картинку ужимаем с сохранением пропорций, чтобы не вылезти за края
+## стены. Плюс страхуемся от вырожденного нуля, чтобы квад не схлопнулся.
 func _clamp_size(s: Vector2) -> Vector2:
-	return Vector2(maxf(0.001, s.x), maxf(0.001, s.y))
+	var w := maxf(0.001, s.x)
+	var h := maxf(0.001, s.y)
+	if _max_w > 0.0 and w > _max_w:
+		h *= _max_w / w
+		w = _max_w
+	return Vector2(w, h)
 
 
 func _update_layout() -> void:
