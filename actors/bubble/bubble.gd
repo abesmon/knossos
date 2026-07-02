@@ -41,6 +41,10 @@ func setup_object(object: Dictionary) -> void:
 
 
 func _ready() -> void:
+	# Слой 2 — только для клика-луча (маска луча игрока — слои 1+2); тело игрока (маска 1)
+	# проходит сквозь пузырь, он не мешает передвижению. Тот же приём, что у ImagePanel/RichPanel.
+	collision_layer = 2
+	collision_mask = 0
 	_mat = StandardMaterial3D.new()
 	_mat.albedo_color = Color(0.4, 0.85, 1.0, 0.45)
 	_mat.emission_enabled = true

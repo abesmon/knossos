@@ -284,11 +284,9 @@ func _set_ui_focusable(focusable: bool) -> void:
 
 
 func _navigate(url: String, base: String, push_history: bool) -> void:
-	# Уходя на ДРУГУЮ страницу, роняем «пузырь» — временный портал «ушёл сюда» в покидаемой
-	# комнате. Делаем это ДО фетча, пока меш старой комнаты ещё жив и поллится: между запросом и
-	# сносом меша (в _on_fetched) проходит асинхронный фетч — reliable-пакет успеет уйти. См.
-	# docs/ephemeral-changes.md.
-	_drop_leave_bubble(url, base)
+	# Пузырь «ушёл сюда» роняем НЕ здесь, а в _on_fetched — когда переход фактически состоялся
+	# (страница получена). До фетча адреса могло не быть или загрузку могли отменить — лишний
+	# пузырь тогда ни к чему. См. _drop_leave_bubble и docs/ephemeral-changes.md.
 	_set_loading(true)
 	_set_status("Загрузка %s …" % url)
 	if push_history:
@@ -304,14 +302,14 @@ func _navigate(url: String, base: String, push_history: bool) -> void:
 
 
 ## Запрашивает эфемерное изменение kind="bubble" в покидаемой комнате: временный портал в точке,
-## где стоит игрок, указывающий на URL назначения. Только онлайн, находясь в комнате, и только
-## если целевая комната (seed_key) отличается от текущей (иначе это reload/переход внутри той же
-## страницы — пузырь не нужен). Позиция хранится как [x,y,z] ради JSON-сериализуемости журнала.
-## См. docs/ephemeral-changes.md.
-func _drop_leave_bubble(url: String, base: String) -> void:
+## где стоит игрок, указывающий на URL назначения. Зовётся из _on_fetched (переход состоялся),
+## пока _current_url ещё старый. Только онлайн, находясь в комнате, и только если целевая комната
+## (seed_key) отличается от текущей (иначе это reload/переход внутри той же страницы — пузырь не
+## нужен). target — финальный адрес назначения (после редиректа). Позиция хранится как [x,y,z]
+## ради JSON-сериализуемости журнала. См. docs/ephemeral-changes.md.
+func _drop_leave_bubble(target: String) -> void:
 	if not (Settings.online_enabled and NetworkManager.in_room()) or _current_url == "" or _player == null:
 		return
-	var target := PageFetcher.resolve_url(url, base if base != "" else _current_url)
 	if target == "" or PageFetcher.seed_key(target) == PageFetcher.seed_key(_current_url):
 		return
 	var p := _player.global_position
@@ -332,6 +330,11 @@ func _drop_leave_bubble(url: String, base: String) -> void:
 
 
 func _on_fetched(html: String, final_url: String) -> void:
+	# Переход состоялся (страница получена) — ТОЛЬКО теперь роняем «пузырь» в покидаемой комнате.
+	# Делаем это до перезаписи _current_url: игрок ещё на старом месте, а p2p-меш покидаемой
+	# комнаты жив (снесёт его _join_current_room в _finish_page — до него ещё есть кадр на флаш
+	# reliable-пакета). Цель — final_url (учитывает редирект). См. docs/ephemeral-changes.md.
+	_drop_leave_bubble(final_url)
 	_current_url = final_url
 	_address.text = final_url
 	# Запись истории хранит финальный URL (после редиректа) — по нему пойдёт назад/вперёд.
@@ -404,6 +407,11 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 	var room_count: int = space.get("rooms", {}).size()
 	_set_status("%s — %d пространств, %d мс" % [final_url, room_count, dt])
 
+	# Даём reliable-пакету «пузыря» (роняем его в _on_fetched, ещё в покидаемой комнате) уйти до
+	# сноса меша: join_room новой комнаты рвёт p2p-меш покидаемой синхронно, а put_packet во WebRTC
+	# улетает лишь со следующим poll меша. Один кадр = один poll → пузырь дойдёт до пиров даже на
+	# странице без внешних стилей, где _finish_page идёт синхронно из _on_fetched.
+	await get_tree().process_frame
 	# Комната мультиплеера = страница. В онлайне переключаемся на комнату нового URL
 	# (NetworkManager рвёт старые p2p-соединения и пересоздаёт mesh).
 	_join_current_room()
