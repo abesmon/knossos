@@ -74,6 +74,10 @@ var _history_index: int = -1
 var _pending_restore_pose: Variant = null
 var _label_positions: Dictionary = {}
 var _loading: bool = false
+# true, пока запись истории под _history_index создана push-навигацией, которая ещё не
+# закоммитилась в _on_fetched (страница не загрузилась). Позволяет заменить такой «фантом»
+# при повторной навигации, а не копить его (омнибокс браузера: A→C, а не A→B→C).
+var _pending_history_push: bool = false
 
 var _settings_overlay: Control
 var _debug_panel: PanelContainer
@@ -206,25 +210,34 @@ func _update_voice_indicators(delta: float) -> void:
 
 func _on_go() -> void:
 	var url := _address.text.strip_edges()
-	if url == "" or _loading:
+	if url == "":
 		return
-	# Ввод в адресной строке — это абсолютный адрес (как омнибокс браузера),
-	# а не путь относительно текущей страницы. Поэтому base пустой: иначе домен
-	# «abesmon.syrupmg.ru» приклеится к текущему пути. Относительный резолв нужен
-	# только для внутристраничных ссылок (см. _activate_transition).
+	# Новый адрес во время загрузки — как в омнибоксе браузера: отменяем текущую (незавершённую)
+	# загрузку и стартуем актуальную. _navigate сам прервёт in-flight запрос и заменит фантомную
+	# запись истории вместо накопления (см. _cancel_load и ветку push в _navigate).
+	# Ввод в адресной строке — это абсолютный адрес, а не путь относительно текущей страницы.
+	# Поэтому base пустой: иначе домен «abesmon.syrupmg.ru» приклеится к текущему пути.
+	# Относительный резолв нужен только для внутристраничных ссылок (см. _activate_transition).
 	_navigate(url, "", true)
 	_player.capture_mouse(true)
 
 
-## Cancel в навбаре: прерывает текущую загрузку. Останавливаем HTTP-запрос, инвалидируем
-## возможный отложенный CSS-колбэк (bump _nav_id, см. _on_fetched) и снимаем флаг загрузки.
+## Cancel в навбаре: прерывает текущую загрузку и снимает флаг (в отличие от навигации, новую
+## не начинаем). Остановку запроса и инвалидацию отложенного CSS-колбэка делает _cancel_load.
 func _on_cancel() -> void:
 	if not _loading:
 		return
-	_fetcher.cancel()
-	_nav_id += 1
+	_cancel_load()
 	_set_loading(false)
 	_set_status("Загрузка отменена")
+
+
+## Прерывает текущую загрузку: останавливает HTTP-запрос и инвалидирует возможный отложенный
+## CSS-колбэк предыдущей навигации (bump _nav_id, см. _on_fetched). Флаг _loading не трогает —
+## его выставит вызывающий (_on_cancel снимает, _navigate тут же поднимает под новую загрузку).
+func _cancel_load() -> void:
+	_fetcher.cancel()
+	_nav_id += 1
 
 
 ## Refresh в навбаре: перезагружает текущую страницу, сохраняя позу игрока (как reload
@@ -287,16 +300,28 @@ func _navigate(url: String, base: String, push_history: bool) -> void:
 	# Пузырь «ушёл сюда» роняем НЕ здесь, а в _on_fetched — когда переход фактически состоялся
 	# (страница получена). До фетча адреса могло не быть или загрузку могли отменить — лишний
 	# пузырь тогда ни к чему. См. _drop_leave_bubble и docs/ephemeral-changes.md.
+	# Любая новая навигация отменяет ещё идущую (иначе старый ответ мог бы «доехать» поверх новой).
+	if _loading:
+		_cancel_load()
 	_set_loading(true)
 	_set_status("Загрузка %s …" % url)
 	if push_history:
-		# Уходим со страницы по новой ссылке: запоминаем позу в текущей записи, обрезаем
-		# ветку «вперёд» (как браузер) и добавляем новую запись. URL запишется финальным
-		# (после возможного редиректа) в _on_fetched.
-		_capture_current_pose()
-		_history.resize(_history_index + 1)
-		_history.append({"url": url, "pose": null})
-		_history_index = _history.size() - 1
+		if _pending_history_push:
+			# Предыдущий push-переход ещё не закоммитился (страница не загрузилась) — заменяем
+			# его запись, а не копим фантом невыполненного перехода (омнибокс: A→C, не A→B→C).
+			_history[_history_index] = {"url": url, "pose": null}
+		else:
+			# Уходим со страницы по новой ссылке: запоминаем позу в текущей записи, обрезаем
+			# ветку «вперёд» (как браузер) и добавляем новую запись. URL запишется финальным
+			# (после возможного редиректа) в _on_fetched.
+			_capture_current_pose()
+			_history.resize(_history_index + 1)
+			_history.append({"url": url, "pose": null})
+			_history_index = _history.size() - 1
+		_pending_history_push = true
+	else:
+		# reload/назад-вперёд идут по уже существующей (закоммиченной) записи — фантома нет.
+		_pending_history_push = false
 	_update_nav_buttons()
 	_fetcher.fetch(url, base)
 
@@ -337,6 +362,8 @@ func _on_fetched(html: String, final_url: String) -> void:
 	_drop_leave_bubble(final_url)
 	_current_url = final_url
 	_address.text = final_url
+	# Переход состоялся — запись истории закоммичена, она больше не «фантом» (см. _navigate).
+	_pending_history_push = false
 	# Запись истории хранит финальный URL (после редиректа) — по нему пойдёт назад/вперёд.
 	if _history_index >= 0 and _history_index < _history.size():
 		_history[_history_index]["url"] = final_url
