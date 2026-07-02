@@ -1,0 +1,4 @@
+/* Фикстура теста CssFetcher: @import разворачивается на месте. */
+@import url("css_import_b.css");
+@import url("css_import_b.css") print;
+.a { color: red; }

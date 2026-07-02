@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>CSS cascade demo</title>
+	<!-- Внешняя таблица по относительной ссылке: качается CssFetcher'ом
+	     (vrwebresource://css_demo.css), в headless-тесте читается напрямую. -->
+	<link rel="stylesheet" href="css_demo.css">
+	<style>
+		/* Встроенный <style> участвует в том же каскаде, что и внешний файл. */
+		.inline-styled { color: #ffcc00; }
+	</style>
+</head>
+<body>
+	<h1>Демо мини-каскада</h1>
+
+	<section class="card">
+		<h2>Карточка с фоном из класса</h2>
+		<p>Фон и цвет этой секции заданы классом во внешней таблице —
+			раньше такие цвета терялись (виден был только инлайн style).</p>
+		<p class="inline-styled">Цвет этого абзаца — из встроенного &lt;style&gt;.</p>
+	</section>
+
+	<section class="dark important-note">
+		<h2>Специфичность и !important</h2>
+		<p>Фон секции спорят два правила: побеждает !important.</p>
+		<p class="big-note">Этот текст крупнее из-за em-кегля от :root-переменной размера.</p>
+	</section>
+
+	<section>
+		<h2 class="visual">Видимость</h2>
+		<span class="sr-only">Скрытый для глаз текст (.sr-only) — в мир не попадает.</span>
+		<nav class="mobile-menu">Мобильное меню (display:none на десктопе) — тоже мимо мира.</nav>
+		<p>А этот текст виден.</p>
+	</section>
+
+	<p style="color: #ff00ff">Инлайн style побеждает внешнюю таблицу (магента, не серый).</p>
+	<a href="about.html">Дверь на соседнюю страницу</a>
+</body>
+</html>

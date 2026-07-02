@@ -88,8 +88,7 @@ func _process(_delta: float) -> bool:
 	var panels := get_nodes_in_group("rich_panel")
 	print("\n=== After frame: RichPanels (абзацы с inline-ссылками): ", panels.size(), " ===")
 	for rp in panels:
-		print("  runs=", rp._runs.size(), " links=", rp._metas.size(),
-			" h_px=", rp._h_px, " bbcode=", rp._bbcode.substr(0, 140))
+		print("  runs=", rp._runs.size(), " links=", rp._metas.size(), " h_px=", rp._h_px)
 	_holder.queue_free()
 	return true
 

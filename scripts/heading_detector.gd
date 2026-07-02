@@ -62,8 +62,9 @@ static func _word_count(text: String) -> int:
 	return text.split(" ", false).size()
 
 
-## Максимальный объявленный кегль (в px) по инлайновому поддереву, либо 0 если нигде не
-## объявлен. Наследование от внешних предков НЕ учитывается (v1 — см. открытые вопросы §9).
+## Максимальный кегль (в px) по инлайновому поддереву, либо 0 если нигде не объявлен.
+## С мини-каскадом (node.computed) наследование и классы учтены; без него (фолбэк)
+## берётся только инлайновая декларация, наследование от внешних предков не учитывается.
 static func _max_font_px(node: HtmlNode, base_px: float) -> float:
 	var best := _own_font_px(node, base_px)
 	for c in node.children:
@@ -73,6 +74,11 @@ static func _max_font_px(node: HtmlNode, base_px: float) -> float:
 
 
 static func _own_font_px(node: HtmlNode, base_px: float) -> float:
+	# Мини-каскад бежал: кегль уже вычислен (включая классы, <font size>, наследование).
+	# Для узла без своей декларации это унаследованная база — ratio ~1, сигнала нет,
+	# как и раньше при «нигде не объявлен».
+	if node.computed.has("font-size"):
+		return node.computed["font-size"]
 	match node.tag:
 		"font":
 			if node.has_attr("size"):
@@ -134,6 +140,9 @@ static func _is_all_bold(node: HtmlNode) -> bool:
 static func _self_bold(node: HtmlNode) -> bool:
 	if node.tag == "b" or node.tag == "strong":
 		return true
+	# Каскадный вес уже включает инлайн style и классы.
+	if node.computed.has("font-weight"):
+		return int(node.computed["font-weight"]) >= 600
 	var style := node.get_attr("style").to_lower().replace(" ", "")
 	if style.contains("font-weight:bold") or style.contains("font-weight:bolder"):
 		return true
@@ -163,6 +172,8 @@ static func _has_heading_class(node: HtmlNode) -> bool:
 static func _is_centered(node: HtmlNode) -> bool:
 	if node.tag == "center":
 		return true
+	if node.computed.has("text-align"):
+		return node.computed["text-align"] == "center"
 	if node.get_attr("align").to_lower() == "center":
 		return true
 	return node.get_attr("style").to_lower().replace(" ", "").contains("text-align:center")

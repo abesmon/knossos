@@ -13,6 +13,7 @@ var raw_tag: String = ""            ## имя тега в исходном ре�
 var text: String = ""               ## заполнен только для #text
 var attributes: Dictionary = {}     ## { имя: значение } в нижнем регистре по ключу
 var children: Array[HtmlNode] = []
+var computed: Dictionary = {}       ## вычисленные стили (StyleResolver); пусто = каскад не бежал
 
 
 func _init(p_tag: String = "") -> void:

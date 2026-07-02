@@ -20,6 +20,13 @@ const BUBBLE_TTL := 30.0
 @onready var _settings_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/settings"
 
 var _fetcher: PageFetcher
+# Загрузчик внешних CSS (docs/css-cascade.md). Постоянный (не в _world): стили нужны до
+# сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
+var _css_fetcher: CssFetcher
+# Максимум ожидания внешних таблиц: дальше строим мир с тем, что успело прийти.
+const CSS_DEADLINE_SEC := 4.0
+# Номер навигации: guard от гонки «продолжение после загрузки CSS против новой навигации».
+var _nav_id := 0
 var _player: Player
 # Активный генератор мира. Держим сильную ссылку, пока он достраивает геометрию порциями
 # по кадрам (WorldGenerator — RefCounted; без ссылки его корутина-достройка собралась бы GC
@@ -91,6 +98,9 @@ func _ready() -> void:
 	add_child(_fetcher)
 	_fetcher.fetched.connect(_on_fetched)
 	_fetcher.failed.connect(_on_failed)
+
+	_css_fetcher = CssFetcher.new()
+	add_child(_css_fetcher)
 
 	_player = PLAYER_SCENE.instantiate()
 	_player.aim_target_changed.connect(_on_aim_target_changed)
@@ -288,13 +298,11 @@ func _drop_leave_bubble(url: String, base: String) -> void:
 
 
 func _on_fetched(html: String, final_url: String) -> void:
-	_loading = false
 	_current_url = final_url
 	_address.text = final_url
 	# Запись истории хранит финальный URL (после редиректа) — по нему пойдёт назад/вперёд.
 	if _history_index >= 0 and _history_index < _history.size():
 		_history[_history_index]["url"] = final_url
-	_set_status("Сборка пространства…")
 
 	var t0 := Time.get_ticks_msec()
 	var doc := HtmlParser.parse(html)
@@ -304,6 +312,46 @@ func _on_fetched(html: String, final_url: String) -> void:
 	_base_url = base_url
 	# «Паспорт» страницы из <head> для вкладки «Мир» в настройках (заголовок/описание/превью).
 	_page_meta = _extract_page_meta(doc, base_url, final_url)
+
+	# Мини-каскад CSS (docs/css-cascade.md): собираем ссылки на таблицы; внешние качает
+	# CssFetcher с дедлайном — по его истечении едем с тем, что пришло. _loading остаётся
+	# true до _finish_page (двойной go! во время загрузки стилей заблокирован), _nav_id
+	# отсекает продолжение, если за время загрузки началась новая навигация.
+	_nav_id += 1
+	var nav := _nav_id
+	var sheet_refs := StyleResolver.collect_sheet_refs(doc)
+	var hrefs: Array = []
+	for ref in sheet_refs:
+		if ref["kind"] == "link" and CssParser.media_matches(ref["media"]):
+			var abs_url := PageFetcher.resolve_url(ref["href"], base_url)
+			if abs_url != "" and not hrefs.has(abs_url):
+				hrefs.append(abs_url)
+	if hrefs.is_empty():
+		# Без внешних таблиц — синхронно (локальные/простые страницы не ждут лишний кадр).
+		_finish_page(doc, sheet_refs, {}, final_url, base_url, t0)
+	else:
+		_set_status("Загрузка стилей (%d)…" % hrefs.size())
+		_css_fetcher.fetch_all(hrefs, CSS_DEADLINE_SEC,
+			func(css_by_url: Dictionary):
+				if nav == _nav_id:
+					_finish_page(doc, sheet_refs, css_by_url, final_url, base_url, t0))
+
+
+## Продолжение сборки страницы после (возможной) загрузки внешних CSS.
+func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
+		final_url: String, base_url: String, t0: int) -> void:
+	_loading = false
+	_set_status("Сборка пространства…")
+	# Тексты таблиц в порядке документа (<style> и <link> вперемешку) = порядок каскада.
+	var css_texts: Array = []
+	for ref in sheet_refs:
+		if not CssParser.media_matches(ref["media"]):
+			continue
+		if ref["kind"] == "inline":
+			css_texts.append(ref["text"])
+		else:
+			css_texts.append(css_by_url.get(PageFetcher.resolve_url(ref["href"], base_url), ""))
+	StyleResolver.resolve(doc, css_texts)
 	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).

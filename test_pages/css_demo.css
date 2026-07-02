@@ -1,0 +1,63 @@
+/* Внешняя таблица демо-страницы мини-каскада (docs/css-cascade.md).
+   Упражняет: переменные :root, каскад/специфичность, !important, em/rem,
+   скрытие классами, @media, шортхенд background. */
+
+:root {
+	--page-bg: #1b2a3a;
+	--accent: teal;
+	--note-scale: 1.4em;
+}
+
+body {
+	background: var(--page-bg);
+	color: #d8e0e8;
+	font-size: 18px;
+}
+
+h1 {
+	font-size: 2rem;
+}
+
+p {
+	color: gray;
+}
+
+.card {
+	background-color: var(--accent);
+	color: #ffffff;
+	border: 2px solid #0a4a4a;
+}
+
+/* Спор правил: побеждает !important, а не более позднее правило. */
+.important-note {
+	background-color: #402030 !important;
+}
+.dark {
+	background-color: #050505;
+}
+
+.big-note {
+	font-size: var(--note-scale);
+	font-weight: bold;
+}
+
+/* Классические техники скрытия — раньше ловились только в инлайн style. */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	clip: rect(0, 0, 0, 0);
+}
+
+@media (min-width: 900px) {
+	.mobile-menu {
+		display: none;
+	}
+}
+
+/* print-блок не должен применяться (viewport = screen). */
+@media print {
+	body {
+		background: white;
+	}
+}

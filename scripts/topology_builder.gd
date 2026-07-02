@@ -969,6 +969,22 @@ func _semantic_tag(tag: String) -> String:
 
 
 func _css_hints(node: HtmlNode) -> Dictionary:
+	# Каскад бежал (StyleResolver) — computed уже включает инлайн style и bgcolor
+	# как тиры каскада, дополнительно ничего не парсим. Цвета сериализуются в #rrggbbaa —
+	# геометрия (Color.from_string) это понимает, контракт hints.css не меняется.
+	if not node.computed.is_empty():
+		var computed_css := {}
+		var comp := node.computed
+		if comp.has("background-color"):
+			computed_css["bg"] = "#" + (comp["background-color"] as Color).to_html(true)
+		# fg — только собственная декларация: color наследуется, и без own-флага цвет
+		# body покрасил бы хинт каждой комнаты.
+		if comp.get("color-own", false) and comp.has("color"):
+			computed_css["fg"] = "#" + (comp["color"] as Color).to_html(true)
+		if comp.get("border", false):
+			computed_css["border"] = true
+		return computed_css
+	# Фолбэк без резолвера (прямые вызовы build из тестов/дебага): только инлайн style.
 	var css := {}
 	var style := node.get_attr("style").to_lower()
 	var bg := _extract_css_value(style, "background-color")
@@ -990,11 +1006,31 @@ func _css_hints(node: HtmlNode) -> Dictionary:
 ## <body>. Из них фаза F строит небо (картинка -> панорама, иначе фон-цвет -> база неба),
 ## землю (цвет текста, иначе очень тёмный фон) и палитру комнат (см. world_generator).
 ##
-## Каскада/специфичности у нас нет (внешний CSS не резолвится, см. html-to-3d-topology.md
-## §10–§11), поэтому источники берём по нарастанию «явности»: правила body/html/:root из
-## встроенных <style> -> инлайн-style самого <body> -> презентационные атрибуты
-## (bgcolor/text). Каждый следующий перекрывает предыдущий по найденным ключам.
+## Основной путь — мини-каскад (StyleResolver, docs/css-cascade.md): паспорт читается из
+## computed самого <body> с фолбэком на <html> (фон часто объявлен на нём); специфичность,
+## наследование и внешние таблицы учтены каскадом. Презентационные атрибуты bgcolor/text
+## перекрывают, как и раньше. Старый лёгкий экстрактор <style>-правил остаётся фолбэком
+## для прямых вызовов build без резолвера.
 func _document_style(root: HtmlNode, body: HtmlNode) -> Dictionary:
+	if body != null and not body.computed.is_empty():
+		var passport := {}
+		var sources: Array[HtmlNode] = [body]
+		var html_el := root.find_descendant("html")
+		if html_el != null:
+			sources.append(html_el)
+		for n in sources:
+			var comp: Dictionary = n.computed
+			if not passport.has("bg") and comp.has("background-color"):
+				passport["bg"] = "#" + (comp["background-color"] as Color).to_html(true)
+			if not passport.has("bg_image") and comp.has("background-image"):
+				passport["bg_image"] = comp["background-image"]
+			if not passport.has("fg") and comp.get("color-own", false):
+				passport["fg"] = "#" + (comp["color"] as Color).to_html(true)
+		if body.has_attr("bgcolor"):
+			passport["bg"] = body.get_attr("bgcolor").to_lower()
+		if body.has_attr("text"):
+			passport["fg"] = body.get_attr("text").to_lower()
+		return passport
 	var doc := _doc_style_from_stylesheet(_collect_stylesheet_css(root))
 	if body != null:
 		var style := body.get_attr("style").to_lower()
@@ -1164,13 +1200,18 @@ func _accumulate_font_px(node: HtmlNode, inherited_px: float, acc: Dictionary) -
 	if HEADING_TAGS.has(node.tag):
 		return  # текст заголовков в базу не считаем
 	var px := inherited_px
-	var declared := _font_size_px(node)
-	if declared > 0.0:
-		px = declared
+	if node.computed.has("font-size"):
+		# Каскад уже отдал абсолютный кегль с учётом наследования и em/rem/%.
+		px = node.computed["font-size"]
+	else:
+		var declared := _font_size_px(node)
+		if declared > 0.0:
+			px = declared
 	for c in node.children:
 		_accumulate_font_px(c, px, acc)
 
 
+## Инлайновый font-size в px (фолбэк без резолвера; только абсолютные значения).
 func _font_size_px(node: HtmlNode) -> float:
 	var style := node.get_attr("style").to_lower()
 	return _length_px(_extract_css_value(style, "font-size"))
@@ -1234,9 +1275,12 @@ func _extract_css_value(style: String, prop: String) -> String:
 
 
 ## Элемент невидим «для глаза» — выкидываем на фазе линеаризации.
-## Внешний CSS не резолвится (нет движка/рендера), поэтому ловим только надёжные
-## инлайновые признаки и атрибуты, не требующие layout-пасса.
+## Основной путь — вердикт мини-каскада (computed.hidden, StyleResolver): он ловит и
+## скрытие через классы (.sr-only и т.п.). Инлайновые проверки ниже — фолбэк для
+## прямых вызовов build без резолвера. Layout-признаков по-прежнему нет.
 func _is_hidden(node: HtmlNode) -> bool:
+	if node.computed.get("hidden", false):
+		return true
 	# Атрибуты, явно убирающие элемент из видимого/доступного дерева.
 	if node.has_attr("hidden"):
 		return true
