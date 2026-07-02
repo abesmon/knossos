@@ -33,6 +33,7 @@ func setup(player: Node3D) -> void:
 	NetworkManager.peer_left.connect(_on_peer_left)
 	NetworkManager.state_received.connect(_on_state_received)
 	NetworkManager.identity_received.connect(_on_identity_received)
+	NetworkManager.identity_verified.connect(_on_identity_verified)
 	NetworkManager.chat_received.connect(_on_chat_received)
 	NetworkManager.voice_received.connect(_on_voice_received)
 
@@ -44,6 +45,7 @@ func _exit_tree() -> void:
 		NetworkManager.peer_left.disconnect(_on_peer_left)
 		NetworkManager.state_received.disconnect(_on_state_received)
 		NetworkManager.identity_received.disconnect(_on_identity_received)
+		NetworkManager.identity_verified.disconnect(_on_identity_verified)
 		NetworkManager.chat_received.disconnect(_on_chat_received)
 		NetworkManager.voice_received.disconnect(_on_voice_received)
 
@@ -69,6 +71,9 @@ func _on_state_received(id: int, pos: Vector3, look_yaw: float, params: Dictiona
 	if cap == null:
 		cap = REMOTE_PLAYER.instantiate()
 		cap.set_nick(NetworkManager.nick_of(id))
+		# Личность могла подтвердиться до первого state (или до пересоздания view) — адрес
+		# держит NetworkManager, поэтому просто спрашиваем его.
+		cap.set_verified_address(NetworkManager.verified_address_of(id))
 		if _faces.has(id):
 			cap.set_face(_faces[id])   # карточка пришла раньше первого state
 		add_child(cap)
@@ -92,6 +97,15 @@ func _on_identity_received(id: int, nick: String, face: Texture2D, avatar_uri: S
 		if face != null:
 			cap.set_face(face)
 		_apply_avatar(id, avatar_uri)
+
+
+## Личность пира подтверждена криптографически (обе подписи сошлись) — показываем nick@domain
+## с галочкой во второй строке неймплейта. Капсула могла ещё не родиться (создаётся на первом
+## state) — тогда адрес подхватится при создании из NetworkManager.verified_address_of.
+func _on_identity_verified(id: int, address: String) -> void:
+	var cap: RemotePlayer = _capsules.get(id)
+	if cap != null:
+		cap.set_verified_address(address)
 
 
 ## Резолвит идентификатор аватара и монтирует его в капсулу. Асинхронно для внешних URL,

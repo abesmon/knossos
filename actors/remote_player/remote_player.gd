@@ -2,15 +2,18 @@ class_name RemotePlayer
 extends Node3D
 
 ## Другой игрок в комнате. Тело-визуал делегировано AvatarHost (сменяемый аватар), а
-## неймплейт и речевой бабл — UI поверх любого аватара — остаются на корне. Позицию/поворот
+## неймплейт-бабл и речевой бабл — UI поверх любого аватара — остаются на корне. Позицию/поворот
 ## и параметры аватара задаёт RemotePlayersView из сетевых сообщений. Состояние приходит
 ## ~15 Гц, поэтому к цели интерполируем (тело), а аватар сам сглаживает свои параметры.
 
 @onready var _host: AvatarHost = $AvatarHost
-@onready var _label: Label3D = $Label
-# Жёлтый «⚠» над ником: законность аватара не подтверждена (нет манифеста прав / личность пира
-# пока невозможно верифицировать). Создаём кодом, чтобы не править .tscn. См. docs/avatars.md.
-var _warn: Label3D = null
+# View-bubble над головой: display_name крупно + (при наличии) подтверждённый nick@domain с
+# иконкой статуса. См. actors/nameplate/, docs/home-server.md.
+@onready var _nameplate: Nameplate = $Nameplate
+# Иконка над неймплейтом: законность аватара не подтверждена (warning) или отклонена (err) —
+# нет манифеста прав / личность пира пока невозможно верифицировать. Создаём кодом, чтобы не
+# править .tscn. См. docs/avatars.md.
+var _warn: Sprite3D = null
 # Бабл — это UI-плашка (PanelContainer + Label со скруглённым фоном), отрендеренная через
 # SubViewport на billboard-Sprite3D. Так получаем настоящий «пузырь», а не голый текст.
 @onready var _bubble: Sprite3D = $Bubble
@@ -22,6 +25,7 @@ var _target_pos := Vector3.ZERO
 var _target_yaw := 0.0
 var _has_target := false
 var _nick := "Guest"
+var _verified_address := ""
 var _face_tex: Texture2D = null
 # Пространственное воспроизведение голоса пира. Создаётся лениво на первом кадре, чтобы
 # у молчащих капсул не висел лишний AudioStreamPlayer3D с открытым генератором.
@@ -39,14 +43,15 @@ const BUBBLE_PAD := Vector2(18, 10)
 
 
 func _ready() -> void:
-	# Ник/лицо могли задать до входа в дерево (когда @onready ещё null) — применяем тут.
-	_label.text = _nick
+	# Ник/адрес/лицо могли задать до входа в дерево (когда @onready ещё null) — применяем тут.
+	_nameplate.set_display_name(_nick)
+	_nameplate.set_verified_identity(_verified_address, StatusIcons.Status.VERIFIED)
 	_host.apply_identity(_nick, _face_tex)
-	_warn = Label3D.new()
-	_warn.text = "⚠"
-	_warn.modulate = Color(1.0, 0.82, 0.2)
+	_warn = Sprite3D.new()
 	_warn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_warn.shaded = false
 	_warn.no_depth_test = true
+	_warn.pixel_size = 0.006   # иконка ~20px → ~0.12 м
 	_warn.visible = false
 	add_child(_warn)
 	_bubble.texture = _bubble_viewport.get_texture()
@@ -54,12 +59,13 @@ func _ready() -> void:
 	_position_overlays()
 
 
-## Ставит неймплейт, «⚠» и бабл над головой текущего аватара (у разных аватаров разный рост).
+## Ставит неймплейт-бабл, иконку легитимности и речевой бабл над головой текущего аватара
+## (у разных аватаров разный рост).
 func _position_overlays() -> void:
 	var h := _host.current_nameplate_height()
-	_label.position.y = h
+	_nameplate.position.y = h
 	if _warn != null:
-		_warn.position.y = h + 0.22   # чуть выше ника
+		_warn.position.y = h + 0.35   # над неймплейтом
 	_bubble.position.y = h + 0.5
 
 
@@ -69,12 +75,23 @@ func set_avatar(scene: PackedScene) -> void:
 	_position_overlays()
 
 
-## Вердикт легитимности аватара (см. AvatarManifest). Всё, кроме ALLOWED, показывает у ника
-## жёлтый «⚠» — «законность не подтверждена». DENIED (скрытие аватара) появится со слоем
-## идентичности; пока сюда приходит только ALLOWED/UNCONFIRMED.
+## Вердикт легитимности аватара (см. AvatarManifest). ALLOWED — иконки нет; UNCONFIRMED —
+## «warning» (законность не подтверждена); DENIED — «err». DENIED (скрытие аватара) появится
+## со слоем идентичности; пока сюда приходит только ALLOWED/UNCONFIRMED.
 func set_avatar_legitimacy(verdict: AvatarManifest.Verdict) -> void:
-	if _warn != null:
-		_warn.visible = verdict != AvatarManifest.Verdict.ALLOWED
+	if _warn == null:
+		return
+	match verdict:
+		AvatarManifest.Verdict.ALLOWED:
+			_warn.visible = false
+		AvatarManifest.Verdict.DENIED:
+			_warn.texture = StatusIcons.texture(StatusIcons.Status.ERROR)
+			_warn.modulate = StatusIcons.color(StatusIcons.Status.ERROR)
+			_warn.visible = true
+		_:
+			_warn.texture = StatusIcons.texture(StatusIcons.Status.WARNING)
+			_warn.modulate = StatusIcons.color(StatusIcons.Status.WARNING)
+			_warn.visible = true
 
 
 ## Показать речевой бабл с сообщением чата на BUBBLE_SECONDS секунд. Новое сообщение
@@ -110,13 +127,22 @@ func _hide_bubble() -> void:
 	_bubble_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 
-## Ник можно задавать до add_child: значение запоминается и проставится в _ready.
+## Отображаемое имя (display_name). Можно задавать до add_child: значение запоминается и
+## проставится в _ready.
 func set_nick(nick: String) -> void:
 	_nick = nick
-	if _label != null:
-		_label.text = nick
+	if _nameplate != null:
+		_nameplate.set_display_name(nick)
 	if _host != null:
 		_host.apply_identity(nick, _face_tex)
+
+
+## Криптографически подтверждённый федеративный адрес (nick@domain) — вторая строка неймплейта
+## с галочкой. "" — аноним/не проверен (строки нет). См. docs/home-server.md.
+func set_verified_address(address: String) -> void:
+	_verified_address = address
+	if _nameplate != null:
+		_nameplate.set_verified_identity(address, StatusIcons.Status.VERIFIED)
 
 
 ## Текстура лица (256×256 с альфой). Можно вызывать до add_child — запомнится до _ready.
@@ -138,8 +164,8 @@ func push_voice(payload: PackedByteArray) -> void:
 
 
 func _on_speaking_changed(speaking: bool) -> void:
-	if _label != null:
-		_label.modulate = SPEAKING_COLOR if speaking else Color.WHITE
+	if _nameplate != null:
+		_nameplate.set_name_color(SPEAKING_COLOR if speaking else Color.WHITE)
 
 
 ## Состояние от пира: позиция, поворот корпуса (yaw) и словарь параметров аватара.

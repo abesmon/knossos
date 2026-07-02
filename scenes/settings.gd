@@ -497,10 +497,7 @@ func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool,
 	row.add_theme_constant_override("separation", 8)
 
 	var name_label := Label.new()
-	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.text = _user_display_name(nick, uid, online, p2p_connected, is_self, is_authority)
-	if verified != "":
-		name_label.text += "  ✓ %s" % verified
 	var tip := "user_id: %s" % uid if uid != "" else ""
 	if verified != "":
 		tip = (tip + "\n" if tip != "" else "") \
@@ -513,6 +510,28 @@ func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool,
 	if not online:
 		name_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	row.add_child(name_label)
+
+	# Подтверждённая идентичность — та же иконка-галочка, что и в неймплейте (StatusIcons).
+	if verified != "":
+		var icon := TextureRect.new()
+		icon.texture = StatusIcons.texture(StatusIcons.Status.VERIFIED)
+		icon.self_modulate = StatusIcons.color(StatusIcons.Status.VERIFIED)
+		icon.custom_minimum_size = Vector2(16, 16)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		icon.tooltip_text = tip
+		row.add_child(icon)
+		var addr_label := Label.new()
+		addr_label.text = verified
+		addr_label.tooltip_text = tip
+		addr_label.add_theme_color_override("font_color", Color(0.72, 0.85, 0.95))
+		row.add_child(addr_label)
+
+	# Распорка прижимает ранг/кнопки вправо (раньше это делал EXPAND_FILL на имени).
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
 
 	if is_self or not is_auth:
 		# Себя и обычные пиры — только просмотр. Нет ранга — не выводим явную инфу (просто «—»).
