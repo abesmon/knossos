@@ -9,20 +9,35 @@ extends Node3D
 ## Реагирует на ГРАНУЛЯРНЫЕ сигналы транспорта (add/update/remove/reset) — не пересобирает всё на
 ## каждое изменение. Объекты — плоские данные { id, kind, parent, author, ts, ttl, props };
 ## вьюха материализует их по kind, не зная транспорта. Вложенность: объект с parent=<id> другого
-## объекта монтируется как ребёнок его узла (наследует трансформ). Поддержанные kind: "bubble"
-## (портал-метка) и "stroke" (штрих карандаша). Подробно — в docs/ephemeral-changes.md.
+## объекта монтируется как ребёнок его узла (наследует трансформ); parent="page:<node_id>" —
+## как ребёнок РЕАЛЬНОГО узла vrweb-слоя страницы (реестр targets из main).
+##
+## Kind'ы: "bubble" (портал-метка), "stroke" (штрих карандаша) и оверлей vrweb
+## (см. docs/space-console.md):
+##   "vrweb-node"  — добавленный узел сцены: строится VrwebBuilder.build_element;
+##   "vrweb-patch" — правка узла СТРАНИЦЫ (id "vpatch:<node_id>"): применяет props.set к живому
+##                   узлу (с запоминанием оригиналов для отката), props.removed скрывает его.
+## Подробно — в docs/ephemeral-changes.md.
 
 const BUBBLE := preload("res://actors/bubble/bubble.tscn")
 const STROKE := preload("res://actors/stroke/stroke.tscn")
 
 var _activate_cb: Callable
-var _nodes := {}   # id (String) -> Node3D
+var _nodes := {}           # id (String) -> Node (объектные kind'ы; патчи сюда не попадают)
+var _targets := {}         # node_id страницы -> Object (узлы/ресурсы vrweb; реестр из main)
+var _resources := {}       # id -> Resource (суб-ресурсы страницы для резолва ссылок)
+var _base_url := ""
+var _patched := {}         # patch id -> { target: Object, originals: {prop: Variant} }
 
 
-## activate_cb(transition: Dictionary) — обработчик переходов кликабельных объектов (пузырей),
-## маршрутится в main._activate_transition.
-func setup(activate_cb: Callable) -> void:
+## activate_cb(transition) — обработчик переходов кликабельных объектов (маршрут в
+## main._activate_transition). vrweb — привязка к слою страницы:
+## { targets: {node_id -> Object}, resources: {id -> Resource}, base_url: String }.
+func setup(activate_cb: Callable, vrweb: Dictionary = {}) -> void:
 	_activate_cb = activate_cb
+	_targets = vrweb.get("targets", {})
+	_resources = vrweb.get("resources", {})
+	_base_url = str(vrweb.get("base_url", ""))
 	NetworkManager.scene_object_added.connect(_on_added)
 	NetworkManager.scene_object_updated.connect(_on_updated)
 	NetworkManager.scene_object_removed.connect(_on_removed)
@@ -41,11 +56,17 @@ func _exit_tree() -> void:
 # --- Реакция на сигналы транспорта ---
 
 func _on_added(id: String, object: Dictionary) -> void:
+	if str(object.get("kind", "")) == SceneHtml.KIND_PATCH:
+		_apply_patch(id, object)
+		return
 	_spawn(id, object)
 
 
 func _on_updated(id: String, object: Dictionary) -> void:
-	var node: Node3D = _nodes.get(id)
+	if str(object.get("kind", "")) == SceneHtml.KIND_PATCH:
+		_apply_patch(id, object)
+		return
+	var node: Node = _nodes.get(id)
 	if node == null:
 		_spawn(id, object)   # не видели add (например, пришли мид-стрим) — создаём
 		return
@@ -56,7 +77,10 @@ func _on_updated(id: String, object: Dictionary) -> void:
 
 
 func _on_removed(id: String) -> void:
-	var node: Node3D = _nodes.get(id)
+	if _patched.has(id):
+		_revert_patch(id)
+		return
+	var node: Node = _nodes.get(id)
 	# Узел мог уже уйти Godot-стороной вместе с родителем (каскад) — снимаем ссылку.
 	if is_instance_valid(node):
 		node.queue_free()
@@ -70,17 +94,22 @@ func _on_reset() -> void:
 # --- Построение ---
 
 func _rebuild_all() -> void:
+	for id in _patched.keys():
+		_revert_patch(id)
 	for id in _nodes.keys():
 		var n: Node = _nodes[id]
 		if is_instance_valid(n):
 			n.queue_free()
 	_nodes.clear()
-	# Стабильный порядок не гарантирует, что родитель раньше ребёнка → _parent_for создаёт узел
-	# под корнем, а второй проход не нужен: вложенность визуально доедет при следующем update/refresh.
-	# Но чтобы дети сразу попали под родителей, монтируем в два прохода (родители первыми по глубине).
+	# Монтируем в порядке глубины родителя (родители первыми), чтобы к моменту монтажа
+	# ребёнка узел родителя уже существовал.
 	var objects := NetworkManager.scene_objects()
 	for id in _ordered_by_depth(objects):
-		_spawn(id, objects[id])
+		var object: Dictionary = objects[id]
+		if str(object.get("kind", "")) == SceneHtml.KIND_PATCH:
+			_apply_patch(str(id), object)
+		else:
+			_spawn(str(id), object)
 
 
 ## Порядок id по глубине родителя (корневые первыми) — чтобы при сборке узел родителя уже
@@ -113,15 +142,18 @@ func _spawn(id: String, object: Dictionary) -> void:
 	_apply(node, object)
 
 
-## Узел-родитель для монтажа: если parent=<id> другого объекта и его узел есть — он; иначе корень
-## вьюхи (root мира, "" или page:<…> пока резолвится в корень — якорь к узлу страницы будет позже).
+## Узел-родитель для монтажа: parent=<id> другого объекта — его узел; parent="page:<node_id>" —
+## реальный узел vrweb-слоя страницы (реестр _targets); иначе корень вьюхи (root мира).
 func _parent_for(object: Dictionary) -> Node:
 	var parent := str(object.get("parent", ""))
-	var pnode: Node3D = _nodes.get(parent)
+	if parent.begins_with(SceneChanges.PAGE_PREFIX):
+		var t = _targets.get(parent.substr(SceneChanges.PAGE_PREFIX.length()))
+		return t if t is Node else self
+	var pnode: Node = _nodes.get(parent)
 	return pnode if pnode != null else self
 
 
-func _reparent(node: Node3D, object: Dictionary) -> void:
+func _reparent(node: Node, object: Dictionary) -> void:
 	var new_parent := _parent_for(object)
 	if node.get_parent() == new_parent:
 		return
@@ -131,16 +163,23 @@ func _reparent(node: Node3D, object: Dictionary) -> void:
 
 
 ## Применяет данные объекта к узлу: трансформ (позиция из props) — забота вьюхи; визуал по kind —
-## забота узла (setup_object). Зовётся и при создании, и при update.
-func _apply(node: Node3D, object: Dictionary) -> void:
+## забота узла (setup_object). Зовётся и при создании, и при update. Для vrweb-node вместо этого
+## накатываются сырые атрибуты (как при сборке страницы). Ключи, УБРАННЫЕ из attrs при update,
+## остаются с прежними значениями — принятое упрощение (см. docs/space-console.md).
+func _apply(node: Node, object: Dictionary) -> void:
 	var props: Dictionary = object.get("props", {})
-	if props.has("position"):
+	if str(object.get("kind", "")) == SceneHtml.KIND_NODE:
+		var attrs: Dictionary = props.get("attrs", {})
+		for k in attrs:
+			node.set(str(k), VrwebBuilder.resolve_attr_value(str(attrs[k]), _resources))
+		return
+	if props.has("position") and node is Node3D:
 		node.position = _to_vec3(props["position"])
 	if node.has_method("setup_object"):
 		node.setup_object(object)
 
 
-func _make_node(object: Dictionary) -> Node3D:
+func _make_node(object: Dictionary) -> Node:
 	match str(object.get("kind", "")):
 		"bubble":
 			var bubble := BUBBLE.instantiate()
@@ -151,7 +190,70 @@ func _make_node(object: Dictionary) -> Node3D:
 			# Штрих карандаша: один меш-труба по точкам (см. StrokeActor). Не кликабелен —
 			# колбэк активации не нужен; данные ставит вьюха через setup_object в _apply.
 			return STROKE.instantiate()
+		SceneHtml.KIND_NODE:
+			# Добавленный узел vrweb-слоя: строится тем же путём, что узлы страницы
+			# (тот же принятый ClassDB-риск, см. docs/vrweb-tags.md). Дети приходят
+			# отдельными объектами и монтируются обычной вложенностью.
+			var props: Dictionary = object.get("props", {})
+			return VrwebBuilder.build_element(str(props.get("tag", "")),
+				props.get("attrs", {}), _resources, _base_url)
 	return null
+
+
+# --- Патчи узлов страницы (kind="vrweb-patch") ---
+
+## Накатывает патч на живой узел страницы: props.set — оверрайды свойств (оригиналы
+## запоминаются для отката), props.removed — скрыть узел (вместе с поддеревом). Update
+## replace-семантикой: оверрайды, ушедшие из set, откатываются к оригиналу.
+func _apply_patch(id: String, object: Dictionary) -> void:
+	var target = _targets.get(id.trim_prefix(SceneHtml.PATCH_PREFIX))
+	if target == null or not is_instance_valid(target):
+		return   # узла нет у этой страницы (или патч приехал раньше мира) — флаш-онли
+	var props: Dictionary = object.get("props", {})
+	var set_map: Dictionary = props.get("set", {})
+	var rec: Dictionary = _patched.get(id, {"target": target, "originals": {}})
+	var originals: Dictionary = rec["originals"]
+	# Откатываем оверрайды, которых больше нет в set (replace-семантика патча).
+	for prop in originals.keys():
+		if prop != "__visible" and not set_map.has(prop):
+			target.set(prop, originals[prop])
+			originals.erase(prop)
+	for k in set_map:
+		var prop := str(k)
+		if not originals.has(prop):
+			originals[prop] = target.get(prop)
+		target.set(prop, VrwebBuilder.resolve_attr_value(str(set_map[k]), _resources))
+	# removed: скрываем и выключаем обработку (вместе с физикой поддерева); откат — восстановление.
+	var removed: bool = props.get("removed", false)
+	if target is Node:
+		var node := target as Node
+		if removed and not originals.has("__visible"):
+			originals["__visible"] = node.get("visible")
+			node.set("visible", false)
+			node.process_mode = Node.PROCESS_MODE_DISABLED
+		elif not removed and originals.has("__visible"):
+			node.set("visible", originals["__visible"])
+			node.process_mode = Node.PROCESS_MODE_INHERIT
+			originals.erase("__visible")
+	rec["originals"] = originals
+	_patched[id] = rec
+
+
+## Снятие патча: все тронутые свойства возвращаются к оригиналам страницы.
+func _revert_patch(id: String) -> void:
+	var rec: Dictionary = _patched.get(id, {})
+	_patched.erase(id)
+	var target = rec.get("target")
+	if target == null or not is_instance_valid(target):
+		return
+	var originals: Dictionary = rec.get("originals", {})
+	for prop in originals:
+		if prop == "__visible":
+			target.set("visible", originals[prop])
+			if target is Node:
+				(target as Node).process_mode = Node.PROCESS_MODE_INHERIT
+		else:
+			target.set(prop, originals[prop])
 
 
 ## [x,y,z] -> Vector3 (объекты хранят позиции как массивы ради JSON-сериализуемости).

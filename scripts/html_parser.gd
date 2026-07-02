@@ -7,17 +7,9 @@ extends RefCounted
 ## комментарии, doctype и raw-text элементы (script/style). Достаточно для Phase 1,
 ## где HTML приходит уже готовым (без исполнения JS).
 
-## Элементы без закрывающего тега.
-const VOID_TAGS := {
-	"area": true, "base": true, "br": true, "col": true, "embed": true,
-	"hr": true, "img": true, "input": true, "link": true, "meta": true,
-	"param": true, "source": true, "track": true, "wbr": true,
-}
-
-## Элементы, чьё содержимое — сырой текст (не парсится как разметка).
-const RAW_TEXT_TAGS := {
-	"script": true, "style": true, "textarea": true, "title": true,
-}
+## Таблицы void/raw-text тегов живут в HtmlNode (единый источник для парсера и to_html).
+const VOID_TAGS := HtmlNode.VOID_TAGS
+const RAW_TEXT_TAGS := HtmlNode.RAW_TEXT_TAGS
 
 
 static func parse(html: String) -> HtmlNode:

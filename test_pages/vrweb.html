@@ -21,54 +21,56 @@
   <!-- Сцена VRWeb: пол + парящий ящик с коллизией. Обычный браузер игнорирует <vrweb>. -->
   <vrweb mode="combine">
     <!-- Пол -->
-    <MeshInstance3D mesh="SubResource:::FloorMesh"
-                    transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.05, 0)">
-      <StaticBody3D>
-        <CollisionShape3D shape="SubResource:::FloorShape"/>
-      </StaticBody3D>
-    </MeshInstance3D>
+    <Node3D name="Container" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0, 0)">
+      <MeshInstance3D mesh="SubResource:::FloorMesh"
+                      transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)">
+        <StaticBody3D>
+          <CollisionShape3D shape="SubResource:::FloorShape"/>
+        </StaticBody3D>
+      </MeshInstance3D>
 
-    <!-- Парящий ящик -->
-    <MeshInstance3D mesh="SubResource:::BoxMesh"
-                    transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.5, 0)">
-      <StaticBody3D>
-        <CollisionShape3D shape="SubResource:::BoxShape"/>
-      </StaticBody3D>
-    </MeshInstance3D>
+      <!-- Парящий ящик -->
+      <MeshInstance3D mesh="SubResource:::BoxMesh"
+                      transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)">
+        <StaticBody3D>
+          <CollisionShape3D shape="SubResource:::BoxShape"/>
+        </StaticBody3D>
+      </MeshInstance3D>
 
-    <!-- Точечный свет над ящиком -->
-    <OmniLight3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 4, 0)"
-                 omni_range="12" light_energy="3"/>
+      <!-- Точечный свет над ящиком -->
+      <OmniLight3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)"
+                  omni_range="12" light_energy="3"/>
 
-    <!-- Картинка ИЗ ИНТЕРНЕТА: текстура качается асинхронно после сборки и инжектируется -->
-    <Sprite3D texture="ExtResource:::WebIcon" pixel_size="0.005"
-              transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2.5, -3)"/>
+      <!-- Картинка ИЗ ИНТЕРНЕТА: текстура качается асинхронно после сборки и инжектируется -->
+      <Sprite3D texture="ExtResource:::WebIcon" pixel_size="0.005"
+                transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, -3)"/>
 
-    <!-- Меш ИЗ ИНТЕРНЕТА (GLB): извлекаем первый Mesh и кладём в MeshInstance3D -->
-    <MeshInstance3D mesh="ExtResource:::DuckMesh"
-                    transform="Transform3D(0.05, 0, 0, 0, 0.05, 0, 0, 0, 0.05, -7, 0.1, 2)"/>
+      <!-- Меш ИЗ ИНТЕРНЕТА (GLB): извлекаем первый Mesh и кладём в MeshInstance3D -->
+      <MeshInstance3D mesh="ExtResource:::DuckMesh"
+                      transform="Transform3D(0.05, 0, 0, 0, 0.05, 0, 0, 0, 0.05, 3, 0.1, 2)"/>
 
-    <!-- Целая GLTF-сцена ИЗ ИНТЕРНЕТА вставляется ребёнком этого узла -->
-    <ExtScene src="ExtResource:::DuckScene"
-              transform="Transform3D(0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, -13, 0.1, 2)"/>
+      <!-- Целая GLTF-сцена ИЗ ИНТЕРНЕТА вставляется ребёнком этого узла -->
+      <ExtScene src="ExtResource:::DuckScene"
+                transform="Transform3D(0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, -3, 0.1, 2)"/>
 
-    <!-- Звук ИЗ ИНТЕРНЕТА: autoplay стартует, как только поток скачается -->
-    <AudioStreamPlayer3D stream="ExtResource:::Ambient" autoplay="true"
-                         transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.5, 2)"/>
+      <!-- Звук ИЗ ИНТЕРНЕТА: autoplay стартует, как только поток скачается -->
+      <AudioStreamPlayer3D stream="ExtResource:::Ambient" autoplay="true"
+                          transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 2)"/>
 
-    <!-- Зеркало (как в VRChat): планарное отражение в реальном времени. size — метры
-         (ширина:высота). Плоскость в локальной XY, отражающая сторона по +Z — здесь
-         стоит у дальней стены и смотрит на зону спавна.
-         srgb_decode (0..1) — калибровка яркости отражения под рендерер (0 светлее, 1 темнее);
-         подберите на глаз, перезагружая страницу. По умолчанию 0.5. -->
-    <VRWebMirror size="1:2" srgb_decode="0.5"
-                 transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1.05, -4.8)"/>
+      <!-- Зеркало (как в VRChat): планарное отражение в реальном времени. size — метры
+          (ширина:высота). Плоскость в локальной XY, отражающая сторона по +Z — здесь
+          стоит у дальней стены и смотрит на зону спавна.
+          srgb_decode (0..1) — калибровка яркости отражения под рендерер (0 светлее, 1 темнее);
+          подберите на глаз, перезагружая страницу. По умолчанию 0.5. -->
+      <VRWebMirror size="1:2" srgb_decode="0.5"
+                  transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, -4.8)"/>
 
-    <!-- Правила спавна: случайная точка из списка, игрок смотрит вдоль -Z трансформа -->
-    <VRWebSpawner mode="random">
-      <SpawnerPoint transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 1.6, 3)"/>
-      <SpawnerPoint transform="Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -13, 1.6, -3)"/>
-    </VRWebSpawner>
+      <!-- Правила спавна: случайная точка из списка, игрок смотрит вдоль -Z трансформа -->
+      <VRWebSpawner mode="random">
+        <SpawnerPoint transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1.6, 3)"/>
+        <SpawnerPoint transform="Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -3, 1.6, -3)"/>
+      </VRWebSpawner>
+    </Node3D>
 
     <Resource id="FloorMesh" type="BoxMesh" size="Vector3(10, 0.1, 10)"/>
     <Resource id="FloorShape" type="BoxShape3D" size="Vector3(10, 0.1, 10)"/>

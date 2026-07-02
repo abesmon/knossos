@@ -8,6 +8,7 @@ const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 const SETTINGS_SCENE := preload("res://scenes/settings.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
+const SPACE_CONSOLE_SCRIPT := preload("res://scripts/space_console.gd")
 
 ## TTL пузыря — временного портала «ушёл сюда» (см. docs/ephemeral-changes.md).
 const BUBBLE_TTL := 30.0
@@ -65,6 +66,14 @@ var _base_url: String = ""
 # «Паспорт» текущей страницы из <head> (title/description/thumbnail/metas) — заполняется в
 # _on_fetched и отдаётся вкладке «Мир» настроек (см. _extract_page_meta).
 var _page_meta: Dictionary = {}
+# ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
+# консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
+var _current_doc: HtmlNode = null
+# Индекс узлов vrweb-слоя страницы (детерминированные id, см. SceneHtml.build_page_index):
+# по нему консоль сливает страницу с эфемерным оверлеем, а вьюха адресует живые узлы.
+var _vrweb_index: Dictionary = {"found": false, "attrs": {}, "top": [], "nodes": {}}
+# Консоль пространства (клавиша `~`): HTML-репрезентация + редактирование эфемерного слоя.
+var _console: SpaceConsole
 # Браузерная история: список записей {url, pose} и индекс текущей. Переход назад/вперёд
 # двигает _history_index; новая навигация обрезает «вперёд» и добавляет запись.
 var _history: Array[Dictionary] = []
@@ -157,6 +166,49 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_voice_indicators(delta)
+
+
+## `~` (клавиша слева от 1) — консоль пространства, как DevTools в браузере. Перехватываем в
+## _input (раньше GUI), иначе бэктик напечатался бы в редактор консоли при закрытии. Нюанс
+## раскладок: на русской эта физическая клавиша печатает «ё» — если фокус в текстовом поле и
+## клавиша даёт НЕ бэктик/тильду, пропускаем событие в поле (набор «ё» в чате/консоли), а
+## бэктик переключает консоль из любого места.
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if event.physical_keycode != KEY_QUOTELEFT or event.is_command_or_control_pressed():
+		return
+	var focus := get_viewport().gui_get_focus_owner()
+	var typing := focus is LineEdit or focus is TextEdit
+	var is_backtick: bool = event.unicode == 96 or event.unicode == 126 or event.unicode == 0
+	if typing and not is_backtick:
+		return
+	_toggle_console()
+	get_viewport().set_input_as_handled()
+
+
+func _toggle_console() -> void:
+	if _console == null:
+		return
+	if _console.visible:
+		_console.close()
+	else:
+		# Консоль — UI-режим: отпускаем мышь (обратно в браузинг вернёт клик по 3D,
+		# который заодно закроет консоль — см. _on_mouse_capture_changed).
+		_player.capture_mouse(false)
+		_console.open()
+	_sync_chat_with_console()
+
+
+## Пока консоль открыта — прячем чат (он перекрывался бы её нижней половиной и отвлекал);
+## при закрытии возвращаем видимость по обычным правилам (онлайн-состояние).
+func _sync_chat_with_console() -> void:
+	if _chat_root == null:
+		return
+	if _console != null and _console.visible:
+		_chat_root.visible = false
+	else:
+		_update_chat_visibility()
 
 
 ## Индикаторы голоса внизу экрана (см. поля выше). Показываем только онлайн (микрофон работает
@@ -263,6 +315,11 @@ func _set_loading(loading: bool) -> void:
 func _on_mouse_capture_changed(captured: bool) -> void:
 	_set_ui_focusable(not captured)
 	_mouse_captured = captured
+	# Возврат в браузинг (клик по 3D) закрывает консоль: печатать в ней всё равно нельзя,
+	# а нижняя половина экрана мешала бы обзору. Правки при этом не теряются (см. open).
+	if captured and _console != null and _console.visible:
+		_console.close()
+		_sync_chat_with_console()
 	# В режиме перемещения поле ввода не нужно (печатать всё равно нельзя — оно открывается
 	# по Enter через _on_chat_requested), показываем только лог; в UI-режиме — лог + поле.
 	if _chat_input != null:
@@ -370,6 +427,9 @@ func _on_fetched(html: String, final_url: String) -> void:
 
 	var t0 := Time.get_ticks_msec()
 	var doc := HtmlParser.parse(html)
+	# Дерево документа храним: консоль пространства сериализует ЕГО (HTML не восстановим
+	# из построенной геометрии). Один источник и для топологии, и для репрезентации.
+	_current_doc = doc
 	# <base href> (стандарт HTML) переопределяет базу для относительных ссылок/ресурсов;
 	# без него база = адрес страницы. seed/история/комната по-прежнему по final_url.
 	var base_url := _resolve_base_url(doc, final_url)
@@ -420,6 +480,9 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
 	var vrweb := VrwebBuilder.build(doc, base_url)
+	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
+	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
+	_vrweb_index = SceneHtml.build_page_index(doc)
 	# debug=true: топология записывает провенанс (id -> исходный HTML), а WorldGenerator
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
@@ -433,6 +496,10 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 
 	var room_count: int = space.get("rooms", {}).size()
 	_set_status("%s — %d пространств, %d мс" % [final_url, room_count, dt])
+
+	# Новая страница — старый документ консоли (и правки к нему) больше не имеют смысла.
+	if _console != null:
+		_console.on_navigated()
 
 	# Даём reliable-пакету «пузыря» (роняем его в _on_fetched, ещё в покидаемой комнате) уйти до
 	# сноса меша: join_room новой комнаты рвёт p2p-меш покидаемой синхронно, а put_packet во WebRTC
@@ -569,7 +636,21 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	var ephemeral_view := EPHEMERAL_VIEW_SCRIPT.new()
 	ephemeral_view.name = "EphemeralView"
 	_world.add_child(ephemeral_view)
-	ephemeral_view.setup(_activate_transition)
+	# Реестр «id узла страницы -> живой объект» для эфемерного оверлея (vrweb-patch/vrweb-node):
+	# id — из индекса _vrweb_index, объект — из провенанса билдера (элемент -> узел). Суб-ресурсы
+	# страницы адресуются своим id напрямую (патч BoxMesh.size меняет все его меши живьём).
+	var vrweb_targets := {}
+	var node_map: Dictionary = vrweb.get("nodes", {})
+	for nid in _vrweb_index.get("nodes", {}):
+		var built = node_map.get(_vrweb_index["nodes"][nid]["elem"])
+		if built != null:
+			vrweb_targets[nid] = built
+	var page_resources: Dictionary = vrweb.get("resources", {})
+	for rid in page_resources:
+		if not vrweb_targets.has(rid):
+			vrweb_targets[rid] = page_resources[rid]
+	ephemeral_view.setup(_activate_transition,
+		{"targets": vrweb_targets, "resources": page_resources, "base_url": base_url})
 
 	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
 	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).
@@ -1016,6 +1097,13 @@ func _setup_ui_extras() -> void:
 
 	_build_debug_overlay(ui)
 
+	# Консоль пространства (`~`, см. docs/space-console.md): read-only часть — хранимое дерево
+	# страницы БЕЗ блока <vrweb>; редактируемая — единый слитый слой сцены, который консоль
+	# собирает сама из индекса vrweb и эфемерного состояния NetworkManager.
+	_console = SPACE_CONSOLE_SCRIPT.new()
+	_console.setup(_page_html_sans_vrweb, func() -> Dictionary: return _vrweb_index)
+	ui.add_child(_console)
+
 
 ## Оверлей инспектора провенанса (F3): панель в правом верхнем углу с типом топологии и
 ## исходным HTML узла под прицелом. Текст приходит от Player.debug_probed.
@@ -1085,3 +1173,33 @@ func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
 	print("[VRWeb] ", text)
+
+
+## Сериализация хранимого документа страницы БЕЗ блока <vrweb> — read-only часть консоли
+## (сам vrweb показывается там слитым с эфемерным оверлеем). Блок на время сериализации
+## временно вынимается из дерева и возвращается на место (синхронно, дерево общее).
+func _page_html_sans_vrweb() -> String:
+	if _current_doc == null:
+		return ""
+	var block := _current_doc.find_descendant(VrwebBuilder.TAG)
+	if block == null:
+		return _current_doc.to_html()
+	var parent := _find_parent(_current_doc, block)
+	if parent == null:
+		return _current_doc.to_html()
+	var idx := parent.children.find(block)
+	parent.children.remove_at(idx)
+	var html := _current_doc.to_html()
+	parent.children.insert(idx, block)
+	return html
+
+
+## Родитель узла в дереве HtmlNode (или null).
+func _find_parent(node: HtmlNode, target: HtmlNode) -> HtmlNode:
+	for c in node.children:
+		if c == target:
+			return node
+		var found := _find_parent(c, target)
+		if found != null:
+			return found
+	return null

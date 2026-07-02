@@ -79,25 +79,54 @@ var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
 var _ext_defs: Dictionary = {}      # id -> { type: String, url: String } (внешние ресурсы)
 var _ext_targets: Array = []        # [{ obj: Object, prop: String, id: String }] — куда вставить ext
+var _node_map: Dictionary = {}      # HtmlNode (элемент) -> Node — провенанс для эфемерного оверлея
 
 
 ## Ищет блок <vrweb> в документе и строит из него сцену.
 ## base_url — адрес страницы, относительно которого резолвятся пути внешних ресурсов.
-## Возвращает { found, mode, root, spawn, ext }:
+## Возвращает { found, mode, root, spawn, ext, nodes, resources }:
 ##   root — Node3D-холдер с построенными узлами (ещё не в дереве) или null, если узлов нет;
 ##   spawn — { point, look_at } из <VRWebSpawner> или {};
-##   ext — { defs: {id->{type,url}}, targets: [{obj,prop,id}] } для асинхронной подгрузки.
+##   ext — { defs: {id->{type,url}}, targets: [{obj,prop,id}] } для асинхронной подгрузки;
+##   nodes — { HtmlNode-элемент -> Node }: провенанс «элемент страницы -> построенный узел».
+##     По нему эфемерный оверлей (vrweb-patch/vrweb-node, см. docs/space-console.md)
+##     адресует РЕАЛЬНЫЕ узлы сцены;
+##   resources — { id -> Resource }: суб-ресурсы страницы (для резолва ссылок из оверлея).
 static func build(doc: HtmlNode, base_url: String = "") -> Dictionary:
 	var b := VrwebBuilder.new()
 	b._base_url = base_url
 	return b._build(doc)
 
 
+## Строит ОДИН узел сцены из плоских данных эфемерного объекта kind="vrweb-node":
+## tag — класс Godot (или кастомный vrweb-тег), attrs — сырые строки-литералы (как в HTML),
+## resources — суб-ресурсы страницы (ссылки "SubResource:::<id>" резолвятся против них).
+## Дети не строятся — они приходят отдельными объектами и монтируются вьюхой.
+static func build_element(tag: String, attrs: Dictionary, resources: Dictionary, base_url: String = "") -> Node:
+	var b := VrwebBuilder.new()
+	b._base_url = base_url
+	b._resources = resources
+	var elem := HtmlNode.new(tag.to_lower())
+	elem.raw_tag = tag
+	for k in attrs:
+		elem.attributes[str(k)] = str(attrs[k])
+	return b._build_node(elem)
+
+
+## Резолв сырого строкового значения атрибута против суб-ресурсов страницы — для применения
+## эфемерных патчей (vrweb-patch) к живым узлам. Семантика — как у _resolve_value.
+static func resolve_attr_value(raw: String, resources: Dictionary) -> Variant:
+	var b := VrwebBuilder.new()
+	b._resources = resources
+	return b._resolve_value(raw)
+
+
 func _build(doc: HtmlNode) -> Dictionary:
 	var block := doc.find_descendant(TAG)
 	var empty_ext := {"defs": {}, "targets": []}
 	if block == null:
-		return {"found": false, "mode": MODE_COMBINE, "root": null, "spawn": {}, "ext": empty_ext}
+		return {"found": false, "mode": MODE_COMBINE, "root": null, "spawn": {}, "ext": empty_ext,
+			"nodes": {}, "resources": {}}
 
 	var mode := block.get_attr("mode", MODE_COMBINE).to_lower()
 	if mode != MODE_EXCLUSIVE:
@@ -119,8 +148,10 @@ func _build(doc: HtmlNode) -> Dictionary:
 	var ext := {"defs": _ext_defs, "targets": _ext_targets}
 	if root.get_child_count() == 0:
 		root.free()
-		return {"found": true, "mode": mode, "root": null, "spawn": spawn, "ext": ext}
-	return {"found": true, "mode": mode, "root": root, "spawn": spawn, "ext": ext}
+		return {"found": true, "mode": mode, "root": null, "spawn": spawn, "ext": ext,
+			"nodes": {}, "resources": _resources}
+	return {"found": true, "mode": mode, "root": root, "spawn": spawn, "ext": ext,
+		"nodes": _node_map, "resources": _resources}
 
 
 ## Структурные/мета-теги, которые не инстанцируются как узлы сцены.
@@ -183,8 +214,16 @@ func _collect_by_tag(node: HtmlNode, raw_tag: String, out: Array[HtmlNode]) -> v
 
 # --- Узлы сцены ---
 
-## Рекурсивно строит узел Godot из vrweb-элемента и его детей.
+## Рекурсивно строит узел Godot из vrweb-элемента и его детей, записывая провенанс
+## элемент -> узел (для адресации из эфемерного оверлея).
 func _build_node(elem: HtmlNode) -> Node:
+	var node := _instantiate_node(elem)
+	if node != null:
+		_node_map[elem] = node
+	return node
+
+
+func _instantiate_node(elem: HtmlNode) -> Node:
 	if elem.raw_tag == EXT_SCENE_TAG:
 		return _build_ext_scene(elem)
 	if elem.raw_tag == MIRROR_TAG:
