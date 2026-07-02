@@ -1,12 +1,29 @@
-[gd_scene load_steps=4 format=3 uid="uid://bl40q3bqfvck6"]
+[gd_scene format=3 uid="uid://bl40q3bqfvck6"]
 
 [ext_resource type="Texture2D" uid="uid://dcld7xcrm2acp" path="res://resources/icon-arrow-bck.png" id="1_8dd7p"]
 [ext_resource type="Texture2D" uid="uid://clfbp13kvj73e" path="res://resources/icon-arrow-fwd.png" id="2_h18o7"]
+[ext_resource type="Texture2D" uid="uid://dverl4rmt4x2v" path="res://resources/icons/cancel.png" id="3_s7f0f"]
+[ext_resource type="Texture2D" uid="uid://be6yndlg5l4na" path="res://resources/icons/refresh.png" id="4_5ts5m"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_s7f0f"]
 bg_color = Color(1, 1, 1, 0.392157)
 
-[node name="PanelContainer" type="PanelContainer"]
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_np14x"]
+content_margin_left = 16.0
+content_margin_right = 16.0
+bg_color = Color(0.2901961, 0.2901961, 0.2901961, 1)
+corner_radius_top_left = 20
+corner_radius_top_right = 20
+corner_radius_bottom_right = 20
+corner_radius_bottom_left = 20
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_r4gia"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_lcdvh"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_04gl8"]
+
+[node name="PanelContainer" type="PanelContainer" unique_id=1483900525]
 anchors_preset = 10
 anchor_right = 1.0
 offset_bottom = 47.0
@@ -14,39 +31,58 @@ grow_horizontal = 2
 size_flags_horizontal = 3
 theme_override_styles/panel = SubResource("StyleBoxFlat_s7f0f")
 
-[node name="MarginContainer" type="MarginContainer" parent="."]
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=953218812]
 layout_mode = 2
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 8
 
-[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer" unique_id=1017643667]
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="back_btn" type="Button" parent="MarginContainer/HBoxContainer"]
+[node name="back_btn" type="Button" parent="MarginContainer/HBoxContainer" unique_id=382834919]
 layout_mode = 2
 disabled = true
 icon = ExtResource("1_8dd7p")
 flat = true
 
-[node name="fwd_btn" type="Button" parent="MarginContainer/HBoxContainer"]
+[node name="fwd_btn" type="Button" parent="MarginContainer/HBoxContainer" unique_id=1067559150]
 layout_mode = 2
 disabled = true
 icon = ExtResource("2_h18o7")
 flat = true
 
-[node name="address bar" type="LineEdit" parent="MarginContainer/HBoxContainer"]
+[node name="PanelContainer" type="PanelContainer" parent="MarginContainer/HBoxContainer" unique_id=50694198]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_np14x")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/PanelContainer" unique_id=1273294003]
+layout_mode = 2
+
+[node name="address bar" type="LineEdit" parent="MarginContainer/HBoxContainer/PanelContainer/HBoxContainer" unique_id=786339392]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/normal = SubResource("StyleBoxEmpty_r4gia")
+theme_override_styles/read_only = SubResource("StyleBoxEmpty_lcdvh")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_04gl8")
 placeholder_text = "Поиск или адрес сайта"
 
-[node name="go" type="Button" parent="MarginContainer/HBoxContainer"]
+[node name="cancel" type="Button" parent="MarginContainer/HBoxContainer/PanelContainer/HBoxContainer" unique_id=633594879]
 layout_mode = 2
-text = "go!"
+icon = ExtResource("3_s7f0f")
+flat = true
 
-[node name="settings" type="Button" parent="MarginContainer/HBoxContainer"]
+[node name="refresh" type="Button" parent="MarginContainer/HBoxContainer/PanelContainer/HBoxContainer" unique_id=1411014636]
+layout_mode = 2
+icon = ExtResource("4_5ts5m")
+flat = true
+
+[node name="settings" type="Button" parent="MarginContainer/HBoxContainer" unique_id=2147345939]
+custom_minimum_size = Vector2(38, 0)
 layout_mode = 2
 tooltip_text = "Настройки"
+theme_override_font_sizes/font_size = 23
 text = "⚙"

@@ -51,6 +51,13 @@ func fetch(url: String, base_url: String = "") -> void:
 		failed.emit("Не удалось начать запрос (код %d)" % err, resolved)
 
 
+## Прерывает текущий сетевой запрос (если он идёт). Локальный фетч синхронен — отменять нечего.
+## После отмены request_completed не эмитится, так что fetched/failed не придут.
+func cancel() -> void:
+	if _http != null:
+		_http.cancel_request()
+
+
 ## Читает локальный файл синхронно через FileAccess (без сети) и эмитит fetched/failed.
 ## final_url — та же vrweb-схема, чтобы относительные ссылки страницы резолвились дальше.
 func _fetch_local(url: String) -> void:

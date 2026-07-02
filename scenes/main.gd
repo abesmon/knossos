@@ -13,8 +13,11 @@ const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
 const BUBBLE_TTL := 30.0
 
 @onready var _world: Node3D = $world
-@onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/address bar"
-@onready var _go: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/go"
+@onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/address bar"
+# cancel/refresh — одно место в навбаре: во время загрузки виден cancel (прервать),
+# в покое — refresh (перезагрузить). Переключает _set_loading.
+@onready var _cancel: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/cancel"
+@onready var _refresh: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/refresh"
 @onready var _back_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/back_btn"
 @onready var _fwd_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/fwd_btn"
 @onready var _settings_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/settings"
@@ -116,10 +119,12 @@ func _ready() -> void:
 	_player.settings_requested.connect(_open_settings)
 	_world.add_child(_player)
 
-	_go.pressed.connect(_on_go)
+	_cancel.pressed.connect(_on_cancel)
+	_refresh.pressed.connect(_on_refresh)
 	_back_btn.pressed.connect(_on_back_pressed)
 	_fwd_btn.pressed.connect(_on_fwd_pressed)
 	_update_nav_buttons()
+	_set_loading(false)
 	_address.text_submitted.connect(func(_t): _on_go())
 	# При клике в адресную строку отпускаем мышь, чтобы можно было печатать.
 	_address.focus_entered.connect(func(): _player.capture_mouse(false))
@@ -211,6 +216,35 @@ func _on_go() -> void:
 	_player.capture_mouse(true)
 
 
+## Cancel в навбаре: прерывает текущую загрузку. Останавливаем HTTP-запрос, инвалидируем
+## возможный отложенный CSS-колбэк (bump _nav_id, см. _on_fetched) и снимаем флаг загрузки.
+func _on_cancel() -> void:
+	if not _loading:
+		return
+	_fetcher.cancel()
+	_nav_id += 1
+	_set_loading(false)
+	_set_status("Загрузка отменена")
+
+
+## Refresh в навбаре: перезагружает текущую страницу, сохраняя позу игрока (как reload
+## в браузере не телепортирует). Без истории — это тот же URL, а не новый переход.
+func _on_refresh() -> void:
+	if _current_url == "" or _loading:
+		return
+	_pending_restore_pose = _player.get_pose()
+	_navigate(_current_url, "", false)
+
+
+## Переключает индикацию загрузки в навбаре: во время загрузки виден cancel, в покое — refresh.
+func _set_loading(loading: bool) -> void:
+	_loading = loading
+	if _cancel != null:
+		_cancel.visible = loading
+	if _refresh != null:
+		_refresh.visible = not loading
+
+
 ## При входе в браузинг мира (мышь захвачена) запрещаем фокус UI, чтобы клавиатура их не
 ## достала; при выходе — снова разрешаем кликать и печатать в навбаре/чате.
 func _on_mouse_capture_changed(captured: bool) -> void:
@@ -240,7 +274,7 @@ func _on_chat_requested() -> void:
 ## он всё равно сработает (а при захваченной мыши кликнуть по ним и так нельзя).
 func _set_ui_focusable(focusable: bool) -> void:
 	var mode := Control.FOCUS_ALL if focusable else Control.FOCUS_NONE
-	for c: Control in [_address, _go, _back_btn, _fwd_btn, _settings_btn, _chat_input]:
+	for c: Control in [_address, _cancel, _refresh, _back_btn, _fwd_btn, _settings_btn, _chat_input]:
 		if c != null:
 			c.focus_mode = mode
 	# Логу чата хватает фокуса по клику (выделение + Ctrl/Cmd+C); в режиме перемещения
@@ -255,7 +289,7 @@ func _navigate(url: String, base: String, push_history: bool) -> void:
 	# сносом меша (в _on_fetched) проходит асинхронный фетч — reliable-пакет успеет уйти. См.
 	# docs/ephemeral-changes.md.
 	_drop_leave_bubble(url, base)
-	_loading = true
+	_set_loading(true)
 	_set_status("Загрузка %s …" % url)
 	if push_history:
 		# Уходим со страницы по новой ссылке: запоминаем позу в текущей записи, обрезаем
@@ -340,7 +374,7 @@ func _on_fetched(html: String, final_url: String) -> void:
 ## Продолжение сборки страницы после (возможной) загрузки внешних CSS.
 func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		final_url: String, base_url: String, t0: int) -> void:
-	_loading = false
+	_set_loading(false)
 	_set_status("Сборка пространства…")
 	# Тексты таблиц в порядке документа (<style> и <link> вперемешку) = порядок каскада.
 	var css_texts: Array = []
@@ -381,7 +415,7 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 
 
 func _on_failed(message: String, url: String) -> void:
-	_loading = false
+	_set_loading(false)
 	_set_status("Ошибка: %s (%s)" % [message, url])
 
 
