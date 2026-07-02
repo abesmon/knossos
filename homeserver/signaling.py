@@ -23,6 +23,10 @@ class SignalPeer:
         self._send = send
         self.room: str | None = None
         self.nick: str = ""
+        # Порядковый номер ВХОДА В КОМНАТУ (штампуется при каждом join). Старшинство
+        # авторитета считается по нему, а не по id подключения: id выдаётся при коннекте
+        # к серверу, и давно запущенный клиент имел бы преимущество в любой комнате.
+        self.seq: int = 0
 
     async def send(self, msg: dict) -> None:
         # Сокет мог закрыться между нашим event'ом и отправкой — пир умрёт сам,
@@ -37,6 +41,8 @@ class SignalingHub:
     def __init__(self):
         self._rooms: dict[str, dict[int, SignalPeer]] = {}
         self._ids = count(1)
+        # Монотонный счётчик входов в комнаты (общий на сервер): меньший seq = вошёл раньше.
+        self._join_seqs = count(1)
 
     async def connect(self, send: Callable[[dict], Awaitable[None]]) -> SignalPeer:
         peer = SignalPeer(next(self._ids), send)
@@ -60,18 +66,21 @@ class SignalingHub:
         await self._leave(peer)
         peer.room = room
         peer.nick = nick or f"Guest-{peer.id}"
+        # Свежий seq на КАЖДЫЙ вход: ушёл из комнаты — потерял старшинство.
+        peer.seq = next(self._join_seqs)
         members = self._rooms.setdefault(room, {})
 
-        # Новичку — список тех, кто уже в комнате; старожилам — что появился новичок.
+        # Новичку — его seq и список тех, кто уже в комнате; старожилам — что появился новичок.
         await peer.send({
             "type": "peers",
-            "peers": [{"id": p.id, "nick": p.nick} for p in members.values()],
+            "seq": peer.seq,
+            "peers": [{"id": p.id, "nick": p.nick, "seq": p.seq} for p in members.values()],
         })
         for other in members.values():
-            await other.send({"type": "peer_join", "id": peer.id, "nick": peer.nick})
+            await other.send({"type": "peer_join", "id": peer.id, "nick": peer.nick, "seq": peer.seq})
 
         members[peer.id] = peer
-        log.info("peer %d (%s) joined room %r (%d total)", peer.id, peer.nick, room, len(members))
+        log.info("peer %d (%s, seq=%d) joined room %r (%d total)", peer.id, peer.nick, peer.seq, room, len(members))
 
     async def _leave(self, peer: SignalPeer) -> None:
         if peer.room is None:

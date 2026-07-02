@@ -15,8 +15,8 @@
     {"type": "offer"|"answer"|"candidate", "to": <peer_id>, "data": <any>}
   сервер -> клиент:
     {"type": "welcome", "id": <peer_id>}
-    {"type": "peers", "peers": [{"id": <peer_id>, "nick": <str>}, ...]}  # уже в комнате
-    {"type": "peer_join", "id": <peer_id>, "nick": <str>}
+    {"type": "peers", "seq": <мой join seq>, "peers": [{"id", "nick", "seq"}, ...]}  # уже в комнате
+    {"type": "peer_join", "id": <peer_id>, "nick": <str>, "seq": <join seq>}
     {"type": "peer_leave", "id": <peer_id>}
     {"type": "offer"|"answer"|"candidate", "from": <peer_id>, "data": <any>}
 
@@ -42,6 +42,10 @@ log = logging.getLogger("signaling")
 # room_key -> { peer_id: Peer }
 rooms: dict[str, dict[int, "Peer"]] = {}
 _ids = count(1)
+# Монотонный счётчик ВХОДОВ В КОМНАТЫ (общий на сервер): меньший seq = вошёл раньше.
+# Старшинство авторитета клиенты считают по seq, а не по id подключения — id выдаётся
+# при коннекте, и давно запущенный клиент имел бы преимущество в любой комнате.
+_join_seqs = count(1)
 
 
 class Peer:
@@ -50,6 +54,7 @@ class Peer:
         self.id: int = next(_ids)
         self.room: str | None = None
         self.nick: str = ""
+        self.seq: int = 0  # порядковый номер входа в комнату (см. _join_seqs)
 
     async def send(self, msg: dict) -> None:
         await self.ws.send(json.dumps(msg))
@@ -60,19 +65,22 @@ async def _join(peer: Peer, room: str, nick: str) -> None:
     await _leave(peer)
     peer.room = room
     peer.nick = nick or f"Guest-{peer.id}"
+    # Свежий seq на КАЖДЫЙ вход: ушёл из комнаты — потерял старшинство.
+    peer.seq = next(_join_seqs)
     members = rooms.setdefault(room, {})
 
-    # Новичку — список тех, кто уже в комнате.
+    # Новичку — его seq и список тех, кто уже в комнате.
     await peer.send({
         "type": "peers",
-        "peers": [{"id": p.id, "nick": p.nick} for p in members.values()],
+        "seq": peer.seq,
+        "peers": [{"id": p.id, "nick": p.nick, "seq": p.seq} for p in members.values()],
     })
     # Старожилам — что появился новичок.
     for other in members.values():
-        await other.send({"type": "peer_join", "id": peer.id, "nick": peer.nick})
+        await other.send({"type": "peer_join", "id": peer.id, "nick": peer.nick, "seq": peer.seq})
 
     members[peer.id] = peer
-    log.info("peer %d (%s) joined room %r (%d total)", peer.id, peer.nick, room, len(members))
+    log.info("peer %d (%s, seq=%d) joined room %r (%d total)", peer.id, peer.nick, peer.seq, room, len(members))
 
 
 async def _leave(peer: Peer) -> None:

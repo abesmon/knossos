@@ -138,17 +138,27 @@ def test_signaling_join_relay_leave(client):
         a_id = a.receive_json()["id"]
         b_id = b.receive_json()["id"]
 
+        # join штампует монотонный seq (старшинство авторитета — по порядку входа в КОМНАТУ,
+        # а не по id подключения; см. docs/authority.md).
         a.send_json({"type": "join", "room": "r1", "nick": "A"})
-        assert a.receive_json() == {"type": "peers", "peers": []}
+        a_joined = a.receive_json()
+        a_seq = a_joined["seq"]
+        assert a_joined == {"type": "peers", "seq": a_seq, "peers": []}
+        assert a_seq > 0
 
         b.send_json({"type": "join", "room": "r1", "nick": "B"})
-        assert b.receive_json()["peers"] == [{"id": a_id, "nick": "A"}]
-        assert a.receive_json() == {"type": "peer_join", "id": b_id, "nick": "B"}
+        b_joined = b.receive_json()
+        b_seq = b_joined["seq"]
+        assert b_seq > a_seq  # вошёл позже — старшинство ниже
+        assert b_joined["peers"] == [{"id": a_id, "nick": "A", "seq": a_seq}]
+        assert a.receive_json() == {"type": "peer_join", "id": b_id, "nick": "B", "seq": b_seq}
 
         a.send_json({"type": "offer", "to": b_id, "data": {"sdp": "x"}})
         assert b.receive_json() == {"type": "offer", "from": a_id, "data": {"sdp": "x"}}
 
-        # Смена комнаты = выход из старой.
+        # Смена комнаты = выход из старой; новый вход = НОВЫЙ seq (старшинство не переносится).
         b.send_json({"type": "join", "room": "r2", "nick": "B"})
-        assert b.receive_json() == {"type": "peers", "peers": []}
+        b_rejoined = b.receive_json()
+        assert b_rejoined["peers"] == []
+        assert b_rejoined["seq"] > b_seq
         assert a.receive_json() == {"type": "peer_leave", "id": b_id}
