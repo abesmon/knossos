@@ -50,9 +50,14 @@ var voice_denoise: bool = true
 var output_device: String = "Default"
 ## Громкости шин, линейные [0..1]. Имя шины → множитель. Применяются к AudioServer в apply_audio().
 var bus_volumes := {"Master": 1.0, "World": 1.0, "Voice": 1.0}
-## Дефолт берём из приватного конфига сборки (BuildConfig); пользователь может переопределить
-## его в настройках, тогда значение персистится в user://settings.cfg и читается в load_settings.
+## Адрес сигнального сервера, ЯВНО заданный пользователем в настройках. Пусто — авторежим:
+## берём адрес, анонсированный домашним сервером (HomeServer.announced_signaling_url), а без
+## него — дефолт из приватного конфига сборки. Резолвит effective_signaling_url().
 var signaling_url: String = ""
+## Адрес домашнего сервера (идентичность, см. HomeServer и docs/home-server.md), ЯВНО заданный
+## пользователем. Пусто — дефолт из конфига сборки (BuildConfig.home_server_url); резолвит
+## effective_home_server_url().
+var home_server_url: String = ""
 ## Домашняя страница: адрес, который грузится автоматически при запуске (см. main._ready).
 ## Пусто — без автозагрузки: стартуем на пустом экране с фокусом в адресной строке.
 var home_page: String = ""
@@ -75,9 +80,6 @@ var _face_path := FACE_PATH
 func _ready() -> void:
 	_path = Sandbox.resolve(PATH)
 	_face_path = Sandbox.resolve(FACE_PATH)
-	# Дефолт сигналинга — из приватного конфига сборки; load_settings ниже переопределит его
-	# сохранённым значением, если пользователь менял адрес в настройках.
-	signaling_url = BuildConfig.signaling_url
 	load_settings()
 	if nick.strip_edges() == "":
 		nick = random_nick()
@@ -120,6 +122,24 @@ func apply_audio() -> void:
 		AudioServer.set_bus_mute(idx, v <= 0.0)
 		if v > 0.0:
 			AudioServer.set_bus_volume_db(idx, linear_to_db(v))
+
+
+## Фактический адрес сигналинга: явный пользовательский > анонс домашнего сервера > дефолт
+## сборки. Пусто — онлайн фактически недоступен.
+func effective_signaling_url() -> String:
+	if signaling_url.strip_edges() != "":
+		return signaling_url.strip_edges()
+	if HomeServer.announced_signaling_url != "":
+		return HomeServer.announced_signaling_url
+	return BuildConfig.signaling_url
+
+
+## Фактический адрес домашнего сервера: явный пользовательский > дефолт сборки.
+## Пусто — домашний сервер не настроен (аноним без сертификата).
+func effective_home_server_url() -> String:
+	if home_server_url.strip_edges() != "":
+		return home_server_url.strip_edges()
+	return BuildConfig.home_server_url
 
 
 ## Случайный ник по умолчанию (когда поле ника очищено).
@@ -183,6 +203,12 @@ func load_settings() -> void:
 	for bus_name in AUDIO_BUSES:
 		bus_volumes[bus_name] = clampf(cfg.get_value("audio", "vol_" + bus_name, bus_volumes[bus_name]), 0.0, 1.0)
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
+	# Миграция со старой семантики: раньше в cfg всегда лежал полный адрес (дефолт из
+	# BuildConfig копировался при первом же сохранении). Значение, равное дефолту сборки,
+	# считаем «не переопределял» — авторежим (анонс домашнего сервера сможет его заменить).
+	if signaling_url == BuildConfig.signaling_url:
+		signaling_url = ""
+	home_server_url = cfg.get_value("net", "home_server_url", home_server_url)
 	home_page = cfg.get_value("browser", "home_page", home_page)
 	nick = cfg.get_value("net", "nick", nick)
 	user_id = cfg.get_value("identity", "user_id", user_id)
@@ -204,6 +230,7 @@ func save() -> void:
 	for bus_name in AUDIO_BUSES:
 		cfg.set_value("audio", "vol_" + bus_name, bus_volumes[bus_name])
 	cfg.set_value("net", "signaling_url", signaling_url)
+	cfg.set_value("net", "home_server_url", home_server_url)
 	cfg.set_value("browser", "home_page", home_page)
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("identity", "user_id", user_id)

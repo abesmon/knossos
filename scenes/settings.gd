@@ -68,6 +68,22 @@ const THRESH_MAX := 0.15
 @onready var _world_go_home: Button = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/GoHome
 @onready var _users_list: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/UsersScroll/List
 @onready var _users_empty: Label = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Empty
+# Вкладка «Аккаунт» — домашний сервер и федеративная идентичность (см. docs/home-server.md).
+@onready var _account_root: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings
+@onready var _hs_server: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow/Server
+@onready var _hs_server_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow/Clear
+@onready var _hs_server_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerStatus
+@onready var _hs_account_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AccountStatus
+@onready var _hs_cert_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/CertStatus
+@onready var _hs_login_box: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox
+@onready var _hs_nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/NickRow/Nick
+@onready var _hs_pass: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/PassRow/Pass
+@onready var _hs_login: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons/Login
+@onready var _hs_register: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons/Register
+@onready var _hs_authed_box: HBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox
+@onready var _hs_logout: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox/Logout
+@onready var _hs_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox/Refresh
+@onready var _hs_error: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthError
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
 
@@ -134,9 +150,17 @@ func _ready() -> void:
 	NetworkManager.p2p_peer_connected.connect(_users_dirty.unbind(1))
 	NetworkManager.p2p_peer_disconnected.connect(_users_dirty.unbind(1))
 	NetworkManager.identity_received.connect(_users_dirty.unbind(4))
+	NetworkManager.identity_verified.connect(_users_dirty.unbind(2))
 	NetworkManager.ranks_changed.connect(_users_dirty)
 	NetworkManager.authority_changed.connect(_users_dirty.unbind(2))
 	NetworkManager.connection_changed.connect(_users_dirty.unbind(1))
+	# Вкладка «Аккаунт»: логин/регистрация/логаут на домашнем сервере, смена его адреса.
+	_hs_server_clear.pressed.connect(_hs_server.clear)
+	_hs_login.pressed.connect(_on_hs_auth.bind(false))
+	_hs_register.pressed.connect(_on_hs_auth.bind(true))
+	_hs_logout.pressed.connect(_on_hs_logout)
+	_hs_refresh.pressed.connect(_on_hs_refresh)
+	HomeServer.state_changed.connect(_account_dirty)
 
 
 ## Показать экран, заполнив поля текущими значениями. instance_url/page_meta — текущий инстанс
@@ -149,7 +173,17 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_mode.select(_mode_to_index(Settings.voice_mode))
 	_denoise.button_pressed = Settings.voice_denoise
 	_home.text = Settings.home_page
+	# Поле сигналинга: пусто = авторежим (анонс домашнего сервера / дефолт сборки) —
+	# фактический адрес показываем плейсхолдером.
 	_url.text = Settings.signaling_url
+	_url.placeholder_text = "%s (по умолчанию)" % Settings.effective_signaling_url() \
+		if Settings.effective_signaling_url() != "" else "адрес сигнального сервера"
+	_hs_server.text = Settings.home_server_url
+	if BuildConfig.home_server_url != "":
+		_hs_server.placeholder_text = "%s (по умолчанию)" % BuildConfig.home_server_url
+	_hs_error.text = ""
+	_hs_pass.text = ""
+	_refresh_account()
 	_nick.text = Settings.nick
 	_avatar.text = Settings.avatar_uri
 	_user_id.text = Settings.user_id
@@ -195,11 +229,13 @@ func _on_cache_clear() -> void:
 func _setup_tabs() -> void:
 	_tabs.move_child(_world_root, 1)
 	_tabs.move_child(_users_root, 2)
+	_tabs.move_child(_account_root, 4)  # после «Сети» — обе про серверы
 	var titles := {
 		"GeneralSettings": "Основные",
 		"WorldSettings": "Мир",
 		"UsersSettings": "Пользователи",
 		"NetSettings": "Сеть",
+		"AccountSettings": "Аккаунт",
 		"SoundSettings": "Звук",
 		"MiscSettings": "Прочее",
 	}
@@ -306,6 +342,92 @@ func _on_go_home() -> void:
 	_close()
 
 
+# --- Раздел «Аккаунт» (домашний сервер, см. docs/home-server.md) ---
+
+## Состояние HomeServer изменилось (discovery/логин/сертификат) — перерисовать, пока видимы.
+func _account_dirty() -> void:
+	if visible:
+		_refresh_account()
+
+
+## Заполняет статусы вкладки «Аккаунт» и переключает блоки логин/залогинен.
+func _refresh_account() -> void:
+	var url: String = HomeServer.server_url()
+	if url == "":
+		_hs_server_status.text = "Домашний сервер не задан — вход недоступен."
+	elif HomeServer.busy:
+		_hs_server_status.text = "%s — обращение к серверу…" % url
+	elif HomeServer.discovery_error != "":
+		_hs_server_status.text = "%s — ошибка: %s" % [url, HomeServer.discovery_error]
+	elif not HomeServer.discovery.is_empty():
+		var srv: Dictionary = HomeServer.discovery.get("server", {})
+		var feats: Array = HomeServer.discovery.get("features", [])
+		_hs_server_status.text = "%s (%s) — функции: %s" \
+			% [srv.get("name", srv.get("domain", "?")), srv.get("domain", "?"), ", ".join(feats)]
+	else:
+		_hs_server_status.text = url
+	var logged: bool = HomeServer.is_logged_in()
+	_hs_account_status.text = "Вы вошли как %s" % HomeServer.address if logged \
+		else "Вы не вошли — для других вы аноним с самозаявленным ID."
+	if HomeServer.has_certificate():
+		_hs_cert_status.text = "Сертификат идентичности действует до %s (UTC)." \
+			% Time.get_datetime_string_from_unix_time(HomeServer.certificate_expires_at(), true)
+	else:
+		_hs_cert_status.text = "Сертификата идентичности нет."
+	_hs_login_box.visible = not logged
+	_hs_authed_box.visible = logged
+	var busy: bool = HomeServer.busy
+	_hs_login.disabled = busy or url == ""
+	_hs_register.disabled = busy or url == ""
+	_hs_logout.disabled = busy
+	_hs_refresh.disabled = busy
+
+
+## Если адрес сервера в поле отличается от сохранённого — применяем и персистим сразу
+## (как «Сделать инстанс домашним»): логин должен идти на видимый в поле сервер, а
+## HomeServer сам среагирует на смену (Settings.changed → refresh).
+func _commit_hs_server_field() -> void:
+	var url := _hs_server.text.strip_edges()
+	if url != Settings.home_server_url:
+		Settings.home_server_url = url
+		Settings.save()
+
+
+## «Войти» / «Зарегистрироваться» (register = true). Ошибка — в строку под кнопками.
+func _on_hs_auth(register: bool) -> void:
+	_commit_hs_server_field()
+	var nickname := _hs_nick.text.strip_edges()
+	var password := _hs_pass.text
+	if nickname == "" or password == "":
+		_hs_error.text = "Введите имя и пароль."
+		return
+	_hs_error.text = ""
+	var err: String
+	if register:
+		err = await HomeServer.register_account(nickname, password)
+	else:
+		err = await HomeServer.login(nickname, password)
+	_hs_error.text = err
+	if err == "":
+		_hs_pass.text = ""
+		_nick.text = Settings.nick  # логин мог заменить дефолтный Guest-ник на имя аккаунта
+	_account_dirty()
+
+
+func _on_hs_logout() -> void:
+	_hs_error.text = ""
+	await HomeServer.logout()
+	_account_dirty()
+
+
+## «Обновить»: заново опросить сервер (discovery, валидность токена, продление сертификата).
+func _on_hs_refresh() -> void:
+	_hs_error.text = ""
+	_commit_hs_server_field()
+	await HomeServer.refresh()
+	_account_dirty()
+
+
 # --- Раздел «Пользователи» (см. docs/ranks.md) ---
 
 ## Реакция на любое сетевое изменение: пока экран виден — пересобрать вкладку. Иначе no-op.
@@ -338,8 +460,10 @@ func _refresh_users() -> void:
 	var authority_uid := NetworkManager.authority_user_id()
 	var shown_uids := {}
 	var rows := 0
-	# 1) Мы сами — первой строкой (только просмотр).
-	_add_user_row(Settings.nick, Settings.user_id, true, true, ranks, is_auth, authority_uid, true)
+	# 1) Мы сами — первой строкой (только просмотр). Наш «подтверждённый адрес» — адрес
+	# аккаунта, если есть действующий сертификат (пирам мы предъявляем именно его).
+	var my_address: String = HomeServer.address if HomeServer.has_certificate() else ""
+	_add_user_row(Settings.nick, Settings.user_id, true, true, ranks, is_auth, authority_uid, true, my_address)
 	shown_uids[Settings.user_id] = true
 	rows += 1
 	# 2) Онлайн-пиры (у некоторых user_id может быть ещё не получен из карточки).
@@ -347,13 +471,13 @@ func _refresh_users() -> void:
 		var uid := NetworkManager.user_id_of(pid)
 		if uid != "":
 			shown_uids[uid] = true
-		_add_user_row(NetworkManager.nick_of(pid), uid, true, NetworkManager.peer_p2p_connected(pid), ranks, is_auth, authority_uid, false)
+		_add_user_row(NetworkManager.nick_of(pid), uid, true, NetworkManager.peer_p2p_connected(pid), ranks, is_auth, authority_uid, false, NetworkManager.verified_address_of(pid))
 		rows += 1
 	# 3) Ранги без онлайн-пира: запись есть, человека нет.
 	for uid in ranks.keys():
 		if shown_uids.has(uid):
 			continue
-		_add_user_row("", uid, false, false, ranks, is_auth, authority_uid, false)
+		_add_user_row("", uid, false, false, ranks, is_auth, authority_uid, false, "")
 		rows += 1
 	_users_empty.visible = rows == 0
 
@@ -361,7 +485,9 @@ func _refresh_users() -> void:
 ## Одна строка списка. uid == "" — карточка пира ещё не пришла (рангом управлять нельзя).
 ## p2p_connected отличает «видим ник через сигналинг» от «RPC-канал реально открыт».
 ## is_self — это мы (только просмотр). authority_uid — user_id авторитета (для отметки «★»).
-func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool, ranks: Dictionary, is_auth: bool, authority_uid: String, is_self: bool) -> void:
+## verified — криптографически подтверждённый адрес nick@domain ("" — аноним/не проверен),
+## см. docs/home-server.md.
+func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool, ranks: Dictionary, is_auth: bool, authority_uid: String, is_self: bool, verified: String) -> void:
 	var has_rank := uid != "" and ranks.has(uid)
 	var is_authority := uid != "" and uid == authority_uid
 	var row := HBoxContainer.new()
@@ -370,7 +496,12 @@ func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool,
 	var name_label := Label.new()
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.text = _user_display_name(nick, uid, online, p2p_connected, is_self, is_authority)
+	if verified != "":
+		name_label.text += "  ✓ %s" % verified
 	var tip := "user_id: %s" % uid if uid != "" else ""
+	if verified != "":
+		tip = (tip + "\n" if tip != "" else "") \
+			+ "✓ %s — личность подтверждена домашним сервером" % verified
 	if is_authority:
 		tip = (tip + "\n" if tip != "" else "") + "★ — авторитет (раздаёт ранги)"
 	elif online and not p2p_connected:
@@ -634,9 +765,11 @@ func _on_save() -> void:
 	VoiceManager.set_denoise(Settings.voice_denoise)
 	# Домашняя страница: пусто — без автозагрузки при запуске.
 	Settings.home_page = _home.text.strip_edges()
-	# Пустые поля → дефолты.
-	var url := _url.text.strip_edges()
-	Settings.signaling_url = url if url != "" else BuildConfig.signaling_url
+	# Адрес сигналинга: пусто = авторежим (анонс домашнего сервера / дефолт сборки),
+	# см. Settings.effective_signaling_url.
+	Settings.signaling_url = _url.text.strip_edges()
+	# Домашний сервер: пусто = дефолт сборки (BuildConfig.home_server_url).
+	Settings.home_server_url = _hs_server.text.strip_edges()
 	var nick := _nick.text.strip_edges()
 	Settings.nick = nick if nick != "" else Settings.random_nick()
 	# Пустой адрес аватара → дефолт из пака (vrwebavatar://1).

@@ -663,7 +663,7 @@ func _join_current_room() -> void:
 
 
 func _on_connection_changed(online: bool) -> void:
-	_set_status("Онлайн: %s" % Settings.signaling_url if online else "Офлайн")
+	_set_status("Онлайн: %s" % Settings.effective_signaling_url() if online else "Офлайн")
 
 
 # --- Чат ---

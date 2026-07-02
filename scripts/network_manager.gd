@@ -24,6 +24,10 @@ signal state_received(id: int, position: Vector3, look_yaw: float, params: Dicti
 signal chat_received(id: int, text: String)
 ## Пир прислал свою «карточку»: user_id + ник + текстуру лица (приходит при установке p2p).
 signal identity_received(id: int, nick: String, face: Texture2D, avatar_uri: String)
+## Личность пира подтверждена криптографически: сертификат его домашнего сервера проверен
+## и пир доказал владение ключом (challenge–response). address — федеративный nick@domain.
+## См. docs/home-server.md; до этого сигнала пир — аноним с самозаявленным user_id.
+signal identity_verified(id: int, address: String)
 ## Состояние видео-плеера от пира (см. VrwebVideoManager): player_id — id из тега
 ## <VRWebVideoPlayer>, action — "play"/"pause"/"seek"/"sync", position — позиция в секундах.
 ## Транспорт и heartbeat-таймкод идут одним сигналом; различаются по action.
@@ -82,6 +86,12 @@ var _nicks := {}           # peer_id -> String
 var _authority := 0        # последний вычисленный авторитет (для детекта смены) — см. authority_id
 var _ranks := {}           # user_id (String) -> rank (int); владелец — авторитет, см. docs/ranks.md
 var _user_ids := {}        # peer_id (int) -> user_id (String); из карточки идентичности
+# Сертификаты идентичности (см. docs/home-server.md). Проверка двухшаговая: подпись сервера
+# на сертификате, затем challenge–response на владение ключом. Всё — состояние комнаты.
+var _peer_certs := {}      # peer_id -> {json, address, public_key} — сертификат, прошедший шаг 1
+var _challenges := {}      # peer_id -> nonce (32 байта), одноразовый, ждём proof
+var _verified := {}        # peer_id -> address (nick@domain) — прошёл ОБА шага
+var _rng := Crypto.new()   # генератор nonce для челленджей
 var _scene := SceneChanges.new()  # машина состояний эфемерного слоя (чистая, см. scene_changes.gd)
 var _obj_seq := 0          # счётчик для генерации id наших объектов (new_object_id)
 var _scene_resync := false # ждём снимок состояния (был GAP / смена авторитета) — не спамим запросом
@@ -92,6 +102,8 @@ func _ready() -> void:
 	# Как только p2p-канал к пиру открылся — шлём ему свою карточку (ник + лицо).
 	multiplayer.peer_connected.connect(_on_mp_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_mp_peer_disconnected)
+	# Сертификат появился/обновился (логин, продление) — предъявляем его уже подключённым пирам.
+	HomeServer.certificate_changed.connect(broadcast_certificate)
 
 
 func is_online() -> bool:
@@ -104,15 +116,16 @@ func webrtc_available() -> bool:
 		and ClassDB.class_exists("WebRTCMultiplayerPeer")
 
 
-## Подключиться к сигнальному серверу (Settings.signaling_url). Сама комната задаётся
-## отдельно через join_room — обычно main зовёт его сразу после connect.
+## Подключиться к сигнальному серверу (Settings.effective_signaling_url — пользовательский
+## адрес, анонс домашнего сервера или дефолт сборки). Сама комната задаётся отдельно через
+## join_room — обычно main зовёт его сразу после connect.
 func connect_to_server() -> void:
 	if not webrtc_available():
 		push_warning("WebRTC недоступен: положите аддон webrtc-native в addons/webrtc")
 		return
 	disconnect_from_server()
 	_ws = WebSocketPeer.new()
-	var url := _ws_url(Settings.signaling_url)
+	var url := _ws_url(Settings.effective_signaling_url())
 	var err := _ws.connect_to_url(url)
 	if err != OK:
 		push_warning("Не удалось подключиться к %s (%d)" % [url, err])
@@ -173,6 +186,14 @@ func broadcast_identity() -> void:
 		rpc("_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
 
 
+## Разослать наш сертификат идентичности всем в комнате (после логина/обновления).
+## Без сертификата — no-op: для пиров мы остаёмся анонимом.
+func broadcast_certificate() -> void:
+	var payload: Array = HomeServer.certificate_payload()
+	if _can_rpc() and not payload.is_empty():
+		rpc("_recv_certificate", payload[0], payload[1])
+
+
 func _on_mp_peer_connected(id: int) -> void:
 	_connected_peers[id] = true
 	p2p_peer_connected.emit(id)
@@ -180,6 +201,10 @@ func _on_mp_peer_connected(id: int) -> void:
 	# Отдаём новому пиру свою карточку: user_id, ник, лицо (PNG-байты) и идентификатор аватара.
 	if _can_rpc():
 		rpc_id(id, "_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
+		# И сертификат идентичности, если он у нас есть, — пир проверит и пришлёт челлендж.
+		var payload: Array = HomeServer.certificate_payload()
+		if not payload.is_empty():
+			rpc_id(id, "_recv_certificate", payload[0], payload[1])
 	# Если мы авторитет — новичку сразу полную таблицу рангов (чтобы он знал ранги всех, см. docs/ranks.md)
 	# и снимок эфемерной сцены (чтобы он сразу увидел живые объекты, см. docs/ephemeral-changes.md).
 	if has_authority() and _can_rpc():
@@ -326,6 +351,12 @@ func my_rank() -> int:
 ## user_id пира (из его карточки) — "", если ещё не пришла.
 func user_id_of(peer_id: int) -> String:
 	return _user_ids.get(peer_id, "")
+
+
+## Криптографически подтверждённый федеративный адрес пира (nick@domain) — "" пока обе
+## подписи (сервера и владения ключом) не сошлись. См. docs/home-server.md.
+func verified_address_of(peer_id: int) -> String:
+	return _verified.get(peer_id, "")
 
 
 ## Назначить ранг пользователю по его user_id. Только авторитет; у остальных — no-op с
@@ -608,6 +639,9 @@ func _teardown_mesh() -> void:
 	# авторитет пришлёт актуальную таблицу заново (а наш ранг хранится в ЕГО копии). См. docs/ranks.md.
 	_user_ids.clear()
 	_ranks.clear()
+	_peer_certs.clear()
+	_challenges.clear()
+	_verified.clear()
 	# Эфемерная сцена — тоже состояние комнаты: уходя, сбрасываем (при перезаходе авторитет
 	# пришлёт снимок). Свежая машина обнуляет epoch/seq/объекты. См. docs/ephemeral-changes.md.
 	_scene = SceneChanges.new()
@@ -649,6 +683,10 @@ func _drop_peer(id: int) -> void:
 	# Снимаем только привязку peer_id->user_id. Сам ранг в _ranks НЕ трогаем — он привязан к
 	# user_id и должен пережить уход пира (вернётся при перезаходе). См. docs/ranks.md.
 	_user_ids.erase(id)
+	# Верификация привязана к эфемерному peer_id — при перезаходе пир докажет личность заново.
+	_peer_certs.erase(id)
+	_challenges.erase(id)
+	_verified.erase(id)
 	# mesh мог сам убрать пира при закрытии канала — снимаем только если ещё есть.
 	if _mesh != null and _mesh.has_peer(id):
 		_mesh.remove_peer(id)
@@ -703,6 +741,67 @@ func _recv_state(position: Vector3, look_yaw: float, params: Dictionary) -> void
 func _recv_chat(text: String) -> void:
 	# Режем и на приёме — пир мог быть с модифицированным клиентом.
 	chat_received.emit(multiplayer.get_remote_sender_id(), text.left(MAX_CHAT_CHARS))
+
+
+# --- Сертификаты идентичности (двухшаговая проверка, см. docs/home-server.md) ---
+
+## Пир предъявил сертификат. Шаг 1 — подпись его домашнего сервера над канонической строкой
+## (ключи домена тянет HomeServer, поэтому await). Прошло — шлём челлендж на владение ключом.
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_certificate(cert_json: String, signature_b64: String) -> void:
+	var id := multiplayer.get_remote_sender_id()
+	if _verified.has(id) and _peer_certs.get(id, {}).get("json", "") == cert_json:
+		return  # ровно этот сертификат уже подтверждён — не гоняем челленджи повторно
+	var res: Dictionary = await HomeServer.verify_peer_certificate(cert_json, signature_b64)
+	# За время await пир мог уйти, а мы — покинуть комнату.
+	if not _connections.has(id) or not _can_rpc():
+		return
+	if not res.get("ok", false):
+		push_warning("Сертификат пира %d отклонён: %s" % [id, res.get("error", "")])
+		return
+	_verified.erase(id)
+	_peer_certs[id] = {"json": cert_json, "address": res.address, "public_key": res.public_key}
+	var nonce: PackedByteArray = _rng.generate_random_bytes(32)
+	_challenges[id] = nonce
+	rpc_id(id, "_recv_identity_challenge", nonce)
+
+
+## Челлендж от пира: доказываем владение приватным ключом — подписываем nonce, привязанный к
+## паре (мы, проверяющий), см. _proof_payload. Без ключа/сертификата молчим (мы аноним).
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_identity_challenge(nonce: PackedByteArray) -> void:
+	if nonce.size() != 32 or not HomeServer.has_certificate():
+		return
+	var verifier := multiplayer.get_remote_sender_id()
+	var proof: PackedByteArray = HomeServer.sign_challenge(_proof_payload(_my_id, verifier, nonce))
+	if not proof.is_empty() and _can_rpc():
+		rpc_id(verifier, "_recv_identity_proof", proof)
+
+
+## Ответ на наш челлендж (шаг 2): подпись сходится с ключом из проверенного сертификата →
+## предъявитель действительно владелец адреса. nonce одноразовый — стирается при первом ответе,
+## повтор (replay) не пройдёт.
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_identity_proof(proof: PackedByteArray) -> void:
+	var id := multiplayer.get_remote_sender_id()
+	if not _challenges.has(id) or proof.size() > 4096:
+		return
+	var nonce: PackedByteArray = _challenges[id]
+	_challenges.erase(id)
+	var cert: Dictionary = _peer_certs.get(id, {})
+	if cert.is_empty():
+		return
+	if HomeServer.verify_signature(cert.public_key, _proof_payload(id, _my_id, nonce), proof):
+		_verified[id] = cert.address
+		identity_verified.emit(id, cert.address)
+
+
+## Байты, которые подписывает доказывающий: домен-разделитель + peer_id обеих сторон + nonce.
+## Привязка к паре пиров закрывает relay-атаку: подпись, выданная одному проверяющему, не
+## годится для другого (см. «Проверка в комнате» в docs/home-server.md). Обе стороны собирают
+## payload независимо: prover — (свой id, id спросившего), verifier — (id пира, свой id).
+static func _proof_payload(prover_id: int, verifier_id: int, nonce: PackedByteArray) -> PackedByteArray:
+	return ("vrweb-identity-proof.v1:%d:%d:" % [prover_id, verifier_id]).to_utf8_buffer() + nonce
 
 
 @rpc("any_peer", "reliable", "call_remote")

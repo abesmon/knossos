@@ -12,7 +12,7 @@
   для которых сервер выдавал сертификат идентичности</span></p>
   {% if keys %}
   <table>
-    <tr><th>Публичный ключ (Ed25519, base64)</th><th>Выдан</th></tr>
+    <tr><th>Публичный ключ (RSA, base64 DER)</th><th>Выдан</th></tr>
     {% for k in keys %}
     <tr><td class="mono">{{ k['public_key'] }}</td><td>{{ k['created_at'] | timestamp }}</td></tr>
     {% endfor %}

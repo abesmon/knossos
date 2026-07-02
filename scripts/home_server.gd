@@ -1,0 +1,492 @@
+extends Node
+
+## Клиент домашнего сервера (autoload «HomeServer») — «Слой 3» федеративной идентичности,
+## см. docs/home-server.md. Отвечает за:
+##  - discovery своего сервера (/.well-known/vrweb): features, анонс конфигурации (сигналинг);
+##  - аккаунт: логин/регистрация/логаут, Bearer-токен;
+##  - ключ клиента (RSA-2048 в user://identity_key.pem — приватная половина НИКОГДА не
+##    покидает устройство) и сертификат идентичности, выданный сервером;
+##  - проверку ЧУЖИХ сертификатов: подпись сервера над канонической строкой + кэш
+##    signing_keys доменов (память + user://known_servers.cfg — работает и офлайн).
+##
+## Криптография — RSA-2048, подпись PKCS#1 v1.5 + SHA-256 (алгоритм "rsa-sha256" в
+## signing_keys): ровно то, что умеют Crypto/CryptoKey Godot (Ed25519/SHA-512 в движке нет).
+## Challenge–response с пирами делает NetworkManager, отсюда он берёт sign_challenge /
+## verify_signature / certificate_payload.
+
+## Любое изменение состояния (discovery / аккаунт / сертификат) — UI перечитывает всё.
+signal state_changed
+## Появился/обновился наш сертификат — NetworkManager рассылает его пирам.
+signal certificate_changed
+
+const SETTINGS_PATH := "user://homeserver.cfg"
+const KEY_PATH := "user://identity_key.pem"
+const KNOWN_SERVERS_PATH := "user://known_servers.cfg"
+
+## Капабилити, которые поддерживает ЭТОТ клиент; с сервером работает пересечение
+## (см. «features» в docs/home-server.md).
+const CLIENT_FEATURES := ["identity.v1", "signaling.v1"]
+## Единственный поддерживаемый алгоритм подписи (см. шапку).
+const ALGORITHM := "rsa-sha256"
+## Кэш signing_keys домена считается свежим сутки; протухший используется как fallback,
+## если домен недоступен (сертификат самодостаточен — см. docs/home-server.md).
+const KEYS_TTL := 86400
+## За сколько секунд до истечения сертификата перезапрашиваем его при refresh (7 дней).
+const CERT_RENEW_MARGIN := 7 * 86400
+const HTTP_TIMEOUT := 10.0
+
+## --- Состояние аккаунта (персистится в user://homeserver.cfg) ---
+## URL сервера, которому принадлежат токен/сертификат. Смена адреса в настройках = смена
+## провайдера идентичности: старые токен и сертификат сбрасываются.
+var _account_url := ""
+var access_token := ""
+## Полный федеративный адрес (nick@domain); "" — не залогинены.
+var address := ""
+## Сертификат: каноническая JSON-строка (ровно та, что подписана) + подпись (base64).
+var cert_json := ""
+var cert_signature := ""
+var _cert: Dictionary = {}  # распарсенный cert_json (кэш)
+
+## --- Discovery нашего сервера ---
+var discovery: Dictionary = {}       # весь ответ /.well-known/vrweb ({} — не получен)
+var discovery_error := ""            # текст последней ошибки discovery ("" — ок/не пробовали)
+## Адрес сигналинга, анонсированный домашним сервером ("" — нет). Учитывается в
+## Settings.effective_signaling_url(), если пользователь не задал свой.
+var announced_signaling_url := ""
+
+## Идёт сетевая операция логина/регистрации/сертификации — UI блокирует кнопки.
+var busy := false
+
+var _crypto := Crypto.new()
+var _key: CryptoKey = null           # наш RSA-ключ (лениво: с диска или генерация)
+var _domain_keys: Dictionary = {}    # domain -> {fetched_at: int, keys: {key_id: pub_b64}}
+var _path := SETTINGS_PATH
+var _key_path := KEY_PATH
+var _servers_path := KNOWN_SERVERS_PATH
+
+
+func _ready() -> void:
+	_path = Sandbox.resolve(SETTINGS_PATH)
+	_key_path = Sandbox.resolve(KEY_PATH)
+	_servers_path = Sandbox.resolve(KNOWN_SERVERS_PATH)
+	_load_state()
+	_load_known_servers()
+	Settings.changed.connect(_on_settings_changed)
+	# Стартовый refresh: discovery + валидация токена + продление сертификата.
+	refresh()
+
+
+## Фактический URL нашего домашнего сервера (нормализованный; "" — не настроен).
+func server_url() -> String:
+	return _normalize_base(Settings.effective_home_server_url())
+
+
+func is_logged_in() -> bool:
+	return access_token != "" and address != ""
+
+
+## Есть действующий (непросроченный) сертификат идентичности.
+func has_certificate() -> bool:
+	return cert_json != "" and cert_signature != "" \
+		and int(_cert.get("expires_at", 0)) > int(Time.get_unix_time_from_system())
+
+
+## Наш сертификат для предъявления пирам: [каноническая строка, подпись base64].
+func certificate_payload() -> Array:
+	return [cert_json, cert_signature] if has_certificate() else []
+
+
+## Когда истекает сертификат (unix-время; 0 — сертификата нет).
+func certificate_expires_at() -> int:
+	return int(_cert.get("expires_at", 0))
+
+
+## Поддерживают ли фичу ОБЕ стороны (пересечение наших и серверных features).
+func supports(feature: String) -> bool:
+	return feature in CLIENT_FEATURES \
+		and feature in discovery.get("features", [])
+
+
+# --- Аккаунт: логин / регистрация / логаут ---
+
+## Логин на домашнем сервере; после успеха сразу запрашивает сертификат. Возвращает ""
+## при успехе или человекочитаемую ошибку.
+func login(nickname: String, password: String) -> String:
+	return await _authenticate("/api/v1/login", nickname, password)
+
+
+## Регистрация нового аккаунта (если сервер разрешает); дальше — как логин.
+func register_account(nickname: String, password: String) -> String:
+	return await _authenticate("/api/v1/register", nickname, password)
+
+
+func _authenticate(endpoint: String, nickname: String, password: String) -> String:
+	var base := server_url()
+	if base == "":
+		return "Адрес домашнего сервера не задан."
+	if busy:
+		return "Уже идёт операция — подождите."
+	busy = true
+	state_changed.emit()
+	var res := await _http(HTTPClient.METHOD_POST, base + endpoint, [],
+		JSON.stringify({"nickname": nickname, "password": password}))
+	var err := ""
+	if res.code == 200 and typeof(res.data) == TYPE_DICTIONARY:
+		_account_url = base
+		access_token = str(res.data.get("access_token", ""))
+		address = str(res.data.get("address", ""))
+		_save_state()
+		# Ник по умолчанию (Guest-XXXX) заменяем на имя аккаунта — но пользовательский
+		# выбор не трогаем.
+		if Settings.nick.begins_with("Guest-"):
+			Settings.nick = address.get_slice("@", 0)
+			Settings.save()
+		err = await _certify()
+		if err != "":
+			err = "Вошли, но сертификат не получен: " + err
+	else:
+		err = _err_msg(res, "Не удалось связаться с сервером.")
+	busy = false
+	state_changed.emit()
+	return err
+
+
+## Выйти: отозвать токен на сервере (best effort) и забыть аккаунт с сертификатом.
+func logout() -> void:
+	var base := _account_url
+	var token := access_token
+	_clear_account()
+	state_changed.emit()
+	if base != "" and token != "":
+		await _http(HTTPClient.METHOD_POST, base + "/api/v1/logout",
+			["Authorization: Bearer " + token], "")
+
+
+## Обновить состояние: discovery сервера; если есть токен — проверить его и продлить
+## сертификат (при отсутствии/скором истечении). Зовётся на старте и при смене адреса.
+## Параллельные refresh (смена адреса во время запроса) — старый прерывается по поколению.
+var _refresh_gen := 0
+
+func refresh() -> void:
+	_refresh_gen += 1
+	var gen := _refresh_gen
+	var base := server_url()
+	# Аккаунт привязан к конкретному серверу: адрес сменился — старая сессия не наша.
+	if _account_url != "" and _account_url != base:
+		_clear_account()
+	discovery = {}
+	discovery_error = ""
+	announced_signaling_url = ""
+	state_changed.emit()
+	if base == "":
+		return
+	var res := await _http(HTTPClient.METHOD_GET, base + "/.well-known/vrweb", [])
+	if gen != _refresh_gen:
+		return  # за время запроса начался новый refresh (сменили адрес) — не перетираем
+	if res.code == 200 and typeof(res.data) == TYPE_DICTIONARY:
+		discovery = res.data
+		announced_signaling_url = str(discovery.get("config", {}).get("signaling_url", ""))
+		# Ключи своего сервера — сразу в кэш доменов (пригодятся для проверки соседей).
+		var domain := str(discovery.get("server", {}).get("domain", ""))
+		if domain != "":
+			_cache_domain_keys(domain, discovery.get("signing_keys", []))
+	else:
+		discovery_error = _err_msg(res, "Сервер недоступен.")
+	if access_token != "":
+		var acc := await _http(HTTPClient.METHOD_GET, _account_url + "/api/v1/account",
+			["Authorization: Bearer " + access_token], "")
+		if gen != _refresh_gen:
+			return
+		if acc.code == 401:
+			# Токен истёк/отозван — мы разлогинены (сертификат остаётся: он самодостаточен).
+			access_token = ""
+			_save_state()
+		elif acc.code == 200 and is_logged_in() and not has_certificate():
+			await _certify()
+		elif acc.code == 200 and is_logged_in() \
+				and certificate_expires_at() - int(Time.get_unix_time_from_system()) < CERT_RENEW_MARGIN:
+			await _certify()
+	state_changed.emit()
+
+
+func _clear_account() -> void:
+	_account_url = ""
+	access_token = ""
+	address = ""
+	cert_json = ""
+	cert_signature = ""
+	_cert = {}
+	_save_state()
+	certificate_changed.emit()
+
+
+# --- Сертификат ---
+
+## Запросить у сервера сертификат на наш публичный ключ. Возвращает "" или ошибку.
+func _certify() -> String:
+	if not is_logged_in():
+		return "Не залогинены."
+	if not await _ensure_key():
+		return "Не удалось создать ключ клиента."
+	var res := await _http(HTTPClient.METHOD_POST, _account_url + "/api/v1/identity/certify",
+		["Authorization: Bearer " + access_token],
+		JSON.stringify({"public_key": _public_key_b64()}))
+	if res.code != 200 or typeof(res.data) != TYPE_DICTIONARY:
+		return _err_msg(res, "Сервер не выдал сертификат.")
+	var cj := str(res.data.get("certificate_json", ""))
+	var sig := str(res.data.get("signature", ""))
+	var parsed = JSON.parse_string(cj)
+	if cj == "" or sig == "" or typeof(parsed) != TYPE_DICTIONARY:
+		return "Некорректный ответ сервера (нет certificate_json)."
+	cert_json = cj
+	cert_signature = sig
+	_cert = parsed
+	_save_state()
+	certificate_changed.emit()
+	state_changed.emit()
+	return ""
+
+
+## Наш RSA-ключ: с диска или генерация (в отдельном потоке — RSA-2048 занимает секунды).
+func _ensure_key() -> bool:
+	if _key != null:
+		return true
+	if FileAccess.file_exists(_key_path):
+		var loaded := CryptoKey.new()
+		if loaded.load(_key_path) == OK:
+			_key = loaded
+			return true
+		push_warning("HomeServer: %s не читается — генерирую новый ключ" % _key_path)
+	var thread := Thread.new()
+	thread.start(func(): return Crypto.new().generate_rsa(2048))
+	while thread.is_alive():
+		await get_tree().process_frame
+	_key = thread.wait_to_finish()
+	if _key == null:
+		return false
+	_key.save(_key_path)
+	return true
+
+
+## Публичная половина нашего ключа в формате сервера: base64(DER SubjectPublicKeyInfo).
+func _public_key_b64() -> String:
+	return _pem_body(_key.save_to_string(true))
+
+
+# --- Криптография (общая с проверкой чужих сертификатов) ---
+
+## Подписать челлендж пира нашим приватным ключом (см. NetworkManager). Пустой массив —
+## ключа нет (аноним) или подпись не удалась.
+func sign_challenge(payload: PackedByteArray) -> PackedByteArray:
+	if _key == null and FileAccess.file_exists(_key_path):
+		var loaded := CryptoKey.new()
+		if loaded.load(_key_path) == OK:
+			_key = loaded
+	if _key == null:
+		return PackedByteArray()
+	return _crypto.sign(HashingContext.HASH_SHA256, _sha256(payload), _key)
+
+
+## Проверить подпись RSA-SHA256 по публичному ключу base64(DER SPKI).
+func verify_signature(public_key_b64: String, data: PackedByteArray, signature: PackedByteArray) -> bool:
+	if public_key_b64 == "" or signature.is_empty():
+		return false
+	var key := CryptoKey.new()
+	if key.load_from_string(_b64_to_pem(public_key_b64), true) != OK:
+		return false
+	return _crypto.verify(HashingContext.HASH_SHA256, _sha256(data), signature, key)
+
+
+## Проверка ЧУЖОГО сертификата — «шаг 1» из docs/home-server.md: подпись сервера домена
+## над канонической строкой. Возвращает словарь:
+##   { ok: bool, error: String, address: String, public_key: String, expires_at: int }
+## public_key — ключ пира из сертификата: им NetworkManager проверяет челлендж («шаг 2»).
+func verify_peer_certificate(peer_cert_json: String, signature_b64: String) -> Dictionary:
+	var fail := func(err: String) -> Dictionary:
+		return {"ok": false, "error": err, "address": "", "public_key": "", "expires_at": 0}
+	if peer_cert_json.length() > 8192 or signature_b64.length() > 4096:
+		return fail.call("Сертификат подозрительно велик.")
+	var parsed = JSON.parse_string(peer_cert_json)
+	if typeof(parsed) != TYPE_DICTIONARY or int(parsed.get("v", 0)) != 1:
+		return fail.call("Не сертификат (v != 1).")
+	var expires := int(parsed.get("expires_at", 0))
+	if expires <= int(Time.get_unix_time_from_system()):
+		return fail.call("Сертификат истёк.")
+	var peer_address := str(parsed.get("address", ""))
+	var domain := peer_address.get_slice("@", 1)
+	if not peer_address.contains("@") or domain == "" or peer_address.get_slice("@", 0) == "":
+		return fail.call("Некорректный адрес в сертификате.")
+	var keys: Dictionary = await _signing_keys_for(domain)
+	var key_id := str(parsed.get("key_id", ""))
+	if not keys.has(key_id):
+		return fail.call("Ключ %s домена %s недоступен." % [key_id, domain])
+	if not verify_signature(str(keys[key_id]), peer_cert_json.to_utf8_buffer(),
+			Marshalls.base64_to_raw(signature_b64)):
+		return fail.call("Подпись сервера не сходится.")
+	return {"ok": true, "error": "", "address": peer_address,
+		"public_key": str(parsed.get("public_key", "")), "expires_at": expires}
+
+
+## signing_keys домена: свежий кэш → сеть → протухший кэш (лучше, чем ничего: сервер
+## пира может быть временно недоступен, а сертификат самодостаточен).
+func _signing_keys_for(domain: String) -> Dictionary:
+	var entry: Dictionary = _domain_keys.get(domain, {})
+	var now := int(Time.get_unix_time_from_system())
+	if not entry.is_empty() and now - int(entry.get("fetched_at", 0)) < KEYS_TTL:
+		return entry.get("keys", {})
+	var res := await _http(HTTPClient.METHOD_GET, _well_known_url(domain), [])
+	if res.code == 200 and typeof(res.data) == TYPE_DICTIONARY:
+		return _cache_domain_keys(domain, res.data.get("signing_keys", []))
+	return entry.get("keys", {})
+
+
+## Запомнить signing_keys домена (память + диск). Возвращает {key_id: pub_b64}.
+func _cache_domain_keys(domain: String, signing_keys: Variant) -> Dictionary:
+	var keys := {}
+	if typeof(signing_keys) == TYPE_ARRAY:
+		for k in signing_keys:
+			if typeof(k) == TYPE_DICTIONARY and str(k.get("algorithm", "")) == ALGORITHM:
+				var kid := str(k.get("key_id", ""))
+				if kid != "":
+					keys[kid] = str(k.get("public_key", ""))
+	_domain_keys[domain] = {"fetched_at": int(Time.get_unix_time_from_system()), "keys": keys}
+	_save_known_servers()
+	return keys
+
+
+## URL discovery для домена. Федерация ходит по https; исключение — наш собственный
+## сервер: для него берём наш base URL как есть (локальная разработка по http).
+func _well_known_url(domain: String) -> String:
+	var base := server_url()
+	if base != "" and _host_of(base) == domain:
+		return base + "/.well-known/vrweb"
+	return "https://" + domain + "/.well-known/vrweb"
+
+
+# --- Реакция на настройки ---
+
+func _on_settings_changed() -> void:
+	# Интересует только смена адреса сервера; прочие сохранения настроек игнорируем.
+	if server_url() != _account_url or discovery.is_empty():
+		refresh()
+
+
+# --- Персистентность ---
+
+func _load_state() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(_path) != OK:
+		return
+	_account_url = cfg.get_value("account", "server_url", "")
+	access_token = cfg.get_value("account", "token", "")
+	address = cfg.get_value("account", "address", "")
+	cert_json = cfg.get_value("certificate", "json", "")
+	cert_signature = cfg.get_value("certificate", "signature", "")
+	var parsed = JSON.parse_string(cert_json) if cert_json != "" else null
+	_cert = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+
+
+func _save_state() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("account", "server_url", _account_url)
+	cfg.set_value("account", "token", access_token)
+	cfg.set_value("account", "address", address)
+	cfg.set_value("certificate", "json", cert_json)
+	cfg.set_value("certificate", "signature", cert_signature)
+	cfg.save(_path)
+
+
+func _load_known_servers() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(_servers_path) != OK:
+		return
+	for domain in cfg.get_sections():
+		_domain_keys[domain] = {
+			"fetched_at": int(cfg.get_value(domain, "fetched_at", 0)),
+			"keys": cfg.get_value(domain, "keys", {}),
+		}
+
+
+func _save_known_servers() -> void:
+	var cfg := ConfigFile.new()
+	for domain in _domain_keys:
+		cfg.set_value(domain, "fetched_at", _domain_keys[domain]["fetched_at"])
+		cfg.set_value(domain, "keys", _domain_keys[domain]["keys"])
+	cfg.save(_servers_path)
+
+
+# --- Вспомогательное ---
+
+## Один HTTP-запрос через временный HTTPRequest. Возвращает
+## { result: int, code: int, data: Variant } (data — распарсенный JSON или null).
+func _http(method: int, url: String, extra_headers: PackedStringArray, body := "") -> Dictionary:
+	var req := HTTPRequest.new()
+	req.timeout = HTTP_TIMEOUT
+	add_child(req)
+	var headers := PackedStringArray(["Accept: application/json"])
+	if body != "":
+		headers.append("Content-Type: application/json")
+	headers.append_array(extra_headers)
+	if req.request(url, headers, method, body) != OK:
+		req.queue_free()
+		return {"result": HTTPRequest.RESULT_CANT_CONNECT, "code": 0, "data": null}
+	var res: Array = await req.request_completed
+	req.queue_free()
+	# Пустое тело (сервер недоступен и т.п.) не гоняем через парсер — он пушит ошибку в лог.
+	var body_str := (res[3] as PackedByteArray).get_string_from_utf8()
+	var data = JSON.parse_string(body_str) if body_str.strip_edges() != "" else null
+	return {"result": int(res[0]), "code": int(res[1]), "data": data}
+
+
+## Ошибка запроса для UI: message из {"error": ...} сервера или fallback.
+static func _err_msg(res: Dictionary, fallback: String) -> String:
+	if typeof(res.data) == TYPE_DICTIONARY and typeof(res.data.get("error")) == TYPE_DICTIONARY:
+		var msg := str(res.data["error"].get("message", ""))
+		if msg != "":
+			return msg
+	if int(res.code) != 0:
+		return fallback + " (HTTP %d)" % int(res.code)
+	return fallback
+
+
+## Нормализует базовый URL сервера: без хвостового "/", со схемой (дефолт — https).
+static func _normalize_base(url: String) -> String:
+	url = url.strip_edges().rstrip("/")
+	if url == "":
+		return ""
+	if not url.contains("://"):
+		url = "https://" + url
+	return url
+
+
+## Хост (с портом) из URL: "https://a.b:8080/x" -> "a.b:8080".
+static func _host_of(url: String) -> String:
+	var rest := url.get_slice("://", 1)
+	return rest.get_slice("/", 0)
+
+
+static func _sha256(data: PackedByteArray) -> PackedByteArray:
+	var h := HashingContext.new()
+	h.start(HashingContext.HASH_SHA256)
+	h.update(data)
+	return h.finish()
+
+
+## Тело PEM (base64 DER без армирования) — формат public_key на сервере.
+static func _pem_body(pem: String) -> String:
+	var out := ""
+	for line in pem.split("\n"):
+		var t := line.strip_edges()
+		if t != "" and not t.begins_with("-----"):
+			out += t
+	return out
+
+
+## base64 DER (SPKI) -> публичный PEM для CryptoKey.load_from_string.
+static func _b64_to_pem(b64: String) -> String:
+	var body := ""
+	var i := 0
+	while i < b64.length():
+		body += b64.substr(i, 64) + "\n"
+		i += 64
+	return "-----BEGIN PUBLIC KEY-----\n" + body + "-----END PUBLIC KEY-----\n"

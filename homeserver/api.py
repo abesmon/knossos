@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 import accounts
 import identity
+import keys
 
 # Версионированные капабилити монолита; клиент сверяет со своими — работает пересечение.
 FEATURES = ["identity.v1", "signaling.v1"]
@@ -39,7 +40,7 @@ class Credentials(BaseModel):
 
 
 class CertifyRequest(BaseModel):
-    public_key: str  # raw Ed25519 (32 байта) в base64
+    public_key: str  # RSA-ключ клиента: base64(DER SubjectPublicKeyInfo)
 
 
 router = APIRouter()
@@ -61,7 +62,7 @@ def well_known(request: Request) -> dict:
             "homepage": st.cfg.effective_homepage(),
         },
         "signing_keys": [
-            {"key_id": st.keys.KEY_ID, "algorithm": "ed25519", "public_key": st.keys.public_key_b64}
+            {"key_id": st.keys.KEY_ID, "algorithm": keys.ALGORITHM, "public_key": st.keys.public_key_b64}
         ],
     }
 

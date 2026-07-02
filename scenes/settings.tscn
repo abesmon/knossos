@@ -54,6 +54,7 @@ tab_2/title = "Звук"
 tab_3/title = "Прочее"
 tab_4/title = "Пользователи"
 tab_5/title = "Мир"
+tab_6/title = "Аккаунт"
 
 [node name="GeneralSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=991100000]
 layout_mode = 2
@@ -533,6 +534,122 @@ text = "Это ваш домашний инстанс."
 layout_mode = 2
 tooltip_text = "Загрузить домашний инстанс"
 text = "Вернуться домой"
+
+[node name="AccountSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=993300000]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+metadata/_tab_index = 6
+metadata/_tab_name = "Аккаунт"
+
+[node name="ServerLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300001]
+layout_mode = 2
+tooltip_text = "Сервер, на котором живёт ваш аккаунт (идентичность nick@domain). Каждый может поднять свой — см. docs/home-server.md."
+text = "Домашний сервер"
+
+[node name="ServerRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300002]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Server" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow" unique_id=993300003]
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "https://home.example.com"
+
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow" unique_id=993300004]
+layout_mode = 2
+tooltip_text = "Очистить (вернуть сервер по умолчанию)"
+text = "✕"
+
+[node name="ServerStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300005]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "—"
+autowrap_mode = 3
+
+[node name="AccountStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300006]
+layout_mode = 2
+text = "—"
+autowrap_mode = 3
+
+[node name="CertStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300007]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "—"
+autowrap_mode = 3
+
+[node name="LoginBox" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300008]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="NickRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox" unique_id=993300009]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/NickRow" unique_id=993300010]
+custom_minimum_size = Vector2(96, 0)
+layout_mode = 2
+text = "Имя"
+
+[node name="Nick" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/NickRow" unique_id=993300011]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "имя аккаунта (a-z, 0-9, ._-)"
+
+[node name="PassRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox" unique_id=993300012]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/PassRow" unique_id=993300013]
+custom_minimum_size = Vector2(96, 0)
+layout_mode = 2
+text = "Пароль"
+
+[node name="Pass" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/PassRow" unique_id=993300014]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "минимум 8 символов"
+secret = true
+
+[node name="AuthButtons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox" unique_id=993300015]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Login" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons" unique_id=993300016]
+layout_mode = 2
+tooltip_text = "Войти в существующий аккаунт на домашнем сервере"
+text = "Войти"
+
+[node name="Register" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons" unique_id=993300017]
+layout_mode = 2
+tooltip_text = "Создать аккаунт на домашнем сервере (если регистрация открыта)"
+text = "Зарегистрироваться"
+
+[node name="AuthedBox" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300018]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Logout" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox" unique_id=993300019]
+layout_mode = 2
+tooltip_text = "Выйти: отозвать токен и забыть сертификат идентичности"
+text = "Выйти"
+
+[node name="Refresh" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox" unique_id=993300020]
+layout_mode = 2
+tooltip_text = "Заново опросить сервер и продлить сертификат идентичности"
+text = "Обновить"
+
+[node name="AuthError" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300021]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.5, 0.5, 1)
+autowrap_mode = 3
+
+[node name="AccountHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300022]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Вход даёт подписанный сертификат идентичности: другие игроки видят подтверждённый адрес nick@domain вместо самозаявленного ID. Без входа вы — аноним."
+autowrap_mode = 3
 
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer" unique_id=1634399168]
 layout_mode = 2

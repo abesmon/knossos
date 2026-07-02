@@ -19,6 +19,9 @@ const PATH := "res://config/build.private.cfg"
 
 ## Адрес сигнального сервера (см. NetworkManager). Пусто — онлайн фактически недоступен.
 var signaling_url: String = ""
+## Дефолтный адрес домашнего сервера (идентичность, см. HomeServer и docs/home-server.md).
+## Пользователь может сменить его в настройках; пусто — домашний сервер не преднастроен.
+var home_server_url: String = ""
 ## Конфиг ICE-серверов для WebRTCPeerConnection.initialize(): структура { "iceServers": [...] }.
 var ice_servers: Dictionary = {"iceServers": []}
 
@@ -30,4 +33,5 @@ func _init() -> void:
 			% PATH + "Скопируйте config/build.example.cfg в config/build.private.cfg и впишите адреса.")
 		return
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)
+	home_server_url = cfg.get_value("net", "home_server_url", home_server_url)
 	ice_servers = cfg.get_value("webrtc", "ice_servers", ice_servers)

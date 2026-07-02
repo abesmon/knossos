@@ -4,9 +4,10 @@
 import base64
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 import identity
+import keys
 
 CREDS = {"nickname": "alice", "password": "secret123"}
 
@@ -26,8 +27,9 @@ def test_well_known(client):
     assert "signaling.v1" in data["features"]
     assert data["config"]["signaling_url"] == "wss://test.local/signal"
     key = data["signing_keys"][0]
-    assert key["algorithm"] == "ed25519"
-    assert len(base64.b64decode(key["public_key"])) == 32
+    assert key["algorithm"] == keys.ALGORITHM
+    # Публичный ключ — валидный DER SPKI (RSA).
+    serialization.load_der_public_key(base64.b64decode(key["public_key"]))
 
 
 # --- аккаунты ---
@@ -74,9 +76,10 @@ def test_logout_revokes_token(client):
 
 def test_certify_and_verify(client):
     token = _register(client)["access_token"]
-    client_key = Ed25519PrivateKey.generate()
+    client_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pub_b64 = base64.b64encode(client_key.public_key().public_bytes(
-        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw,
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )).decode()
 
     r = client.post("/api/v1/identity/certify", json={"public_key": pub_b64},
@@ -86,15 +89,19 @@ def test_certify_and_verify(client):
 
     assert cert["certificate"]["address"] == "alice@test.local"
     assert cert["certificate"]["public_key"] == pub_b64
+    # certificate_json — ровно та строка, над которой стоит подпись.
+    assert cert["certificate_json"] == keys.canonical_json(cert["certificate"]).decode()
 
     # Проверяем так, как это сделает чужой участник федерации:
-    # ключ сервера — из discovery, подпись — над канонической сериализацией.
+    # ключ сервера — из discovery, подпись — над канонической строкой.
     server_key = client.get("/.well-known/vrweb").json()["signing_keys"][0]["public_key"]
-    assert identity.verify_certificate(cert["certificate"], cert["signature"], server_key)
+    assert identity.verify_certificate_json(cert["certificate_json"], cert["signature"], server_key)
 
     # Испорченный сертификат не проходит.
-    forged = dict(cert["certificate"], address="mallory@test.local")
-    assert not identity.verify_certificate(forged, cert["signature"], server_key)
+    forged = keys.canonical_json(
+        dict(cert["certificate"], address="mallory@test.local")
+    ).decode()
+    assert not identity.verify_certificate_json(forged, cert["signature"], server_key)
 
 
 def test_certify_rejects_bad_key(client):

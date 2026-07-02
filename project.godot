@@ -30,6 +30,7 @@ driver/mix_rate=48000
 Settings="*res://scripts/settings.gd"
 NetworkManager="*res://scripts/network_manager.gd"
 VoiceManager="*res://scripts/voice/voice_manager.gd"
+HomeServer="*res://scripts/home_server.gd"
 BuildConfig="*res://config/build_config.gd"
 
 [display]
