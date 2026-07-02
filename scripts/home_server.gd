@@ -13,6 +13,13 @@ extends Node
 ## signing_keys): ровно то, что умеют Crypto/CryptoKey Godot (Ed25519/SHA-512 в движке нет).
 ## Challenge–response с пирами делает NetworkManager, отсюда он берёт sign_challenge /
 ## verify_signature / certificate_payload.
+##
+## БЕЗОПАСНОСТЬ ключей доменов (см. docs/home-server.md → «Строгая проверка»): ключи домена
+## считаются авторитетными, только если получены с КАНОНИЧЕСКОГО источника — `https://<домен>`,
+## чей хост совпадает с доменом. Это не даёт домашнему серверу (даже своему, если он врёт про
+## `domain`, или скомпрометированному) присвоить себе чужой домен и отравить кэш. Строгий режим —
+## по умолчанию; для локальной разработки/тестов (http, self-host, домен ≠ хост) его смягчает
+## insecure_identity() — тогда неканоничный источник не отклоняется, а лишь предупреждает.
 
 ## Любое изменение состояния (discovery / аккаунт / сертификат) — UI перечитывает всё.
 signal state_changed
@@ -22,6 +29,26 @@ signal certificate_changed
 const SETTINGS_PATH := "user://homeserver.cfg"
 const KEY_PATH := "user://identity_key.pem"
 const KNOWN_SERVERS_PATH := "user://known_servers.cfg"
+
+## Небезопасный режим идентичности (только для локальной разработки/тестов): снимает
+## требование канонического HTTPS-источника ключей и сверку «домен == хост». Источник —
+## cmdline `--insecure-identity` ИЛИ env `VRWEB_INSECURE_IDENTITY` (1/true), как у Sandbox.
+## По умолчанию ВЫКЛ (строгая проверка). НИКОГДА не включать в проде.
+const INSECURE_ARG := "--insecure-identity"
+const INSECURE_ENV := "VRWEB_INSECURE_IDENTITY"
+static var _insecure_checked := false
+static var _insecure := false
+
+## Не static (зовётся через автолоад HomeServer.insecure_identity()); кэш — в static-переменных.
+func insecure_identity() -> bool:
+	if not _insecure_checked:
+		_insecure_checked = true
+		if OS.get_cmdline_user_args().has(INSECURE_ARG) or OS.get_cmdline_args().has(INSECURE_ARG):
+			_insecure = true
+		else:
+			var e := OS.get_environment(INSECURE_ENV).strip_edges().to_lower()
+			_insecure = e == "1" or e == "true" or e == "yes"
+	return _insecure
 
 ## Капабилити, которые поддерживает ЭТОТ клиент; с сервером работает пересечение
 ## (см. «features» в docs/home-server.md).
@@ -59,7 +86,7 @@ var busy := false
 
 var _crypto := Crypto.new()
 var _key: CryptoKey = null           # наш RSA-ключ (лениво: с диска или генерация)
-var _domain_keys: Dictionary = {}    # domain -> {fetched_at: int, keys: {key_id: pub_b64}}
+var _domain_keys: Dictionary = {}    # domain -> {fetched_at: int, keys: {key_id: pub_b64}, origin: url}
 var _path := SETTINGS_PATH
 var _key_path := KEY_PATH
 var _servers_path := KNOWN_SERVERS_PATH
@@ -71,6 +98,10 @@ func _ready() -> void:
 	_servers_path = Sandbox.resolve(KNOWN_SERVERS_PATH)
 	_load_state()
 	_load_known_servers()
+	if insecure_identity():
+		push_warning("HomeServer: небезопасный режим идентичности ВКЛЮЧЁН (%s / %s). "
+			% [INSECURE_ARG, INSECURE_ENV] + "Строгая проверка источника ключей отключена — "
+			+ "только для локальной разработки/тестов, НЕ для прода.")
 	Settings.changed.connect(_on_settings_changed)
 	# Стартовый refresh: discovery + валидация токена + продление сертификата.
 	refresh()
@@ -186,10 +217,13 @@ func refresh() -> void:
 	if res.code == 200 and typeof(res.data) == TYPE_DICTIONARY:
 		discovery = res.data
 		announced_signaling_url = str(discovery.get("config", {}).get("signaling_url", ""))
-		# Ключи своего сервера — сразу в кэш доменов (пригодятся для проверки соседей).
+		# Ключи своего сервера — в кэш доменов (пригодятся для проверки соседей), НО только как
+		# авторитетные для домена, который сервер про себя заявил, если этот домен канонично
+		# совпадает с хостом, куда мы реально ходили. Иначе сервер присваивает себе чужой домен
+		# (или врёт про свой) — в строгом режиме не кэшируем. См. шапку и docs/home-server.md.
 		var domain := str(discovery.get("server", {}).get("domain", ""))
-		if domain != "":
-			_cache_domain_keys(domain, discovery.get("signing_keys", []))
+		if domain != "" and _accept_key_origin(base, domain, "домашний сервер"):
+			_cache_domain_keys(domain, discovery.get("signing_keys", []), base)
 	else:
 		discovery_error = _err_msg(res, "Сервер недоступен.")
 	if access_token != "":
@@ -328,20 +362,29 @@ func verify_peer_certificate(peer_cert_json: String, signature_b64: String) -> D
 
 
 ## signing_keys домена: свежий кэш → сеть → протухший кэш (лучше, чем ничего: сервер
-## пира может быть временно недоступен, а сертификат самодостаточен).
+## пира может быть временно недоступен, а сертификат самодостаточен). Кэш и сетевой ответ
+## принимаются, только если их источник канонический для домена (строгий режим) — иначе
+## отравленный/downgrade-источник не подставится под проверку. См. шапку.
 func _signing_keys_for(domain: String) -> Dictionary:
 	var entry: Dictionary = _domain_keys.get(domain, {})
 	var now := int(Time.get_unix_time_from_system())
-	if not entry.is_empty() and now - int(entry.get("fetched_at", 0)) < KEYS_TTL:
+	# Свежий кэш используем, только если его источник канонический (в insecure — любой). Так
+	# запись, отравленная в insecure-сессии, не «переживает» до истечения TTL в строгом режиме.
+	if not entry.is_empty() and now - int(entry.get("fetched_at", 0)) < KEYS_TTL \
+			and (insecure_identity() or _origin_is_canonical(str(entry.get("origin", "")), domain)):
 		return entry.get("keys", {})
-	var res := await _http(HTTPClient.METHOD_GET, _well_known_url(domain), [])
+	var url := _well_known_url(domain)
+	if not _accept_key_origin(url, domain, "домен сертификата"):
+		return entry.get("keys", {}) if insecure_identity() else {}
+	var res := await _http(HTTPClient.METHOD_GET, url, [])
 	if res.code == 200 and typeof(res.data) == TYPE_DICTIONARY:
-		return _cache_domain_keys(domain, res.data.get("signing_keys", []))
+		return _cache_domain_keys(domain, res.data.get("signing_keys", []), url)
 	return entry.get("keys", {})
 
 
-## Запомнить signing_keys домена (память + диск). Возвращает {key_id: pub_b64}.
-func _cache_domain_keys(domain: String, signing_keys: Variant) -> Dictionary:
+## Запомнить signing_keys домена (память + диск) вместе с origin (откуда взяты — для проверки
+## каноничности при чтении кэша). Возвращает {key_id: pub_b64}.
+func _cache_domain_keys(domain: String, signing_keys: Variant, origin: String) -> Dictionary:
 	var keys := {}
 	if typeof(signing_keys) == TYPE_ARRAY:
 		for k in signing_keys:
@@ -349,18 +392,42 @@ func _cache_domain_keys(domain: String, signing_keys: Variant) -> Dictionary:
 				var kid := str(k.get("key_id", ""))
 				if kid != "":
 					keys[kid] = str(k.get("public_key", ""))
-	_domain_keys[domain] = {"fetched_at": int(Time.get_unix_time_from_system()), "keys": keys}
+	_domain_keys[domain] = {"fetched_at": int(Time.get_unix_time_from_system()), "keys": keys, "origin": origin}
 	_save_known_servers()
 	return keys
 
 
-## URL discovery для домена. Федерация ходит по https; исключение — наш собственный
-## сервер: для него берём наш base URL как есть (локальная разработка по http).
+## URL discovery для домена. Федерация ходит по https://<домен>; исключение — наш собственный
+## сервер по тому же хосту: для него берём наш base URL как есть (локальная разработка по http
+## работает только в insecure-режиме — строгий отклонит не-https источник).
 func _well_known_url(domain: String) -> String:
 	var base := server_url()
 	if base != "" and _host_of(base) == domain:
 		return base + "/.well-known/vrweb"
 	return "https://" + domain + "/.well-known/vrweb"
+
+
+## Канонический ли источник `url` для ключей `domain`: только https и хост == домен. Это
+## единственный источник, которому мы верим как авторитетному в строгом режиме.
+static func _origin_is_canonical(url: String, domain: String) -> bool:
+	return url.begins_with("https://") and _host_of(url) == domain
+
+
+## Принять ли ключи домена из источника `url`. Канонический — да, молча. Неканонический —
+## в insecure-режиме да, но с мягким предупреждением («подозрительно»); в строгом — нет.
+## what — что за источник (для текста предупреждения). Общий гейт для discovery и проверки пиров.
+func _accept_key_origin(url: String, domain: String, what: String) -> bool:
+	if _origin_is_canonical(url, domain):
+		return true
+	if insecure_identity():
+		push_warning("HomeServer: %s заявляет домен «%s», но ключи взяты из неканоничного "
+			% [what, domain] + "источника %s (не https://%s). Подозрительно; принято только "
+			% [url, domain] + "из-за insecure-режима — в проде было бы отклонено.")
+		return true
+	push_warning("HomeServer: %s заявляет домен «%s», но ключи доступны только с https://%s "
+		% [what, domain, domain] + "(строгий режим). Источник %s отклонён. Для локалки: %s / %s=1."
+		% [url, INSECURE_ARG, INSECURE_ENV])
+	return false
 
 
 # --- Реакция на настройки ---
@@ -404,6 +471,9 @@ func _load_known_servers() -> void:
 		_domain_keys[domain] = {
 			"fetched_at": int(cfg.get_value(domain, "fetched_at", 0)),
 			"keys": cfg.get_value(domain, "keys", {}),
+			# origin отсутствует у старых записей → "" (неканоничный) → строгий режим их не
+			# использует и перезапросит канонично. Безопасный дефолт при апгрейде.
+			"origin": str(cfg.get_value(domain, "origin", "")),
 		}
 
 
@@ -412,6 +482,7 @@ func _save_known_servers() -> void:
 	for domain in _domain_keys:
 		cfg.set_value(domain, "fetched_at", _domain_keys[domain]["fetched_at"])
 		cfg.set_value(domain, "keys", _domain_keys[domain]["keys"])
+		cfg.set_value(domain, "origin", _domain_keys[domain].get("origin", ""))
 	cfg.save(_servers_path)
 
 

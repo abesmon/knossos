@@ -366,6 +366,9 @@ func _refresh_account() -> void:
 			% [srv.get("name", srv.get("domain", "?")), srv.get("domain", "?"), ", ".join(feats)]
 	else:
 		_hs_server_status.text = url
+	# Небезопасный режим идентичности (локалка/тесты) — предупреждаем, что галочки не строгие.
+	if HomeServer.insecure_identity():
+		_hs_server_status.text += "\n⚠ Небезопасный режим идентичности включён — проверки ослаблены (только для разработки)."
 	var logged: bool = HomeServer.is_logged_in()
 	_hs_account_status.text = "Вы вошли как %s" % HomeServer.address if logged \
 		else "Вы не вошли — для других вы аноним с самозаявленным ID."

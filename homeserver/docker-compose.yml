@@ -1,0 +1,17 @@
+services:
+  homeserver:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      VRWEB_DOMAIN: ${VRWEB_DOMAIN:-localhost}
+      VRWEB_NAME: ${VRWEB_NAME:-VRWeb Home}
+      VRWEB_HOMEPAGE: ${VRWEB_HOMEPAGE:-}
+      VRWEB_SIGNALING_URL: ${VRWEB_SIGNALING_URL:-}
+      VRWEB_REGISTRATION_OPEN: ${VRWEB_REGISTRATION_OPEN:-true}
+    volumes:
+      - data:/app/data
+    restart: unless-stopped
+
+volumes:
+  data:

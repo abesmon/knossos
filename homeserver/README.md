@@ -26,6 +26,19 @@ discovery — `/.well-known/vrweb`, сигналинг — `ws://host:8080/signa
 
 ## Запуск в Docker
 
+Самый простой способ — docker compose:
+
+```bash
+cd homeserver
+cp .env.example .env   # поправить VRWEB_DOMAIN и остальное
+docker compose up -d --build
+```
+
+Данные (SQLite + подписывающий ключ) живут в именованном volume `data` — переживают
+пересборку/перезапуск контейнера.
+
+Вручную, без compose:
+
 ```bash
 cd homeserver
 docker build -t vrweb-homeserver .
