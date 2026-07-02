@@ -82,6 +82,31 @@ layout_mode = 2
 tooltip_text = "Очистить (не загружать страницу при запуске)"
 text = "✕"
 
+[node name="FovRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings" unique_id=991100005]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow" unique_id=991100006]
+custom_minimum_size = Vector2(96, 0)
+layout_mode = 2
+tooltip_text = "Угол обзора камеры (вертикальный FOV). Больше — шире обзор, но сильнее искажения по краям."
+text = "Обзор (FOV)"
+
+[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow" unique_id=991100007]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 30.0
+max_value = 120.0
+step = 1.0
+value = 75.0
+
+[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow" unique_id=991100008]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+text = "75°"
+horizontal_alignment = 2
+
 [node name="NetSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=1884775178]
 visible = false
 layout_mode = 2

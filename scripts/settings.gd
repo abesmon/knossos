@@ -61,6 +61,12 @@ var home_server_url: String = ""
 ## Домашняя страница: адрес, который грузится автоматически при запуске (см. main._ready).
 ## Пусто — без автозагрузки: стартуем на пустом экране с фокусом в адресной строке.
 var home_page: String = ""
+## Угол обзора камеры игрока (вертикальный FOV, градусы). 75 — дефолт Camera3D в Godot.
+## Применяется в Player._ready() и по Settings.changed (см. docs/settings.md).
+const FOV_MIN := 30.0
+const FOV_MAX := 120.0
+const DEFAULT_FOV := 75.0
+var fov: float = DEFAULT_FOV
 var nick: String = ""
 var avatar_uri: String = DEFAULT_AVATAR_URI
 ## Постоянный идентификатор этого пользователя (UUID-подобная hex-строка), генерится один раз
@@ -210,6 +216,7 @@ func load_settings() -> void:
 		signaling_url = ""
 	home_server_url = cfg.get_value("net", "home_server_url", home_server_url)
 	home_page = cfg.get_value("browser", "home_page", home_page)
+	fov = clampf(cfg.get_value("graphics", "fov", fov), FOV_MIN, FOV_MAX)
 	nick = cfg.get_value("net", "nick", nick)
 	user_id = cfg.get_value("identity", "user_id", user_id)
 	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
@@ -232,6 +239,7 @@ func save() -> void:
 	cfg.set_value("net", "signaling_url", signaling_url)
 	cfg.set_value("net", "home_server_url", home_server_url)
 	cfg.set_value("browser", "home_page", home_page)
+	cfg.set_value("graphics", "fov", fov)
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("identity", "user_id", user_id)
 	cfg.set_value("avatar", "uri", avatar_uri)

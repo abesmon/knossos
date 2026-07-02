@@ -73,6 +73,15 @@ func _ready() -> void:
 	capture_mouse(true)
 	_setup_local_avatar()
 	_setup_tools()
+	_apply_fov()
+	Settings.changed.connect(_apply_fov)
+
+
+## Угол обзора камеры — из Settings.fov (настройки → «Основные»); применяется живьём при
+## движении ползунка (см. scenes/settings.gd._on_fov_changed) и при сохранении.
+func _apply_fov() -> void:
+	if _camera != null:
+		_camera.fov = Settings.fov
 
 
 ## Видимое тело игрока — чтобы видеть себя в зеркалах (как в VRChat). Тело висит на слое

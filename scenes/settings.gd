@@ -39,6 +39,8 @@ const THRESH_MAX := 0.15
 }
 @onready var _home: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow/Home
 @onready var _home_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow/Clear
+@onready var _fov_slider: HSlider = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow/Slider
+@onready var _fov_value: Label = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow/Value
 @onready var _url: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Url
 @onready var _url_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Clear
 @onready var _nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow/Nick
@@ -116,6 +118,8 @@ func _ready() -> void:
 	_world_go_home.pressed.connect(_on_go_home)
 	_face_pick.pressed.connect(_face_dialog.popup_centered_ratio)
 	_face_dialog.file_selected.connect(_on_face_selected)
+	# Обзор камеры — применяем живьём (видно сразу, если экран открыт поверх мира).
+	_fov_slider.value_changed.connect(_on_fov_changed)
 	# Очистка полей: пустые на сохранении превратятся в дефолты (placeholder подсказывает).
 	_home_clear.pressed.connect(_home.clear)
 	_url_clear.pressed.connect(_url.clear)
@@ -173,6 +177,8 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_mode.select(_mode_to_index(Settings.voice_mode))
 	_denoise.button_pressed = Settings.voice_denoise
 	_home.text = Settings.home_page
+	_fov_slider.set_value_no_signal(Settings.fov)
+	_update_fov_label(Settings.fov)
 	# Поле сигналинга: пусто = авторежим (анонс домашнего сервера / дефолт сборки) —
 	# фактический адрес показываем плейсхолдером.
 	_url.text = Settings.signaling_url
@@ -699,6 +705,18 @@ func _on_volume_changed(value: float, bus_name: String) -> void:
 
 func _update_volume_label(bus_name: String, value: float) -> void:
 	_vol_values[bus_name].text = "%d%%" % roundi(value * 100.0)
+
+
+## Движение ползунка обзора камеры: применяем живьём (Settings.changed слушает Player) и
+## обновляем подпись в градусах.
+func _on_fov_changed(value: float) -> void:
+	Settings.fov = value
+	Settings.changed.emit()
+	_update_fov_label(value)
+
+
+func _update_fov_label(value: float) -> void:
+	_fov_value.text = "%d°" % roundi(value)
 
 
 ## Движение ползунка усиления микрофона: применяем к VoiceManager живьём (видно по индикатору).
