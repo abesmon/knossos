@@ -22,23 +22,24 @@ color = Color(0, 0, 0, 0.55)
 
 [node name="Panel" type="PanelContainer" parent="." unique_id=1611600985]
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
+anchors_preset = -1
+anchor_left = 0.08
+anchor_top = 0.08
+anchor_right = 0.92
+anchor_bottom = 0.92
 grow_horizontal = 2
 grow_vertical = 2
 
 [node name="Margin" type="MarginContainer" parent="Panel" unique_id=1887913210]
 layout_mode = 2
-theme_override_constants/margin_left = 16
+theme_override_constants/margin_left = 42
 theme_override_constants/margin_top = 16
-theme_override_constants/margin_right = 16
+theme_override_constants/margin_right = 42
 theme_override_constants/margin_bottom = 16
 
 [node name="VBoxContainer" type="VBoxContainer" parent="Panel/Margin" unique_id=576267187]
 layout_mode = 2
+theme_override_constants/separation = 16
 
 [node name="SettingsLabel" type="Label" parent="Panel/Margin/VBoxContainer" unique_id=506637704]
 layout_mode = 2
@@ -98,7 +99,6 @@ size_flags_horizontal = 3
 size_flags_vertical = 4
 min_value = 30.0
 max_value = 120.0
-step = 1.0
 value = 75.0
 
 [node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow" unique_id=991100008]
@@ -675,6 +675,10 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "Вход даёт подписанный сертификат идентичности: другие игроки видят подтверждённый адрес nick@domain вместо самозаявленного ID. Без входа вы — аноним."
 autowrap_mode = 3
+
+[node name="Spacer" type="Control" parent="Panel/Margin/VBoxContainer" unique_id=1499833373]
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer" unique_id=1634399168]
 layout_mode = 2

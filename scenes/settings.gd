@@ -213,6 +213,9 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_update_world_availability()
 	_refresh_world()
 	show()
+	# Чат-лог добавляется в UI позже настроек, поэтому по умолчанию рисуется поверх них.
+	# Поднимаем оверлей на передний план среди сиблингов, чтобы настройки перекрывали всё.
+	move_to_front()
 	_nick.grab_focus()
 
 
