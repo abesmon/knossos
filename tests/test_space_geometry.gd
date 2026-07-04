@@ -5,7 +5,7 @@ extends SceneTree
 ##   - сборка доходит до build_complete, не падает;
 ##   - на каждую комнату есть holder Room_*, у него полы (StaticBody3D) и стены;
 ##   - футпринты комнат не пересекаются между собой (SpaceLayout), у не-корня есть вход;
-##   - spawn_point стоит над первой route-клеткой root-комнаты, если route есть.
+##   - spawn_point стоит над первой route-клеткой «верхней» комнаты (мин. doc_order), если route есть.
 ## Запуск: godot --headless --path . --script res://tests/test_space_geometry.gd
 
 const RICH := """
@@ -272,11 +272,14 @@ func _check_case(name: String) -> void:
 		int(floor((sp.z - _gen._shift.z) / WorldGenerator.GRID)))
 	var on_floor: bool = owner.has(cell) or _gen._corr_cells.has(cell)
 	_expect(name, "спавн над полом", on_floor, "spawn=%s cell=%s" % [str(sp), str(cell)])
-	var root_routes: Array = rooms.get(root_id, {}).get("routes", [])
-	if not root_routes.is_empty() and not root_routes[0].is_empty():
-		var route_cell: Vector2i = root_routes[0][0]
-		_expect(name, "спавн на первой route-клетке root", cell == route_cell,
-			"spawn_cell=%s route_cell=%s" % [str(cell), str(route_cell)])
+	# Спавн — на первой route-клетке «верхней» комнаты (мин. doc_order среди листьев с
+	# наполнением), а не обязательно root: см. WorldGenerator._find_spawn_room_id.
+	var target_id: int = _gen._spawn_target_id if _gen._spawn_target_id != -1 else root_id
+	var target_routes: Array = rooms.get(target_id, {}).get("routes", [])
+	if not target_routes.is_empty() and not target_routes[0].is_empty():
+		var route_cell: Vector2i = target_routes[0][0]
+		_expect(name, "спавн на первой route-клетке верхней комнаты", cell == route_cell,
+			"spawn_cell=%s route_cell=%s target=%d" % [str(cell), str(route_cell), target_id])
 
 	print("  rooms=%d corridors=%d unrouted=%d holders=%d bodies=%d" %
 		[rooms.size(), layout.get("corridors", []).size(), unrouted, room_holders, bodies])

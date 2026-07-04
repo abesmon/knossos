@@ -64,6 +64,7 @@ const LINK_GROUP_MIN := 3        # ≥ столько ссылок в конте
 var _rooms: Dictionary = {}      # id -> Room
 var _labels: Dictionary = {}     # anchorId -> id
 var _next_id: int = 0
+var _doc_seq: int = 0            # монотонный счётчик открытия фреймов = порядок чтения (hints.doc_order)
 var _base_px: float = 16.0       # базовый кегль страницы (нужен детектору заголовков)
 var _debug: bool = false         # собирать ли карту id -> исходный HTML (только для отладки)
 var _sources: Dictionary = {}    # id -> реконструированный HTML (заполняется при _debug)
@@ -168,10 +169,14 @@ func _new_frame(type: String, node, weight: int, title, light_kind: String) -> D
 	var css := {}
 	if node != null:
 		_merge_into(css, _css_hints(node))
+	# seq — порядок открытия фрейма в DFS = порядок чтения документа (нет layout-пассы, но
+	# очерёдность в потоке контента у нас есть). Меньше seq = выше на странице (хэдер идёт первым).
+	var seq := _doc_seq
+	_doc_seq += 1
 	return {
 		"type": type, "weight": weight, "title": title, "node": node,
 		"light_kind": light_kind, "items": [], "anchors": anchors,
-		"css": css, "runbuf": [],
+		"css": css, "runbuf": [], "seq": seq,
 	}
 
 
@@ -512,7 +517,7 @@ func _materialize(frame: Dictionary) -> int:
 
 	# Соединитель — кластер, чья роль ТОЛЬКО ветвиться: ≥2 детей и нет своего наполнения.
 	var kind := "connector" if (child_ids.size() >= 2 and objects.is_empty()) else "room"
-	var hints := {"weight": weight}
+	var hints := {"weight": weight, "doc_order": int(frame["seq"])}
 	if child_ids.size() >= 2:
 		hints["degree"] = child_ids.size()
 	if frame["node"] != null:
@@ -584,6 +589,10 @@ func _flush_merge(merge: Array, result: Array) -> void:
 ## ребёнка), css-box (стены/пол), семантический тег (если у ребёнка своего нет).
 func _merge_meta_into_room(frame: Dictionary, room_id: int) -> void:
 	var room: Dictionary = _rooms[room_id]
+	# Проходной родитель открылся раньше ребёнка (меньший seq = выше на странице): выжившая
+	# комната наследует верхнюю позицию, чтобы спавн-выбор по doc_order не «проваливался» вниз.
+	var order: int = int(room["hints"].get("doc_order", frame["seq"]))
+	room["hints"]["doc_order"] = mini(order, int(frame["seq"]))
 	for aid in frame["anchors"]:
 		_labels[aid] = room_id
 	if not (frame["css"] as Dictionary).is_empty():
