@@ -78,6 +78,10 @@ const EPHEMERAL_ADMIN_RANK := 0
 
 var _ws: WebSocketPeer
 var _was_open := false
+# Эффективный адрес сигналинга (до нормализации в ws/wss), с которым открыт/открывается
+# текущий сокет. Сравнивается с Settings.effective_signaling_url(): анонс домашнего сервера
+# мог прийти/смениться после подключения — тогда connect_to_server честно переподключается.
+var _target_url := ""
 var _my_id := 0
 var _room := ""            # желаемая комната; "" — не в комнате
 var _pending_join := false # ждём welcome, чтобы отправить join
@@ -156,24 +160,32 @@ func webrtc_available() -> bool:
 ## адрес, анонс домашнего сервера или дефолт сборки). Сама комната задаётся отдельно через
 ## join_room — обычно main зовёт его сразу после connect.
 ##
-## ИДЕМПОТЕНТЕН: если сокет уже открыт ИЛИ ещё подключается — не рвём его ради нового.
-## Иначе повторный вызов в окне рукопожатия (is_online() ещё false, т.к. состояние не OPEN,
-## а CONNECTING) открыл бы новый сокет — сервер выдал бы НОВЫЙ, больший peer_id. Авторитет
-## считается по МИНИМАЛЬНОМУ id (кто раньше подключился), поэтому «прожжённый» id ломает
-## старшинство: свежезашедший может оказаться с меньшим id, стать авторитетом и снести своим
-## пустым снимком чужое состояние. См. docs/authority.md. join_room, выставив _pending_join,
-## отправит вход сам, как только придёт welcome по уже идущему соединению.
+## ИДЕМПОТЕНТЕН: если сокет уже открыт ИЛИ ещё подключается К ТОМУ ЖЕ адресу — не рвём его
+## ради нового. Иначе повторный вызов в окне рукопожатия (is_online() ещё false, т.к. состояние
+## не OPEN, а CONNECTING) открыл бы новый сокет — сервер выдал бы НОВЫЙ, больший peer_id.
+## Авторитет считается по МИНИМАЛЬНОМУ id (кто раньше подключился), поэтому «прожжённый» id
+## ломает старшинство: свежезашедший может оказаться с меньшим id, стать авторитетом и снести
+## своим пустым снимком чужое состояние. См. docs/authority.md. join_room, выставив
+## _pending_join, отправит вход сам, как только придёт welcome по уже идущему соединению.
+##
+## Если же эффективный адрес СМЕНИЛСЯ (пользователь переопределил, домашний сервер анонсировал
+## другой сигналинг) — старое соединение вело бы не туда: рвём и подключаемся заново. Вызывающий
+## (main._join_current_room) сразу после нас зовёт join_room — вход в комнату восстановится.
 func connect_to_server() -> void:
 	if not webrtc_available():
 		push_warning("WebRTC недоступен: положите аддон webrtc-native в addons/webrtc")
 		return
+	var target := Settings.effective_signaling_url()
 	if _ws != null:
 		var state := _ws.get_ready_state()
 		if state == WebSocketPeer.STATE_OPEN or state == WebSocketPeer.STATE_CONNECTING:
-			return
+			if target == _target_url:
+				return
+			_nlog("сигналинг сменился: %s -> %s, переподключаемся" % [_target_url, target])
 	disconnect_from_server()
 	_ws = WebSocketPeer.new()
-	var url := _ws_url(Settings.effective_signaling_url())
+	_target_url = target
+	var url := _ws_url(target)
 	_nlog("connect_to_server -> %s" % url)
 	var err := _ws.connect_to_url(url)
 	if err != OK:

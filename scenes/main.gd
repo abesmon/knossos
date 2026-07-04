@@ -805,6 +805,12 @@ func _setup_net() -> void:
 	_build_chat_ui(ui)
 
 	Settings.changed.connect(_on_settings_changed)
+	# Discovery домашнего сервера завершился (в т.ч. после смены адреса в настройках) —
+	# эффективный сигналинг мог смениться (анонс сервера). _sync_online → connect_to_server
+	# сравнит адреса и при необходимости честно переподключится. Именно refresh_finished,
+	# а не state_changed: тот эмитится и В НАЧАЛЕ refresh (анонс временно сброшен в "") —
+	# реагируя на него, мы бы дёргались на конфигный адрес и обратно.
+	HomeServer.refresh_finished.connect(_sync_online)
 	NetworkManager.connection_changed.connect(_on_connection_changed)
 	NetworkManager.chat_received.connect(_on_chat_received)
 	# Взаимодействие с голосом (смена режима / нажатие V) — мигаем индикатором даже без сигнала.
@@ -849,13 +855,14 @@ func _sync_online() -> void:
 	_update_chat_visibility()
 
 
-## Подключиться (если ещё нет) и войти в комнату текущего URL. join_room сам поставит
-## вход в очередь, если соединение ещё устанавливается.
+## Подключиться (если ещё нет) и войти в комнату текущего URL. connect_to_server идемпотентен
+## (живое соединение с актуальным адресом не трогает), а при сменившемся эффективном адресе
+## сигналинга — переподключается; join_room сам поставит вход в очередь, если соединение ещё
+## устанавливается.
 func _join_current_room() -> void:
 	if not (Settings.online_enabled and NetworkManager.webrtc_available()):
 		return
-	if not NetworkManager.is_online():
-		NetworkManager.connect_to_server()
+	NetworkManager.connect_to_server()
 	if _current_url != "":
 		NetworkManager.join_room(PageFetcher.seed_key(_current_url))
 

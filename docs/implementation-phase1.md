@@ -336,7 +336,9 @@ GODOT="/Applications/Godot 4.4.1.app/Contents/MacOS/Godot"
 "$GODOT" --headless --path . --script res://tests/test_topology.gd   # тест пайплайна
 ```
 
-Главная сцена: `res://scenes/main.tscn` (`run/main_scene` в `project.godot`).
+Главная сцена: `res://scenes/loading_screen.tscn` (`run/main_scene` в `project.godot`) —
+экран загрузки ждёт discovery домашнего сервера (см. [home-server.md](home-server.md)) и
+переходит в `res://scenes/main.tscn`.
 
 ## Известные ограничения (кандидаты на следующие итерации)
 
