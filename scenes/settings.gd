@@ -151,6 +151,9 @@ func _ready() -> void:
 	# аргументы сигналов — нам нужен только факт изменения.
 	NetworkManager.peer_joined.connect(_users_dirty.unbind(2))
 	NetworkManager.peer_left.connect(_users_dirty.unbind(1))
+	NetworkManager.peer_ghosted.connect(_users_dirty.unbind(3))
+	NetworkManager.ghost_expired.connect(_users_dirty.unbind(1))
+	NetworkManager.peer_reclaimed.connect(_users_dirty.unbind(2))
 	NetworkManager.p2p_peer_connected.connect(_users_dirty.unbind(1))
 	NetworkManager.p2p_peer_disconnected.connect(_users_dirty.unbind(1))
 	NetworkManager.identity_received.connect(_users_dirty.unbind(4))
@@ -483,9 +486,17 @@ func _refresh_users() -> void:
 		var uid := NetworkManager.user_id_of(pid)
 		if uid != "":
 			shown_uids[uid] = true
-		_add_user_row(NetworkManager.nick_of(pid), uid, true, NetworkManager.peer_p2p_connected(pid), ranks, is_auth, authority_uid, false, NetworkManager.verified_address_of(pid))
+		_add_user_row(NetworkManager.nick_of(pid), uid, true, NetworkManager.peer_p2p_connected(pid), ranks, is_auth, authority_uid, false, NetworkManager.verified_address_of(pid), NetworkManager.peer_p2p_lost(pid))
 		rows += 1
-	# 3) Ранги без онлайн-пира: запись есть, человека нет.
+	# 3) «Призраки»: недавно ушли, ждём переподключения (grace-период, см. NetworkManager).
+	var ghosts := NetworkManager.ghosts_snapshot()
+	for uid in ghosts.keys():
+		if shown_uids.has(uid):
+			continue
+		shown_uids[uid] = true
+		_add_ghost_row(str(ghosts[uid].get("nick", "")), uid, ranks)
+		rows += 1
+	# 4) Ранги без онлайн-пира: запись есть, человека нет.
 	for uid in ranks.keys():
 		if shown_uids.has(uid):
 			continue
@@ -494,31 +505,75 @@ func _refresh_users() -> void:
 	_users_empty.visible = rows == 0
 
 
+## Строка «призрака»: пир только что ушёл, NetworkManager ждёт его переподключения
+## (grace-период). Оранжевая иконка no-connection + серый ник; ранг — только просмотр
+## (запись в таблице жива, вернётся вместе с пиром).
+func _add_ghost_row(nick: String, uid: String, ranks: Dictionary) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var icon := TextureRect.new()
+	icon.texture = StatusIcons.texture(StatusIcons.Status.OFFLINE)
+	icon.self_modulate = StatusIcons.color(StatusIcons.Status.OFFLINE)
+	icon.custom_minimum_size = Vector2(16, 16)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(icon)
+	var name_label := Label.new()
+	name_label.text = "%s (нет связи)" % (nick if nick != "" else "Гость")
+	name_label.tooltip_text = "user_id: %s\nПир отключился — ждём переподключения" % uid
+	name_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	row.add_child(name_label)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+	var rank_label := Label.new()
+	rank_label.text = ("ранг %d" % int(ranks[uid])) if ranks.has(uid) else "—"
+	rank_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	row.add_child(rank_label)
+	_users_list.add_child(row)
+
+
 ## Одна строка списка. uid == "" — карточка пира ещё не пришла (рангом управлять нельзя).
-## p2p_connected отличает «видим ник через сигналинг» от «RPC-канал реально открыт».
+## p2p_connected отличает «видим ник через сигналинг» от «RPC-канал реально открыт»;
+## p2p_lost — канал БЫЛ открыт и оборвался (пир ещё в комнате) — рисуем иконку no-connection.
 ## is_self — это мы (только просмотр). authority_uid — user_id авторитета (для отметки «★»).
 ## verified — криптографически подтверждённый адрес nick@domain ("" — аноним/не проверен),
 ## см. docs/home-server.md.
-func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool, ranks: Dictionary, is_auth: bool, authority_uid: String, is_self: bool, verified: String) -> void:
+func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool, ranks: Dictionary, is_auth: bool, authority_uid: String, is_self: bool, verified: String, p2p_lost: bool = false) -> void:
 	var has_rank := uid != "" and ranks.has(uid)
 	var is_authority := uid != "" and uid == authority_uid
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 
 	var name_label := Label.new()
-	name_label.text = _user_display_name(nick, uid, online, p2p_connected, is_self, is_authority)
+	name_label.text = _user_display_name(nick, uid, online, p2p_connected, is_self, is_authority, p2p_lost)
 	var tip := "user_id: %s" % uid if uid != "" else ""
 	if verified != "":
 		tip = (tip + "\n" if tip != "" else "") \
 			+ "✓ %s — личность подтверждена домашним сервером" % verified
 	if is_authority:
 		tip = (tip + "\n" if tip != "" else "") + "★ — авторитет (раздаёт ранги)"
+	elif p2p_lost:
+		tip = "WebRTC-канал к пиру оборвался (пир ещё в комнате по сигналингу)"
 	elif online and not p2p_connected:
 		tip = "Пир виден через сигналинг, но WebRTC/RPC-канал ещё не открылся"
 	name_label.tooltip_text = tip
-	if not online:
+	if not online or p2p_lost:
 		name_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	row.add_child(name_label)
+
+	# Обрыв связи — та же иконка no-connection, что и над неймплейтом (StatusIcons.OFFLINE).
+	if p2p_lost:
+		var conn_icon := TextureRect.new()
+		conn_icon.texture = StatusIcons.texture(StatusIcons.Status.OFFLINE)
+		conn_icon.self_modulate = StatusIcons.color(StatusIcons.Status.OFFLINE)
+		conn_icon.custom_minimum_size = Vector2(16, 16)
+		conn_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		conn_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		conn_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		conn_icon.tooltip_text = tip
+		row.add_child(conn_icon)
 
 	# Подтверждённая идентичность — та же иконка-галочка, что и в неймплейте (StatusIcons).
 	if verified != "":
@@ -572,7 +627,10 @@ func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool,
 	else:
 		# Онлайн-пир без p2p или без полученной карточки — рангом пока управлять нельзя.
 		var note := Label.new()
-		note.text = "P2P подключается" if not p2p_connected else "ID ещё не получен"
+		if p2p_lost:
+			note.text = "нет связи"
+		else:
+			note.text = "P2P подключается" if not p2p_connected else "ID ещё не получен"
 		note.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 		row.add_child(note)
 
@@ -580,13 +638,15 @@ func _add_user_row(nick: String, uid: String, online: bool, p2p_connected: bool,
 
 
 ## Подпись строки: ник для онлайн-пира, короткий user_id для офлайн-записи, «(вы)» для себя,
-## «★» для авторитета.
-func _user_display_name(nick: String, uid: String, online: bool, p2p_connected: bool, is_self: bool, is_authority: bool) -> String:
+## «★» для авторитета, «(нет связи)» при обрыве p2p-канала.
+func _user_display_name(nick: String, uid: String, online: bool, p2p_connected: bool, is_self: bool, is_authority: bool, p2p_lost: bool = false) -> String:
 	var base := ""
 	if online:
 		var who := nick if nick != "" else "Гость"
 		base = "● %s" % who
-		if not p2p_connected:
+		if p2p_lost:
+			base += " (нет связи)"
+		elif not p2p_connected:
 			base += " (P2P подключается)"
 		elif uid == "":
 			base += " (ID ещё не получен)"

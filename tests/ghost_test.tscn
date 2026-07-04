@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cmaw8rhkas5aa"]
+
+[ext_resource type="Script" path="res://tests/ghost_test.gd" id="1"]
+
+[node name="GhostTest" type="Node"]
+script = ExtResource("1")

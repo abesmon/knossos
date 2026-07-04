@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://faceupd00001"]
+
+[ext_resource type="Script" path="res://tests/face_update_test.gd" id="1"]
+
+[node name="FaceUpdateTest" type="Node"]
+script = ExtResource("1")

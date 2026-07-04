@@ -20,6 +20,11 @@ var _capsules := {}        # peer_id -> RemotePlayer
 var _faces := {}           # peer_id -> Texture2D (карточка могла прийти до создания капсулы)
 var _avatar_uris := {}     # peer_id -> String (желаемый аватар из карточки)
 var _avatar_applied := {}  # peer_id -> String (какой аватар уже смонтирован — чтобы не дёргать)
+# Капсулы-«призраки»: пир ушёл, но NetworkManager даёт ему grace-период на переподключение
+# (peer_ghosted). Капсулу не сносим — держим с иконкой «нет связи», а при возврате пира
+# (peer_reclaimed, новый peer_id) отдаём ему обратно — без «моргания». user_id ->
+# {cap, face, uri, applied}. См. docs/multiplayer.md.
+var _ghost_caps := {}
 var _send_accum := 0.0
 var _resolver: AvatarResolver
 
@@ -31,6 +36,11 @@ func setup(player: Node3D) -> void:
 	add_child(_resolver)
 	NetworkManager.peer_joined.connect(_on_peer_joined)
 	NetworkManager.peer_left.connect(_on_peer_left)
+	NetworkManager.peer_ghosted.connect(_on_peer_ghosted)
+	NetworkManager.ghost_expired.connect(_on_ghost_expired)
+	NetworkManager.peer_reclaimed.connect(_on_peer_reclaimed)
+	NetworkManager.p2p_peer_connected.connect(_on_p2p_connected)
+	NetworkManager.p2p_peer_disconnected.connect(_on_p2p_disconnected)
 	NetworkManager.state_received.connect(_on_state_received)
 	NetworkManager.identity_received.connect(_on_identity_received)
 	NetworkManager.identity_verified.connect(_on_identity_verified)
@@ -43,6 +53,11 @@ func _exit_tree() -> void:
 	if NetworkManager.peer_joined.is_connected(_on_peer_joined):
 		NetworkManager.peer_joined.disconnect(_on_peer_joined)
 		NetworkManager.peer_left.disconnect(_on_peer_left)
+		NetworkManager.peer_ghosted.disconnect(_on_peer_ghosted)
+		NetworkManager.ghost_expired.disconnect(_on_ghost_expired)
+		NetworkManager.peer_reclaimed.disconnect(_on_peer_reclaimed)
+		NetworkManager.p2p_peer_connected.disconnect(_on_p2p_connected)
+		NetworkManager.p2p_peer_disconnected.disconnect(_on_p2p_disconnected)
 		NetworkManager.state_received.disconnect(_on_state_received)
 		NetworkManager.identity_received.disconnect(_on_identity_received)
 		NetworkManager.identity_verified.disconnect(_on_identity_verified)
@@ -158,6 +173,75 @@ func _on_voice_received(id: int, payload: PackedByteArray) -> void:
 	var cap: RemotePlayer = _capsules.get(id)
 	if cap != null:
 		cap.push_voice(payload)
+
+
+## Пир ушёл, но NetworkManager ждёт его обратно (grace-период): капсулу НЕ сносим — переносим
+## в пул призраков под его user_id, с иконкой «нет связи». Эмитится ПЕРЕД peer_left, поэтому
+## к приходу peer_left капсулы в _capsules уже нет и она не будет освобождена.
+func _on_peer_ghosted(user_id: String, peer_id: int, _nick: String) -> void:
+	var cap: RemotePlayer = _capsules.get(peer_id)
+	if cap == null:
+		return
+	# Один user_id мог «уйти» дважды (два клиента с общим user://) — старого призрака сносим.
+	_on_ghost_expired(user_id)
+	_capsules.erase(peer_id)
+	_ghost_caps[user_id] = {
+		"cap": cap,
+		"face": _faces.get(peer_id),
+		"uri": _avatar_uris.get(peer_id, ""),
+		"applied": _avatar_applied.get(peer_id, ""),
+	}
+	cap.set_connection_lost(true)
+
+
+## Grace-период истёк (или мы сами ушли из комнаты) — призрак уходит по-настоящему.
+func _on_ghost_expired(user_id: String) -> void:
+	var g: Dictionary = _ghost_caps.get(user_id, {})
+	if g.is_empty():
+		return
+	_ghost_caps.erase(user_id)
+	(g["cap"] as RemotePlayer).queue_free()
+
+
+## Пир вернулся под новым peer_id — отдаём ему его капсулу-призрака. Эмитится ПЕРЕД
+## identity_received, так что карточка следом применит свежие ник/лицо/аватар (если менялись).
+## _avatar_applied переносим — тот же аватар не перемонтируется (нет «моргания» модели).
+func _on_peer_reclaimed(user_id: String, peer_id: int) -> void:
+	var g: Dictionary = _ghost_caps.get(user_id, {})
+	if g.is_empty():
+		return
+	_ghost_caps.erase(user_id)
+	var cap: RemotePlayer = g["cap"]
+	# Гонка: state нового пира мог прийти раньше карточки — капсула под новый id уже создана.
+	# Тогда призрак лишний: оставляем свежую капсулу, призрака сносим.
+	if _capsules.has(peer_id):
+		cap.queue_free()
+		return
+	_capsules[peer_id] = cap
+	if g["face"] != null:
+		_faces[peer_id] = g["face"]
+	if g["uri"] != "":
+		_avatar_uris[peer_id] = g["uri"]
+	if g["applied"] != "":
+		_avatar_applied[peer_id] = g["applied"]
+	cap.set_connection_lost(false)
+	# Верификация привязана к эфемерному peer_id — новый пир докажет личность заново
+	# (identity_verified придёт следом), до тех пор адреса нет.
+	cap.set_verified_address(NetworkManager.verified_address_of(peer_id))
+
+
+## p2p-канал к пиру оборвался/поднялся, пока он ещё в комнате по сигналингу (обрыв ICE) —
+## показываем/снимаем иконку «нет связи» на его капсуле.
+func _on_p2p_connected(id: int) -> void:
+	var cap: RemotePlayer = _capsules.get(id)
+	if cap != null:
+		cap.set_connection_lost(false)
+
+
+func _on_p2p_disconnected(id: int) -> void:
+	var cap: RemotePlayer = _capsules.get(id)
+	if cap != null:
+		cap.set_connection_lost(true)
 
 
 func _on_peer_left(id: int) -> void:

@@ -19,6 +19,10 @@ const AVATAR_LAYER := 11  # бит (AVATAR_LAYER-1)
 
 var _source: AvatarParameterSource
 var _resolver: AvatarResolver
+# Какой avatar_uri уже смонтирован — чтобы сохранение настроек без смены модели не
+# перемонтировало аватар зря (то самое «моргание» зеркала). Ровно как _avatar_applied в
+# RemotePlayersView для чужих капсул.
+var _applied_uri := ""
 
 
 ## Задаёт продюсера параметров игрока. Зовётся ДО add_child (до _ready), чтобы _ready успел
@@ -71,10 +75,16 @@ func _apply_local_identity() -> void:
 
 ## Резолвит аватар из Settings.avatar_uri (как у других игроков) и монтирует его. Для внешних
 ## URL колбэк приходит асинхронно — тогда же переносим тело на слой зеркал (через set_avatar).
+## Модель не сменилась (тот же uri уже смонтирован) — не перемонтируем: иначе каждое сохранение
+## настроек «моргало» бы зеркалом. Лицо/ник обновляются отдельно через _apply_local_identity.
 func _resolve_from_settings() -> void:
-	_resolver.resolve(Settings.avatar_uri, func(scene: PackedScene) -> void:
+	var uri := Settings.avatar_uri
+	if uri == _applied_uri:
+		return
+	_resolver.resolve(uri, func(scene: PackedScene) -> void:
 		if scene != null:
 			set_avatar(scene)
+			_applied_uri = uri
 	)
 
 

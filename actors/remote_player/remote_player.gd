@@ -14,6 +14,9 @@ extends Node3D
 # нет манифеста прав / личность пира пока невозможно верифицировать. Создаём кодом, чтобы не
 # править .tscn. См. docs/avatars.md.
 var _warn: Sprite3D = null
+# Иконка «нет связи» над неймплейтом (оранжевый no-connection): p2p-канал оборвался или пир
+# в grace-периоде «призрака» — ждём переподключения. См. docs/multiplayer.md.
+var _conn: Sprite3D = null
 # Бабл — это UI-плашка (PanelContainer + Label со скруглённым фоном), отрендеренная через
 # SubViewport на billboard-Sprite3D. Так получаем настоящий «пузырь», а не голый текст.
 @onready var _bubble: Sprite3D = $Bubble
@@ -27,6 +30,8 @@ var _has_target := false
 var _nick := "Guest"
 var _verified_address := ""
 var _face_tex: Texture2D = null
+# Связь с пиром потеряна (обрыв p2p / призрак) — иконка no-connection + серый ник.
+var _conn_lost := false
 # Пространственное воспроизведение голоса пира. Создаётся лениво на первом кадре, чтобы
 # у молчащих капсул не висел лишний AudioStreamPlayer3D с открытым генератором.
 var _voice: VoicePlayback = null
@@ -34,6 +39,8 @@ var _voice: VoicePlayback = null
 const LERP_RATE := 12.0
 ## Цвет неймплейта, пока пир говорит (подсветка активности).
 const SPEAKING_COLOR := Color(0.5, 1.0, 0.6)
+## Цвет неймплейта при потере связи с пиром (см. set_connection_lost).
+const LOST_COLOR := Color(0.65, 0.65, 0.65)
 ## Сколько висит речевой бабл, если не пришло новое сообщение.
 const BUBBLE_SECONDS := 30.0
 ## Максимальная ширина текста (px): короткий ужимается под себя, длинный переносится.
@@ -54,8 +61,21 @@ func _ready() -> void:
 	_warn.pixel_size = 0.006   # иконка ~20px → ~0.12 м
 	_warn.visible = false
 	add_child(_warn)
+	_conn = Sprite3D.new()
+	_conn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_conn.shaded = false
+	_conn.no_depth_test = true
+	_conn.pixel_size = 0.006
+	# offset в пикселях спрайта — сдвиг в плоскости билборда: иконка связи живёт левее места
+	# warn-иконки, чтобы они не накладывались, когда видны обе.
+	_conn.offset = Vector2(-28, 0)
+	_conn.texture = StatusIcons.texture(StatusIcons.Status.OFFLINE)
+	_conn.modulate = StatusIcons.color(StatusIcons.Status.OFFLINE)
+	_conn.visible = _conn_lost
+	add_child(_conn)
 	_bubble.texture = _bubble_viewport.get_texture()
 	_bubble_timer.timeout.connect(_hide_bubble)
+	_refresh_name_color()
 	_position_overlays()
 
 
@@ -66,6 +86,8 @@ func _position_overlays() -> void:
 	_nameplate.position.y = h
 	if _warn != null:
 		_warn.position.y = h + 0.35   # над неймплейтом
+	if _conn != null:
+		_conn.position.y = h + 0.35   # там же; разводит offset в плоскости билборда
 	_bubble.position.y = h + 0.5
 
 
@@ -163,8 +185,27 @@ func push_voice(payload: PackedByteArray) -> void:
 	_voice.push(payload)
 
 
+## Связь с пиром потеряна/восстановлена: иконка no-connection над неймплейтом (оранжевая) и
+## серый ник. Ставится при обрыве p2p-канала и на время grace-периода «призрака»; снимается
+## при переподключении (RemotePlayersView). См. docs/multiplayer.md.
+func set_connection_lost(lost: bool) -> void:
+	_conn_lost = lost
+	if _conn != null:
+		_conn.visible = lost
+	_refresh_name_color()
+
+
 func _on_speaking_changed(speaking: bool) -> void:
-	if _nameplate != null:
+	_refresh_name_color(speaking)
+
+
+## Цвет ника: серый при потере связи, зелёный пока говорит, иначе белый.
+func _refresh_name_color(speaking: bool = false) -> void:
+	if _nameplate == null:
+		return
+	if _conn_lost:
+		_nameplate.set_name_color(LOST_COLOR)
+	else:
 		_nameplate.set_name_color(SPEAKING_COLOR if speaking else Color.WHITE)
 
 
