@@ -90,6 +90,23 @@ const NAVBAR := """
 """
 
 
+# RichText только из картинок (без связного текста) распаковывается в отдельные объекты-image.
+# Галерея из inline-картинок-ссылок сливается в ОДИН RichText-сегмент (light-кластер меню),
+# который целиком состоит из картинок -> раскрываем в отдельные image→navigate.
+# Картинка-ссылка сохраняет кликабельность (function переезжает на объект). Смешанный абзац
+# (текст + картинка) панелью остаётся.
+const IMAGES_ONLY := """
+<html><body>
+  <div class="gallery">
+    <a href="/x"><img src="a.png" alt="a"></a>
+    <a href="/y"><img src="b.png" alt="b"></a>
+    <a href="/z"><img src="c.png" alt="c"></a>
+  </div>
+  <p>подпись с <img src="d.png" alt="d"> внутри текста</p>
+</body></html>
+"""
+
+
 var _holder: Node3D
 var _gen
 
@@ -113,6 +130,8 @@ func _initialize() -> void:
 		"<html><body><header><h1>Титул</h1></header>" +
 		"<p><a href=\"/home\" style=\"font-size:22px;font-weight:bold\"><span>ENTER →</span></a></p>" +
 		"</body></html>")
+	# Панель из одних картинок распакована: ждём objs=[image→navigate ×3, text(смешанный)].
+	_dump_case("IMAGES-ONLY (RichText из картинок -> отдельные image)", IMAGES_ONLY)
 	_dump_linebreaks()
 
 	# Geometry smoke: BLOCKS содержит code/quote/figure — проверяем, что рендер не падает.

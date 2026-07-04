@@ -581,8 +581,51 @@ func _form_objects(frame: Dictionary) -> Array:
 
 
 func _flush_merge(merge: Array, result: Array) -> void:
-	if _runs_have_content(merge):
-		result.append(_rich_text_object(null, merge))
+	if not _runs_have_content(merge):
+		return
+	# RichText ТОЛЬКО из картинок — это не «панель с текстом», а картинки в обёртке абзаца.
+	# Панель тут ничего не добавляет и лишь занимает место, поэтому распаковываем её в
+	# отдельные объекты-image (каждая картинка — самостоятельный объект комнаты).
+	if _runs_are_images_only(merge):
+		result.append_array(_images_from_runs(merge))
+		return
+	result.append(_rich_text_object(null, merge))
+
+
+## RichText-сегмент состоит ИСКЛЮЧИТЕЛЬНО из картинок: есть хотя бы один картинка-прогон и
+## ни одного текстового прогона со значимым текстом. Переносы/пробелы между картинками
+## (границы абзацев «\n», схлопнутые пробелы) — это разделители, а не контент, поэтому
+## распаковку не блокируют.
+func _runs_are_images_only(runs: Array) -> bool:
+	var has_image := false
+	for r in runs:
+		if str(r.get("type", "")) == "image":
+			has_image = true
+		elif str(r.get("text", "")).strip_edges() != "":
+			return false
+	return has_image
+
+
+## Разворачивает картинка-прогоны в самостоятельные объекты-image. Каждый несёт src/alt/
+## размеры как обычный объект-картинка, а функция перехода (если картинка была в <a href>)
+## переезжает на уровень объекта — так распакованная картинка-ссылка остаётся кликабельной.
+func _images_from_runs(runs: Array) -> Array:
+	var out: Array = []
+	for r in runs:
+		if str(r.get("type", "")) != "image":
+			continue
+		var content := {"src": str(r.get("src", "")), "alt": str(r.get("alt", ""))}
+		if r.has("width_px"):
+			content["width_px"] = r["width_px"]
+		if r.has("height_px"):
+			content["height_px"] = r["height_px"]
+		var obj := {
+			"id": _alloc(), "type": "image",
+			"function": r.get("function", null), "content": content,
+		}
+		_record_source(obj["id"], null)
+		out.append(obj)
+	return out
 
 
 ## Переносит мету схлопнутого родителя-проходной в комнату-ребёнка: якоря (-> labels на
