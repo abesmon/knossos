@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Моё пространство — {{ cfg.name }}{% endblock %}
+{% block content %}
+<h1>Моё пространство</h1>
+
+<div class="card">
+  <p>Адрес: <a href="{{ url }}"><code>{{ url }}</code></a></p>
+  <p class="muted">Клиент не хранит этот адрес — «кнопка домой» каждый раз спрашивает его
+  у сервера, поэтому смена адреса ломает только розданные ссылки.</p>
+  <form method="post" action="/space/rotate"
+        onsubmit="return confirm('Сменить адрес? Все розданные ссылки перестанут работать.')">
+    <button type="submit">Сменить адрес</button>
+  </form>
+</div>
+
+<form class="card" method="post" action="/space/settings">
+  <label for="name">Название</label>
+  <input type="text" id="name" name="name" value="{{ space['name'] }}" maxlength="64">
+  <label>Кто может заходить</label>
+  <label><input type="radio" name="policy" value="when-home"
+    {% if space['policy'] == 'when-home' %}checked{% endif %}>
+    Пока я дома — гости входят, только когда я в пространстве</label>
+  <label><input type="radio" name="policy" value="public"
+    {% if space['policy'] == 'public' %}checked{% endif %}>
+    Всегда открыто — любой, кто знает адрес</label>
+  <label><input type="radio" name="policy" value="private"
+    {% if space['policy'] == 'private' %}checked{% endif %}>
+    Только я и редакторы</label>
+  <button type="submit">Сохранить</button>
+</form>
+
+<div class="card">
+  <p><b>Редакторы</b> <span class="muted">— федеративные адреса (nick@domain), которым
+  разрешено сохранять изменения в пространство. Владелец может всегда.</span></p>
+  {% if editors %}
+  <table>
+    {% for e in editors %}
+    <tr>
+      <td class="mono">{{ e }}</td>
+      <td style="text-align:right">
+        <form method="post" action="/space/editors/remove" style="margin:0">
+          <input type="hidden" name="address" value="{{ e }}">
+          <button type="submit">Убрать</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Пока никого.</p>
+  {% endif %}
+  <form method="post" action="/space/editors/add">
+    <label for="address">Добавить редактора</label>
+    <input type="text" id="address" name="address" placeholder="nick@domain">
+    <button type="submit">Добавить</button>
+  </form>
+</div>
+{% endblock %}

@@ -483,6 +483,12 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
 	_vrweb_index = SceneHtml.build_page_index(doc)
+	# id узлов базы резервируются в эфемерном слое: add с таким id отклоняется — объект с id
+	# из базы может быть только её запечённой копией (дедуп персистенции, docs/page-persistence.md).
+	var reserved := {}
+	for nid in _vrweb_index.get("nodes", {}):
+		reserved[nid] = true
+	NetworkManager.set_scene_reserved_ids(reserved)
 	# debug=true: топология записывает провенанс (id -> исходный HTML), а WorldGenerator
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
@@ -798,6 +804,9 @@ func _setup_net() -> void:
 	# возвращает клик по 3D, а не само закрытие. Поэтому closed здесь ни к чему не цепляем.
 	# «Вернуться домой» с вкладки «Мир» — грузим домашний инстанс.
 	_settings_overlay.home_requested.connect(_on_home_requested)
+	# «Моё пространство» с вкладки «Аккаунт» — персональное пространство домашнего сервера,
+	# отдельно от домашней страницы (разные сущности, см. docs/personal-spaces.md).
+	_settings_overlay.space_requested.connect(_on_space_requested)
 
 	_settings_btn.pressed.connect(_open_settings)
 	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
@@ -813,6 +822,10 @@ func _setup_net() -> void:
 	HomeServer.refresh_finished.connect(_sync_online)
 	NetworkManager.connection_changed.connect(_on_connection_changed)
 	NetworkManager.chat_received.connect(_on_chat_received)
+	# Сигналинг отказал во входе (закрытое персональное пространство): мир построен, но комнаты
+	# нет — мы в нём одни. Подсказываем причину. См. docs/personal-spaces.md.
+	NetworkManager.room_denied.connect(func(_room: String, _reason: String):
+		_set_status("Пространство закрыто — хозяина нет дома (комната недоступна)"))
 	# Взаимодействие с голосом (смена режима / нажатие V) — мигаем индикатором даже без сигнала.
 	VoiceManager.indicator_nudge.connect(_on_voice_nudge)
 
@@ -825,14 +838,36 @@ func _open_settings() -> void:
 	_settings_overlay.open(_current_url, _page_meta)
 
 
-## «Вернуться домой» из настроек: грузим домашний инстанс (как ввод адреса в омнибоксе —
-## абсолютный URL, без базы) и уводим мышь обратно в перемещение.
+## «Вернуться домой» из настроек: грузим ДОМАШНЮЮ СТРАНИЦУ (произвольная закладка старта —
+## как ввод адреса в омнибоксе, абсолютный URL без базы). Если она не задана — фолбэком идём
+## в персональное пространство (пустой старт логично открывать в своём доме).
 func _on_home_requested() -> void:
 	var home := Settings.home_page.strip_edges()
 	if home == "":
+		await _go_to_personal_space()
 		return
 	_address.text = home
 	_navigate(home, "", true)
+	_player.capture_mouse(true)
+
+
+## «Моё пространство» из настроек (вкладка «Аккаунт»): идём в ПЕРСОНАЛЬНОЕ ПРОСТРАНСТВО
+## домашнего сервера ВНЕ зависимости от домашней страницы — это разные сущности
+## (см. docs/personal-spaces.md).
+func _on_space_requested() -> void:
+	await _go_to_personal_space()
+
+
+## Переход в персональное пространство домашнего сервера (personal-spaces.v1). Его адрес НЕ
+## хранится — спрашивается у сервера каждый раз, поэтому ротация адреса владельцу незаметна.
+func _go_to_personal_space() -> void:
+	var res: Dictionary = await HomeServer.fetch_home_space()
+	if not res.get("ok", false):
+		_set_status("Персональное пространство недоступно: %s" % res.get("error", ""))
+		return
+	var url := str(res.get("url", ""))
+	_address.text = url
+	_navigate(url, "", true)
 	_player.capture_mouse(true)
 
 
@@ -1108,7 +1143,8 @@ func _setup_ui_extras() -> void:
 	# страницы БЕЗ блока <vrweb>; редактируемая — единый слитый слой сцены, который консоль
 	# собирает сама из индекса vrweb и эфемерного состояния NetworkManager.
 	_console = SPACE_CONSOLE_SCRIPT.new()
-	_console.setup(_page_html_sans_vrweb, func() -> Dictionary: return _vrweb_index)
+	_console.setup(_page_html_sans_vrweb, func() -> Dictionary: return _vrweb_index,
+		func() -> String: return _current_url)
 	ui.add_child(_console)
 
 

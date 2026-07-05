@@ -15,8 +15,18 @@ import accounts
 import identity
 import keys
 
-# Версионированные капабилити монолита; клиент сверяет со своими — работает пересечение.
-FEATURES = ["identity.v1", "signaling.v1"]
+# Версионированные капабилити ДОМАШНЕГО СЕРВЕРА — то, на что клиент может рассчитывать в
+# связке клиент↔домашний-сервер (клиент сверяет со своими, работает пересечение). Каждая
+# фича — это конкретный контракт (эндпоинты), не абстрактное «умеет»:
+#   identity.v1       — сертификация ключа клиента + проверка чужих (/api/v1/identity/certify,
+#                       signing_keys в discovery); см. docs/home-server.md;
+#   signaling.v1      — WebRTC-handshake через /signal этого сервера; см. docs/multiplayer.md;
+#   personal-spaces.v1 — хостит персональные пространства пользователя (/api/v1/spaces/home);
+#                       см. docs/personal-spaces.md.
+# ВАЖНО: persistence flush — это свойство САМОЙ СТРАНИЦЫ (атрибут `persist` на её блоке
+# <vrweb>), а НЕ фича домашнего сервера. Страницы наших пространств его несут, но обнаруживает
+# его клиент по странице, а не по этому списку. См. docs/page-persistence.md.
+FEATURES = ["identity.v1", "signaling.v1", "personal-spaces.v1"]
 
 
 def api_error(status: int, code: str, message: str) -> HTTPException:

@@ -19,6 +19,10 @@ class Config:
     domain: str = "localhost"
     name: str = "VRWeb Home"
     homepage: str = ""
+    # Публичный базовый URL сервера (для абсолютных ссылок: страницы пространств,
+    # persist-endpoint). "" -> производный https://{domain}. Для локальной разработки —
+    # http://127.0.0.1:8080 (иначе клиент не попадёт по сгенерированным ссылкам).
+    base_url: str = ""
     # "" -> производный wss://{domain}/signal (сигналинг-модуль этого же монолита).
     signaling_url: str = ""
     data_dir: Path = Path(__file__).resolve().parent / "data"
@@ -30,6 +34,9 @@ class Config:
 
     def effective_signaling_url(self) -> str:
         return self.signaling_url or f"wss://{self.domain}/signal"
+
+    def effective_base_url(self) -> str:
+        return (self.base_url or f"https://{self.domain}").rstrip("/")
 
     def effective_homepage(self) -> str:
         return self.homepage or f"https://{self.domain}/"
@@ -45,6 +52,7 @@ def load_config(path: str | None = None) -> Config:
         cfg.domain = s.get("domain", cfg.domain)
         cfg.name = s.get("name", cfg.name)
         cfg.homepage = s.get("homepage", cfg.homepage)
+        cfg.base_url = s.get("base_url", cfg.base_url)
         cfg.signaling_url = s.get("signaling_url", cfg.signaling_url)
         cfg.data_dir = Path(s.get("data_dir", str(cfg.data_dir)))
         cfg.registration_open = s.getboolean("registration_open", cfg.registration_open)
@@ -57,6 +65,7 @@ def load_config(path: str | None = None) -> Config:
     cfg.domain = env.get("VRWEB_DOMAIN", cfg.domain)
     cfg.name = env.get("VRWEB_NAME", cfg.name)
     cfg.homepage = env.get("VRWEB_HOMEPAGE", cfg.homepage)
+    cfg.base_url = env.get("VRWEB_BASE_URL", cfg.base_url)
     cfg.signaling_url = env.get("VRWEB_SIGNALING_URL", cfg.signaling_url)
     if "VRWEB_DATA_DIR" in env:
         cfg.data_dir = Path(env["VRWEB_DATA_DIR"])

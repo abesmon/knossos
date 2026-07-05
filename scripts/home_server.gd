@@ -55,8 +55,9 @@ func insecure_identity() -> bool:
 	return _insecure
 
 ## Капабилити, которые поддерживает ЭТОТ клиент; с сервером работает пересечение
-## (см. «features» в docs/home-server.md).
-const CLIENT_FEATURES := ["identity.v1", "signaling.v1"]
+## (см. «features» в docs/home-server.md). personal-spaces.v1 — персональные
+## пространства (docs/personal-spaces.md).
+const CLIENT_FEATURES := ["identity.v1", "signaling.v1", "personal-spaces.v1"]
 ## Единственный поддерживаемый алгоритм подписи (см. шапку).
 const ALGORITHM := "rsa-sha256"
 ## Кэш signing_keys домена считается свежим сутки; протухший используется как fallback,
@@ -272,6 +273,52 @@ func _clear_account() -> void:
 	_cert = {}
 	_save_state()
 	certificate_changed.emit()
+
+
+# --- Персональное пространство (personal-spaces.v1, docs/personal-spaces.md) ---
+
+## Актуальный адрес СВОЕГО пространства с домашнего сервера. Клиент URL не хранит —
+## спрашивает каждый раз: так «кнопка домой» переживает ротацию адреса незаметно.
+## Возвращает { ok, url, name, error }.
+func fetch_home_space() -> Dictionary:
+	if not is_logged_in():
+		return {"ok": false, "url": "", "name": "", "error": "Не залогинены на домашнем сервере."}
+	if not supports("personal-spaces.v1"):
+		return {"ok": false, "url": "", "name": "", "error": "Сервер не поддерживает персональные пространства."}
+	var res := await _http(HTTPClient.METHOD_GET, _account_url + "/api/v1/spaces/home",
+		["Authorization: Bearer " + access_token], "")
+	if res.code == 200 and typeof(res.data) == TYPE_DICTIONARY:
+		return {"ok": true, "url": str(res.data.get("url", "")),
+			"name": str(res.data.get("name", "")), "error": ""}
+	return {"ok": false, "url": "", "name": "", "error": _err_msg(res, "Сервер не ответил.")}
+
+
+## Заголовок Authorization для запроса к URL — только если это НАШ домашний сервер
+## (хост совпадает) и мы залогинены; иначе "". Так владелец входит в свой закрытый дом:
+## presence-gate пространств пускает по Bearer (см. docs/personal-spaces.md).
+func auth_header_for(url: String) -> String:
+	if not is_logged_in() or _account_url == "" or _host_of(url) != _host_of(_account_url):
+		return ""
+	return "Authorization: Bearer " + access_token
+
+
+## access_token для join сигналинга — только когда сигналинг живёт на нашем же домашнем
+## сервере (монолит): токен привязывает WS-сессию к аккаунту, по ней сервер видит
+## «хозяин дома» (presence-gate). Чужому сигналингу токен не показываем.
+func signaling_token() -> String:
+	if not is_logged_in() or _account_url == "" \
+			or _host_of(Settings.effective_signaling_url()) != _host_of(_account_url):
+		return ""
+	return access_token
+
+
+## Префикс подписи флаша персистенции (см. docs/page-persistence.md).
+const FLUSH_PROOF_PREFIX := "vrweb-flush.v1:"
+
+## Подписать payload флаша нашим ключом идентичности (base64; "" — ключа нет).
+func sign_flush_payload(payload: String) -> String:
+	var sig := sign_challenge((FLUSH_PROOF_PREFIX + payload).to_utf8_buffer())
+	return Marshalls.raw_to_base64(sig) if not sig.is_empty() else ""
 
 
 # --- Сертификат ---

@@ -36,6 +36,12 @@ const MAX_PROPS_BYTES := 8192   # грубый потолок размера pro
 # --- Результат применения события (для followers) ---
 enum Apply { APPLIED, IGNORED, GAP }
 
+## Зарезервированные адреса — id узлов vrweb-слоя СТРАНИЦЫ (заполняет транспорт из индекса
+## базы): add с таким id отклоняется, как и с занятым. Гарантия дедупликации персистенции:
+## объект слоя с id из базы мог появиться единственным путём — это его же запечённая копия
+## (см. docs/page-persistence.md, «Дедупликация»). Плоские данные, протокол не меняется.
+var reserved_ids := {}
+
 var _objects := {}        # id -> object (Dictionary)
 var _epoch := 0           # эпоха авторитета (растёт при смене авторитета)
 var _seq := 0             # порядковый в пределах эпохи (последний применённый/выданный)
@@ -91,8 +97,8 @@ func expire(now: float) -> Array:
 
 func _commit_add(action: Dictionary, author: String, _is_admin: bool, now: float) -> Array:
 	var id := str(action.get("id", ""))
-	if id == "" or _objects.has(id):
-		return []   # пустой id или попытка занять существующий (анти-хайджек)
+	if id == "" or _objects.has(id) or reserved_ids.has(id):
+		return []   # пустой id, занятый (анти-хайджек) или зарезервированный базой страницы
 	if _objects.size() >= MAX_OBJECTS:
 		return []
 	var kind := str(action.get("kind", ""))

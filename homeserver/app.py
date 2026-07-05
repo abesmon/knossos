@@ -13,7 +13,10 @@ import logging
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+import accounts
 import api
+import spaces
+import spaces_api
 import webui
 from config import Config
 from db import Database
@@ -30,7 +33,18 @@ def create_app(cfg: Config) -> FastAPI:
     app.state.version = VERSION
     app.state.db = Database(cfg.data_dir / "homeserver.db")
     app.state.keys = ServerKeys(cfg.data_dir)
-    app.state.hub = SignalingHub()
+
+    # Хуки сигналинга для персональных пространств (docs/personal-spaces.md): привязка
+    # WS-сессии к аккаунту по access_token и гейт комнат закрытых пространств. Хаб про
+    # аккаунты не знает — граница модулей остаётся здесь.
+    def _signal_auth(token: str) -> str:
+        user = accounts.session_user(app.state.db, token, cfg.session_ttl_days)
+        return "%s@%s" % (user["nickname"], cfg.domain) if user is not None else ""
+
+    def _signal_join_check(room: str, address: str) -> bool:
+        return spaces.room_allowed(app.state.db, cfg, app.state.hub, room, address)
+
+    app.state.hub = SignalingHub(auth=_signal_auth, join_check=_signal_join_check)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException):
@@ -38,6 +52,7 @@ def create_app(cfg: Config) -> FastAPI:
         return JSONResponse(status_code=exc.status_code, content={"error": detail})
 
     app.include_router(api.router)
+    app.include_router(spaces_api.router)
     app.include_router(webui.router)
 
     @app.websocket("/signal")

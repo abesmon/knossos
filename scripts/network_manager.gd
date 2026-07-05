@@ -47,6 +47,9 @@ signal connection_changed(online: bool)
 ## Пришёл голосовой кадр от пира: payload — закодированный VoiceCodec (см. VoiceManager).
 ## Воспроизведение — на капсуле пира (RemotePlayer/VoicePlayback), маршрутит RemotePlayersView.
 signal voice_received(id: int, payload: PackedByteArray)
+## Сигналинг отказал во входе в комнату (закрытое персональное пространство —
+## «хозяина нет дома», см. docs/personal-spaces.md). Мы остаёмся онлайн, но вне комнаты.
+signal room_denied(room: String, reason: String)
 ## Сменился авторитет комнаты (см. authority_id). new_authority — id нового авторитета
 ## (0, если мы вне комнаты), is_me — стали ли авторитетом мы. Эмитится при входе/выходе
 ## пиров, когда меняется результат min(id). Консьюмеры привилегированных действий слушают
@@ -129,6 +132,10 @@ var _ghosts := {}
 var _p2p_lost := {}
 var _rng := Crypto.new()   # генератор nonce для челленджей
 var _scene := SceneChanges.new()  # машина состояний эфемерного слоя (чистая, см. scene_changes.gd)
+# Зарезервированные id (узлы vrweb-слоя ТЕКУЩЕЙ страницы): add с таким id отклоняется —
+# анти-коллизия дедупликации персистенции (см. docs/page-persistence.md). Ставит main
+# после индексации страницы; переживает пересоздание _scene при смене комнаты.
+var _scene_reserved := {}
 var _obj_seq := 0          # счётчик для генерации id наших объектов (new_object_id)
 var _action_token := 0     # счётчик токенов отслеживаемых действий (request_scene_action_tracked)
 var _scene_resync := false # ждём снимок состояния (был GAP / смена авторитета) — не спамим запросом
@@ -563,6 +570,14 @@ func request_scene_action_tracked(action: Dictionary) -> int:
 	return token
 
 
+## Задать зарезервированные адреса эфемерного слоя (id узлов страницы): валидация add
+## отклонит попытку занять id, уже существующий в базе. Объект с id из базы может быть
+## только её же запечённой копией — это и делает дедуп персистенции точным.
+func set_scene_reserved_ids(ids: Dictionary) -> void:
+	_scene_reserved = ids.duplicate()
+	_scene.reserved_ids = _scene_reserved
+
+
 ## Сгенерировать id для нового объекта (для op=add). Префикс из нашего user_id + счётчик —
 ## адрес, по которому МЫ потом сможем править/удалять свой объект. Уникальность гарантирует
 ## префикс (владение проверяется по author, а не по префиксу). Чистый адрес, без доверия.
@@ -794,6 +809,14 @@ func _on_ws_message(raw: String) -> void:
 			_register_peer(int(msg.get("id", 0)), str(msg.get("nick", "")), int(msg.get("seq", 0)))
 		"peer_leave":
 			_drop_peer(int(msg.get("id", 0)))
+		"join_denied":
+			# Комната закрыта политикой пространства («хозяина нет дома»). Мы онлайн, но вне
+			# комнаты: сносим ожидающий меш, чтобы не считать себя её авторитетом.
+			_nlog("join DENIED room=%s reason=%s" % [str(msg.get("room", "")), str(msg.get("reason", ""))])
+			if str(msg.get("room", "")) == _room:
+				_room = ""
+				_teardown_mesh()
+			room_denied.emit(str(msg.get("room", "")), str(msg.get("reason", "")))
 		"offer":
 			_on_remote_offer(int(msg.get("from", 0)), str(msg.get("data", "")))
 		"answer":
@@ -805,7 +828,14 @@ func _on_ws_message(raw: String) -> void:
 func _send_join() -> void:
 	_nlog("send join room=%s (my_id=%d)" % [_room, _my_id])
 	_setup_mesh()
-	_ws_send({"type": "join", "room": _room, "nick": Settings.nick})
+	var join := {"type": "join", "room": _room, "nick": Settings.nick}
+	# Токен аккаунта — только своему домашнему серверу (монолит сигналинг+хостинг): по нему
+	# сервер привязывает WS-сессию к адресу — так владелец входит в закрытое пространство,
+	# а presence-gate видит «хозяин дома». См. docs/personal-spaces.md.
+	var token: String = HomeServer.signaling_token()
+	if token != "":
+		join["access_token"] = token
+	_ws_send(join)
 	_pending_join = false
 
 
@@ -857,6 +887,7 @@ func _teardown_mesh() -> void:
 	# Эфемерная сцена — тоже состояние комнаты: уходя, сбрасываем (при перезаходе авторитет
 	# пришлёт снимок). Свежая машина обнуляет epoch/seq/объекты. См. docs/ephemeral-changes.md.
 	_scene = SceneChanges.new()
+	_scene.reserved_ids = _scene_reserved
 	_scene_resync = false
 	scene_reset.emit()
 	if _mesh != null:

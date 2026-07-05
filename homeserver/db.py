@@ -31,6 +31,23 @@ CREATE TABLE IF NOT EXISTS user_keys (
     created_at INTEGER NOT NULL,
     UNIQUE (user_id, public_key)
 );
+CREATE TABLE IF NOT EXISTS spaces (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    slug       TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
+    policy     TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    room_key   TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS space_editors (
+    id       INTEGER PRIMARY KEY,
+    space_id INTEGER NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    address  TEXT NOT NULL,
+    UNIQUE (space_id, address)
+);
 """
 
 

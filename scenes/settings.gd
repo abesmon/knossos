@@ -7,6 +7,11 @@ extends Control
 signal closed
 ## «Вернуться домой» на вкладке «Мир»: просим main загрузить домашний инстанс.
 signal home_requested
+## «Моё пространство» на вкладке «Аккаунт»: просим main перейти в персональное пространство
+## домашнего сервера — ОТДЕЛЬНО от домашней страницы (это разные сущности, см.
+## docs/personal-spaces.md). Домашняя страница — произвольная закладка старта; пространство —
+## хостируемый сервером дом пользователя.
+signal space_requested
 
 ## Верх диапазона ползунка порога активации (RMS) — для перевода значения в проценты в подписи.
 const THRESH_MAX := 0.15
@@ -85,6 +90,9 @@ const THRESH_MAX := 0.15
 @onready var _hs_authed_box: HBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox
 @onready var _hs_logout: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox/Logout
 @onready var _hs_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox/Refresh
+# «Моё пространство» — создаётся в коде (нет в .tscn), кладётся в AuthedBox. Вход в
+# персональное пространство домашнего сервера, независимый от домашней страницы.
+var _hs_space: Button
 @onready var _hs_error: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthError
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
@@ -167,6 +175,13 @@ func _ready() -> void:
 	_hs_register.pressed.connect(_on_hs_auth.bind(true))
 	_hs_logout.pressed.connect(_on_hs_logout)
 	_hs_refresh.pressed.connect(_on_hs_refresh)
+	# «Моё пространство» — вход в персональное пространство домашнего сервера, независимо от
+	# домашней страницы (см. space_requested). Кнопки нет в .tscn — создаём и кладём в AuthedBox.
+	_hs_space = Button.new()
+	_hs_space.text = "Моё пространство"
+	_hs_space.tooltip_text = "Перейти в персональное пространство на домашнем сервере"
+	_hs_space.pressed.connect(_on_go_space)
+	_hs_authed_box.add_child(_hs_space)
 	HomeServer.state_changed.connect(_account_dirty)
 
 
@@ -334,8 +349,16 @@ func _update_home_status() -> void:
 	var is_home := home != "" and home == _instance_url
 	_world_make_home.disabled = is_home
 	_world_home_status.visible = is_home
-	_world_go_home.disabled = home == ""
-	_world_go_home.tooltip_text = "Домашний инстанс не задан" if home == "" else "Загрузить домашний инстанс"
+	# «Домой» доступна, если задана домашняя страница ИЛИ есть персональное пространство на
+	# домашнем сервере (при пустом home_page main грузит его, см. docs/personal-spaces.md).
+	var has_space: bool = HomeServer.is_logged_in() and HomeServer.supports("personal-spaces.v1")
+	_world_go_home.disabled = home == "" and not has_space
+	if home != "":
+		_world_go_home.tooltip_text = "Загрузить домашний инстанс"
+	elif has_space:
+		_world_go_home.tooltip_text = "Перейти в персональное пространство на домашнем сервере"
+	else:
+		_world_go_home.tooltip_text = "Домашний инстанс не задан"
 
 
 ## «Сделать инстанс домашним»: запоминаем текущий URL как домашнюю страницу и сразу сохраняем
@@ -351,6 +374,13 @@ func _on_make_home() -> void:
 ## «Вернуться домой»: просим main загрузить домашний инстанс и закрываемся.
 func _on_go_home() -> void:
 	home_requested.emit()
+	_close()
+
+
+## «Моё пространство»: просим main перейти в персональное пространство домашнего сервера и
+## закрываемся. Отдельно от «Домой»: пространство доступно даже при заданной домашней странице.
+func _on_go_space() -> void:
+	space_requested.emit()
 	_close()
 
 
@@ -396,6 +426,9 @@ func _refresh_account() -> void:
 	_hs_register.disabled = busy or url == ""
 	_hs_logout.disabled = busy
 	_hs_refresh.disabled = busy
+	# «Моё пространство» — только когда сервер анонсирует personal-spaces.v1 (иначе идти некуда).
+	_hs_space.visible = logged and HomeServer.supports("personal-spaces.v1")
+	_hs_space.disabled = busy
 
 
 ## Если адрес сервера в поле отличается от сохранённого — применяем и персистим сразу

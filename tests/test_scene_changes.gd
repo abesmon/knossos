@@ -23,7 +23,22 @@ func _initialize() -> void:
 	_test_ttl_expire()
 	_test_snapshot_roundtrip()
 	_test_props_size_limit()
+	_test_reserved_ids()
 	quit(1 if _failed else 0)
+
+
+# --- reserved_ids: id узлов базы страницы занять нельзя (анти-коллизия дедупа персистенции,
+# см. docs/page-persistence.md) ---
+func _test_reserved_ids() -> void:
+	var sc := SceneChanges.new()
+	sc.begin_authority()
+	sc.reserved_ids = {"n0-2": true, "lamp": true}
+	_eq(sc.authority_commit(_add("n0-2", "vrweb-node", "", {"tag": "Node3D", "attrs": {}}),
+		ALICE, false, 100.0).size(), 0, "add с id узла базы отклонён")
+	_eq(sc.authority_commit(_add("lamp", "bubble", "", {}), ALICE, false, 100.0).size(), 0,
+		"резерв не зависит от kind")
+	_eq(sc.authority_commit(_add("u1.1", "vrweb-node", "page:n0-2", {"tag": "Node3D", "attrs": {}}),
+		ALICE, false, 100.0).size(), 1, "свободный id проходит (в т.ч. с якорем на зарезервированный узел)")
 
 
 # --- add + владение по author ---

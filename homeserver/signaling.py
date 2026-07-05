@@ -27,6 +27,9 @@ class SignalPeer:
         # авторитета считается по нему, а не по id подключения: id выдаётся при коннекте
         # к серверу, и давно запущенный клиент имел бы преимущество в любой комнате.
         self.seq: int = 0
+        # Аутентифицированный федеративный адрес (nick@domain) из access_token в join;
+        # "" — аноним. Нужен presence-гейту пространств (docs/personal-spaces.md).
+        self.address: str = ""
 
     async def send(self, msg: dict) -> None:
         # Сокет мог закрыться между нашим event'ом и отправкой — пир умрёт сам,
@@ -38,11 +41,19 @@ class SignalPeer:
 
 
 class SignalingHub:
-    def __init__(self):
+    """auth/join_check — опциональные хуки монолита (standalone-режим их не задаёт):
+    auth(token) -> федеративный адрес ("" — невалидный токен); join_check(room, address)
+    -> пускать ли в комнату (гейт комнат персональных пространств). Хаб по-прежнему не
+    знает об аккаунтах — только зовёт колбэки."""
+
+    def __init__(self, auth: Callable[[str], str] | None = None,
+                 join_check: Callable[[str, str], bool] | None = None):
         self._rooms: dict[str, dict[int, SignalPeer]] = {}
         self._ids = count(1)
         # Монотонный счётчик входов в комнаты (общий на сервер): меньший seq = вошёл раньше.
         self._join_seqs = count(1)
+        self._auth = auth
+        self._join_check = join_check
 
     async def connect(self, send: Callable[[dict], Awaitable[None]]) -> SignalPeer:
         peer = SignalPeer(next(self._ids), send)
@@ -53,17 +64,34 @@ class SignalingHub:
     async def handle(self, peer: SignalPeer, msg: dict) -> None:
         mtype = msg.get("type")
         if mtype == "join":
-            await self._join(peer, str(msg.get("room", "")), str(msg.get("nick", "")))
+            await self._join(peer, str(msg.get("room", "")), str(msg.get("nick", "")),
+                             str(msg.get("access_token", "")))
         elif mtype in SIGNAL_TYPES:
             await self._relay(peer, msg)
+
+    def room_has_address(self, room: str, address: str) -> bool:
+        """Есть ли в комнате аутентифицированный участник с этим адресом (presence
+        для «дверь открыта, пока хозяин дома»)."""
+        if address == "":
+            return False
+        return any(p.address == address for p in self._rooms.get(room, {}).values())
 
     async def disconnect(self, peer: SignalPeer) -> None:
         await self._leave(peer)
         log.info("peer %d disconnected", peer.id)
 
-    async def _join(self, peer: SignalPeer, room: str, nick: str) -> None:
+    async def _join(self, peer: SignalPeer, room: str, nick: str, access_token: str = "") -> None:
         # Повторный join (клиент сменил страницу) — сперва выходим из старой комнаты.
         await self._leave(peer)
+        # Токен привязывает WS-сессию к аккаунту (владелец входит в свой закрытый дом);
+        # невалидный токен не рвёт соединение — пир просто аноним.
+        peer.address = self._auth(access_token) if self._auth and access_token else ""
+        if self._join_check is not None and not self._join_check(room, peer.address):
+            # Комната закрыта политикой пространства (см. spaces.room_allowed): без страницы
+            # гость и так ничего не увидит, гейт закрывает подслушивание голоса по URL.
+            log.info("peer %d denied to room %r (space closed)", peer.id, room)
+            await peer.send({"type": "join_denied", "room": room, "reason": "space_closed"})
+            return
         peer.room = room
         peer.nick = nick or f"Guest-{peer.id}"
         # Свежий seq на КАЖДЫЙ вход: ушёл из комнаты — потерял старшинство.

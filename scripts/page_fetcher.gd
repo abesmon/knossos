@@ -46,6 +46,12 @@ func fetch(url: String, base_url: String = "") -> void:
 		"User-Agent: " + USER_AGENT,
 		"Accept: text/html,application/xhtml+xml",
 	]
+	# Страницы СВОЕГО домашнего сервера фетчим с Bearer-токеном: так владелец входит в
+	# своё закрытое персональное пространство (presence-gate, docs/personal-spaces.md).
+	# Для чужих хостов заголовок пустой — токен наружу не утекает.
+	var auth: String = HomeServer.auth_header_for(resolved)
+	if auth != "":
+		headers.append(auth)
 	var err := _http.request(resolved, headers)
 	if err != OK:
 		failed.emit("Не удалось начать запрос (код %d)" % err, resolved)

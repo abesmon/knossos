@@ -25,6 +25,10 @@ def test_well_known(client):
     assert data["server"]["domain"] == "test.local"
     assert "identity.v1" in data["features"]
     assert "signaling.v1" in data["features"]
+    assert "personal-spaces.v1" in data["features"]
+    # persistence flush — капабилити СТРАНИЦЫ (атрибут `persist`), НЕ фича домашнего сервера:
+    # в discovery домашнего сервера её быть не должно (см. docs/page-persistence.md).
+    assert "persistence.v1" not in data["features"]
     assert data["config"]["signaling_url"] == "wss://test.local/signal"
     key = data["signing_keys"][0]
     assert key["algorithm"] == keys.ALGORITHM

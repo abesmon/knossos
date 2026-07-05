@@ -133,6 +133,12 @@ func _depth_of(id: String, objects: Dictionary, guard := 0) -> int:
 func _spawn(id: String, object: Dictionary) -> void:
 	if _nodes.has(id):
 		return
+	# Дедупликация персистенции: vrweb-node, чей id уже есть среди узлов СТРАНИЦЫ, — его же
+	# запечённая флашем копия (занять id из базы новым add нельзя — reserved_ids в SceneChanges).
+	# База уже построила узел — второй раз не строим; у пиров со старой базой объект строится
+	# как раньше. См. docs/page-persistence.md («Дедупликация»).
+	if str(object.get("kind", "")) == SceneHtml.KIND_NODE and _targets.has(id):
+		return
 	var node := _make_node(object)
 	if node == null:
 		return

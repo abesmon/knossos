@@ -24,22 +24,28 @@ var _editor: CodeEdit          # слитый блок <vrweb>: единстве
 var _status: Label
 var _save_btn: Button
 var _cancel_btn: Button
+var _flush_btn: Button         # «В страницу»: флаш дельты на сервер (docs/page-persistence.md)
 var _get_page_html: Callable   # () -> String — хранимое дерево страницы БЕЗ <vrweb> (main)
 var _get_page_index: Callable  # () -> Dictionary — индекс vrweb-узлов страницы (main)
+var _get_page_url: Callable    # () -> String — URL текущей страницы (main._current_url)
 var _pristine := ""            # последний отрендеренный блок: text == _pristine → правок нет
 var _pending := {}             # token -> true: ждём ack; документ заблокирован
 var _sent_total := 0           # сколько действий ушло в текущем сохранении
 var _failed := 0               # сколько из них отклонено (или не отвечено)
+var _flushing := false         # идёт POST флаша — документ заблокирован
 var _timeout: Timer
 var _style_normal: StyleBoxFlat
 var _style_error: StyleBoxFlat
+var _crypto := Crypto.new()    # nonce для payload флаша
 
 
 ## Колбэки main: get_page_html — сериализация документа страницы без <vrweb>;
-## get_page_index — индекс vrweb-узлов страницы (SceneHtml.build_page_index).
-func setup(get_page_html: Callable, get_page_index: Callable) -> void:
+## get_page_index — индекс vrweb-узлов страницы (SceneHtml.build_page_index);
+## get_page_url — URL текущей страницы (для payload флаша и same-origin проверки).
+func setup(get_page_html: Callable, get_page_index: Callable, get_page_url: Callable) -> void:
 	_get_page_html = get_page_html
 	_get_page_index = get_page_index
+	_get_page_url = get_page_url
 
 
 func _ready() -> void:
@@ -111,6 +117,14 @@ func _build_ui() -> void:
 	_save_btn.text = "Сохранить"
 	_save_btn.pressed.connect(_on_save)
 	header.add_child(_save_btn)
+
+	# Флаш дельты в страницу (persist-атрибут блока <vrweb>): видна только на страницах,
+	# анонсирующих персистенцию. См. docs/page-persistence.md.
+	_flush_btn = Button.new()
+	_flush_btn.text = "В страницу"
+	_flush_btn.tooltip_text = "Сохранить накопленную дельту оверлея в саму страницу на её сервере"
+	_flush_btn.pressed.connect(_on_flush)
+	header.add_child(_flush_btn)
 
 	# Две области с перетаскиваемым разделителем: страница (read-only) и <ephemeral>.
 	var split := VSplitContainer.new()
@@ -196,6 +210,9 @@ func _refresh(preserve := true) -> void:
 	_page_view.text = str(_get_page_html.call()) if _get_page_html.is_valid() else ""
 	_pristine = SceneHtml.serialize_scene(_page_index(), NetworkManager.scene_objects()) + "\n"
 	_apply_editor_text(_pristine, preserve)
+	# «В страницу» — только на страницах, анонсирующих персистенцию (persist на блоке <vrweb>).
+	if _flush_btn != null:
+		_flush_btn.visible = _persist_endpoint() != ""
 	_mark_error(false)
 	_set_status(HINT)
 
@@ -323,12 +340,163 @@ func _on_cancel() -> void:
 	_set_status("Правки отменены")
 
 
+# --- Флаш: сохранить дельту оверлея В СТРАНИЦУ (docs/page-persistence.md) ---
+
+## Endpoint персистенции с блока <vrweb> ("" — страница read-only). Принимаем только
+## same-origin с самой страницей: чужому origin подписанные дельты не отправляем.
+func _persist_endpoint() -> String:
+	var attrs: Dictionary = _page_index().get("attrs", {})
+	var persist := str(attrs.get("persist", "")).strip_edges()
+	if persist == "" or not _get_page_url.is_valid():
+		return ""
+	if _host_of(persist) == "" or _host_of(persist) != _host_of(str(_get_page_url.call())):
+		return ""
+	return persist
+
+
+## Дельта для флаша: постоянные (ttl=0) объекты оверлея vrweb, в порядке родители-раньше-детей.
+## vrweb-node, чей id уже есть в базе (запечён прошлым флашем), не отправляем — сервер всё
+## равно ответил бы «already persisted».
+func _flush_objects() -> Array:
+	var page_nodes: Dictionary = _page_index().get("nodes", {})
+	var objects := NetworkManager.scene_objects()
+	var out: Array = []
+	for id in objects:
+		var o: Dictionary = objects[id]
+		var kind := str(o.get("kind", ""))
+		if float(o.get("ttl", 0.0)) != 0.0:
+			continue
+		if kind == SceneHtml.KIND_PATCH or (kind == SceneHtml.KIND_NODE and not page_nodes.has(id)):
+			out.append({"id": str(id), "kind": kind, "parent": str(o.get("parent", "")),
+				"props": o.get("props", {})})
+	# Родители раньше детей: вложенный vrweb-node сервер монтирует под уже вставленного.
+	var depth := func(oid: String) -> int:
+		var d := 0
+		var cur := str(objects.get(oid, {}).get("parent", ""))
+		while objects.has(cur) and d < 64:
+			cur = str(objects[cur].get("parent", ""))
+			d += 1
+		return d
+	out.sort_custom(func(a, b) -> bool: return depth.call(a["id"]) < depth.call(b["id"]))
+	return out
+
+
+func _on_flush() -> void:
+	if _flushing or not _pending.is_empty():
+		return
+	if _editor.text != _pristine:
+		_set_status("Сначала «Сохранить» (или «Отменить») правки — в страницу уходит сохранённая дельта")
+		return
+	var endpoint := _persist_endpoint()
+	if endpoint == "":
+		_set_status("Страница не принимает персистенцию")
+		return
+	var objects := _flush_objects()
+	if objects.is_empty():
+		_set_status("Нечего сохранять в страницу — дельта пуста или уже запечена")
+		return
+	var base_rev := str(_page_index().get("attrs", {}).get("rev", ""))
+	# payload подписывается и уходит ВЕРБАТИМ строкой — серверу не нужно воспроизводить
+	# нашу сериализацию (тот же приём, что certificate_json). См. docs/page-persistence.md.
+	var payload := JSON.stringify({
+		"v": 1, "url": str(_get_page_url.call()), "base_rev": base_rev,
+		"ts": int(Time.get_unix_time_from_system()),
+		"nonce": Marshalls.raw_to_base64(_crypto.generate_random_bytes(16)),
+		"objects": objects,
+	})
+	var body := {"v": 1, "payload": payload}
+	var headers := PackedStringArray(["Content-Type: application/json", "Accept: application/json"])
+	# Авторизация: Bearer своему домашнему серверу (дёшево, так входит владелец) или
+	# федеративная пара сертификат + proof-подпись (редактор на чужом сервере).
+	var auth: String = HomeServer.auth_header_for(endpoint)
+	if auth != "":
+		headers.append(auth)
+	elif HomeServer.has_certificate():
+		var sig: String = HomeServer.sign_flush_payload(payload)
+		if sig == "":
+			_reject("Не удалось подписать запрос ключом идентичности")
+			return
+		var cp: Array = HomeServer.certificate_payload()
+		body["identity"] = {"certificate_json": cp[0], "signature": cp[1]}
+		body["proof_signature"] = sig
+	else:
+		_reject("Флаш требует идентичности: войдите на домашний сервер (вкладка «Аккаунт»)")
+		return
+
+	_flushing = true
+	_lock(true)
+	_set_status("Сохранение в страницу (%d объектов)…" % objects.size())
+	var req := HTTPRequest.new()
+	req.timeout = 10.0
+	add_child(req)
+	var err := req.request(endpoint, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
+	if err != OK:
+		req.queue_free()
+		_finish_flush(false, "Не удалось начать запрос (код %d)" % err)
+		return
+	var res: Array = await req.request_completed
+	req.queue_free()
+	_on_flush_completed(int(res[0]), int(res[1]), res[3] as PackedByteArray)
+
+
+func _on_flush_completed(result: int, code: int, body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		_finish_flush(false, "Сетевая ошибка (result %d)" % result)
+		return
+	var data = JSON.parse_string(body.get_string_from_utf8())
+	if code == 409:
+		# Version skew: база изменилась между загрузкой и флашем — дельту надо пересобрать
+		# против свежей базы (перезагрузка страницы), см. docs/page-persistence.md.
+		_finish_flush(false, "База страницы изменилась — обновите страницу (⟳) и повторите")
+		return
+	if code != 200 or typeof(data) != TYPE_DICTIONARY:
+		var msg := "Сервер отказал (HTTP %d)" % code
+		if typeof(data) == TYPE_DICTIONARY and typeof(data.get("error")) == TYPE_DICTIONARY:
+			msg = str(data["error"].get("message", msg))
+		_finish_flush(false, msg)
+		return
+	# Принятые объекты помечаем persisted_rev обычным update слоя: UI и будущий GC видят
+	# «запечено», а дедуп у пиров на новой базе держится на id и без пометки. Чужие объекты
+	# авторитет отклонит по владению — это ок, пометка не обязана пройти у всех.
+	var rev := str(data.get("rev", ""))
+	var applied := 0
+	var results: Dictionary = data.get("results", {})
+	for id in results:
+		if str(results[id].get("outcome", "")) == "applied":
+			applied += 1
+			NetworkManager.request_scene_action({"op": SceneChanges.OP_UPDATE, "id": str(id),
+				"props": {"persisted_rev": rev}})
+	var total := results.size()
+	if applied == total and applied > 0:
+		_finish_flush(true, "Запечено в страницу: %d объектов (rev %s). Новые посетители получат их из базы" % [applied, rev])
+	elif applied > 0:
+		_finish_flush(false, "Частично: %d из %d запечено (rev %s) — остальным сервер отказал" % [applied, total, rev])
+	else:
+		_finish_flush(false, "Сервер не принял ни одного объекта")
+
+
+func _finish_flush(ok: bool, message: String) -> void:
+	_flushing = false
+	_lock(false)
+	_mark_error(not ok)
+	_set_status(message)
+
+
+## Хост (с портом) из URL — для same-origin проверки persist-endpoint.
+static func _host_of(url: String) -> String:
+	if not url.contains("://"):
+		return ""
+	return url.get_slice("://", 1).get_slice("/", 0)
+
+
 # --- Мелочи ---
 
 func _lock(locked: bool) -> void:
 	_editor.editable = not locked
 	_save_btn.disabled = locked
 	_cancel_btn.disabled = locked
+	if _flush_btn != null:
+		_flush_btn.disabled = locked
 
 
 func _mark_error(on: bool) -> void:
