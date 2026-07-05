@@ -97,6 +97,13 @@ var _hs_space: Button
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
 
+# Строка статуса связи под полем адреса сигналинга (вкладка «Сеть»): «светофор» + развёрнутый
+# текст (адрес, число пиров, последняя ошибка). Создаётся в коде (нет в .tscn), см.
+# _build_net_status_row / _refresh_net_status.
+var _net_status_dot: Panel
+var _net_status_dot_style: StyleBoxFlat
+var _net_status_text: Label
+
 ## Мягкий хинт под выбором микрофона (только macOS): смена входа на лету ограничена драйвером
 ## CoreAudio — показываем после первой смены устройства. Создаётся в рантайме (см. _ready).
 var _mic_hint: Label = null
@@ -128,6 +135,14 @@ func _ready() -> void:
 	_face_dialog.file_selected.connect(_on_face_selected)
 	# Обзор камеры — применяем живьём (видно сразу, если экран открыт поверх мира).
 	_fov_slider.value_changed.connect(_on_fov_changed)
+	# Строка статуса связи под полем адреса сигналинга + подписка на смену состояния.
+	_build_net_status_row()
+	NetworkManager.net_status_changed.connect(_refresh_net_status.unbind(1))
+	# Число пиров/потерянных p2p меняет только текст (не state) — обновляем и по этим сигналам.
+	NetworkManager.p2p_peer_connected.connect(_refresh_net_status.unbind(1))
+	NetworkManager.p2p_peer_disconnected.connect(_refresh_net_status.unbind(1))
+	NetworkManager.peer_joined.connect(_refresh_net_status.unbind(2))
+	NetworkManager.peer_left.connect(_refresh_net_status.unbind(1))
 	# Очистка полей: пустые на сохранении превратятся в дефолты (placeholder подсказывает).
 	_home_clear.pressed.connect(_home.clear)
 	_url_clear.pressed.connect(_url.clear)
@@ -202,6 +217,7 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_url.text = Settings.signaling_url
 	_url.placeholder_text = "%s (по умолчанию)" % Settings.effective_signaling_url() \
 		if Settings.effective_signaling_url() != "" else "адрес сигнального сервера"
+	_refresh_net_status()
 	_hs_server.text = Settings.home_server_url
 	if BuildConfig.home_server_url != "":
 		_hs_server.placeholder_text = "%s (по умолчанию)" % BuildConfig.home_server_url
@@ -235,6 +251,44 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	# Поднимаем оверлей на передний план среди сиблингов, чтобы настройки перекрывали всё.
 	move_to_front()
 	_nick.grab_focus()
+
+
+## Собирает строку статуса связи под полем адреса сигналинга: круглый «светофор» + текст.
+## Кладётся сразу после UrlRow во вкладке «Сеть» (см. docs/multiplayer.md).
+func _build_net_status_row() -> void:
+	var url_row := _url.get_parent()   # NetSettings/UrlRow
+	var net := url_row.get_parent()    # NetSettings VBoxContainer
+	var row := HBoxContainer.new()
+	row.name = "StatusRow"
+	row.add_theme_constant_override("separation", 8)
+	_net_status_dot = Panel.new()
+	_net_status_dot.custom_minimum_size = Vector2(12, 12)
+	_net_status_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_net_status_dot_style = StyleBoxFlat.new()
+	_net_status_dot_style.set_corner_radius_all(6)
+	_net_status_dot.add_theme_stylebox_override("panel", _net_status_dot_style)
+	row.add_child(_net_status_dot)
+	_net_status_text = Label.new()
+	_net_status_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_net_status_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_net_status_text.custom_minimum_size = Vector2(320, 0)
+	row.add_child(_net_status_text)
+	net.add_child(row)
+	net.move_child(row, url_row.get_index() + 1)
+
+
+## Перекрашивает «светофор» и переписывает развёрнутый текст статуса из
+## NetworkManager.connection_status(). Зовётся при открытии и по сетевым сигналам.
+func _refresh_net_status() -> void:
+	if _net_status_dot == null:
+		return
+	var st := NetworkManager.connection_status()
+	_net_status_dot_style.bg_color = st.get("color", Color.GRAY)
+	var txt := str(st.get("label", ""))
+	var detail := str(st.get("detail", ""))
+	if detail != "":
+		txt += "\n" + detail
+	_net_status_text.text = txt
 
 
 ## Обновляет подпись с текущим размером дискового кэша (аватары + видео).

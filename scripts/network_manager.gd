@@ -44,6 +44,9 @@ signal identity_verified(id: int, address: String)
 signal video_state_received(id: int, player_id: String, action: String, position: float)
 ## online — есть ли активное подключение к сигнальному серверу.
 signal connection_changed(online: bool)
+## Сменилось агрегированное состояние связи (см. ConnStatus / connection_status()). Эмитится
+## из _process при смене состояния — под индикатор-«светофор» в UI (низ экрана + вкладка «Сеть»).
+signal net_status_changed(status: Dictionary)
 ## Пришёл голосовой кадр от пира: payload — закодированный VoiceCodec (см. VoiceManager).
 ## Воспроизведение — на капсуле пира (RemotePlayer/VoicePlayback), маршрутит RemotePlayersView.
 signal voice_received(id: int, payload: PackedByteArray)
@@ -91,6 +94,22 @@ const EPHEMERAL_ADMIN_RANK := 0
 ## переподключения (смена адреса сигналинга, обрыв WS/сети).
 const GHOST_GRACE_SECONDS := 2.0
 
+## Агрегированное состояние связи для UI-«светофора» (см. connection_status()).
+##   DISABLED   — офлайн-режим, подключение не требуется (серый);
+##   CONNECTING — соединяемся с сигналингом (синий);
+##   ONLINE     — всё хорошо (зелёный);
+##   DEGRADED   — онлайн, но есть проблемы (потеряна p2p-связь с частью пиров) (оранжевый);
+##   ERROR      — должны быть онлайн, но фактически отключены / нет WebRTC (красный).
+enum ConnStatus { DISABLED, CONNECTING, ONLINE, DEGRADED, ERROR }
+
+const _STATUS_COLORS := {
+	ConnStatus.DISABLED: Color(0.55, 0.55, 0.58),
+	ConnStatus.CONNECTING: Color(0.30, 0.55, 1.0),
+	ConnStatus.ONLINE: Color(0.30, 0.82, 0.42),
+	ConnStatus.DEGRADED: Color(0.98, 0.62, 0.12),
+	ConnStatus.ERROR: Color(0.90, 0.26, 0.26),
+}
+
 ## ICE/TURN-серверы берём из приватного конфига сборки (BuildConfig), а не зашиваем сюда —
 ## адреса и учётка TURN не должны жить в коде/репозитории. См. config/build_config.gd.
 
@@ -130,6 +149,12 @@ var _ghosts := {}
 # Пиры, у которых p2p-канал БЫЛ открыт и закрылся, пока они всё ещё в комнате по сигналингу
 # (обрыв ICE). Для индикации «соединение потеряно» vs «P2P подключается». peer_id -> true.
 var _p2p_lost := {}
+# Последняя причина обрыва/отказа связи (код закрытия WS, ошибка подключения, отказ комнаты) —
+# показывается в развёрнутом статусе на вкладке «Сеть». "" — ошибок нет.
+var _last_error := ""
+# Кэш состояния для net_status_changed: эмитим сигнал только при СМЕНЕ состояния.
+var _last_status_state := -1
+var _status_accum := 0.0
 var _rng := Crypto.new()   # генератор nonce для челленджей
 var _scene := SceneChanges.new()  # машина состояний эфемерного слоя (чистая, см. scene_changes.gd)
 # Зарезервированные id (узлы vrweb-слоя ТЕКУЩЕЙ страницы): add с таким id отклоняется —
@@ -178,6 +203,56 @@ func is_online() -> bool:
 	return _ws != null and _ws.get_ready_state() == WebSocketPeer.STATE_OPEN
 
 
+## Агрегированное состояние связи для UI. Возвращает словарь:
+##   state  — ConnStatus (см. enum);
+##   color  — Color для «светофора»;
+##   label  — короткая подпись (одна строка);
+##   detail — развёрнутый текст (адрес сигналинга, число пиров, последняя ошибка) для настроек.
+func connection_status() -> Dictionary:
+	if not Settings.online_enabled:
+		return _status_dict(ConnStatus.DISABLED, "Офлайн", "Онлайн-режим выключен")
+	if not webrtc_available():
+		return _status_dict(ConnStatus.ERROR, "Нет WebRTC",
+			"Аддон webrtc-native не установлен (addons/webrtc) — онлайн невозможен")
+	var ws_state := _ws.get_ready_state() if _ws != null else -1
+	if ws_state == WebSocketPeer.STATE_OPEN:
+		var base := "Сигналинг: %s" % Settings.effective_signaling_url()
+		if in_room():
+			base += "\nВ комнате: %d, p2p-связей: %d" % [peer_ids().size(), peer_count()]
+		else:
+			base += "\nВне комнаты"
+		if _p2p_lost.size() > 0:
+			return _status_dict(ConnStatus.DEGRADED, "Проблемы со связью",
+				base + "\nПотеряна p2p-связь с %d пиром(ами)" % _p2p_lost.size())
+		return _status_dict(ConnStatus.ONLINE, "Онлайн", base)
+	if ws_state == WebSocketPeer.STATE_CONNECTING:
+		return _status_dict(ConnStatus.CONNECTING, "Соединение…",
+			"Подключаемся к %s" % Settings.effective_signaling_url())
+	# online_enabled == true, но сокета нет / он закрывается — должны быть онлайн, но отключены.
+	var detail := "Должны быть онлайн, но соединение разорвано"
+	if _last_error != "":
+		detail += "\n" + _last_error
+	return _status_dict(ConnStatus.ERROR, "Отключено", detail)
+
+
+func _status_dict(state: int, label: String, detail: String) -> Dictionary:
+	return {"state": state, "color": _STATUS_COLORS.get(state, Color.GRAY),
+		"label": label, "detail": detail}
+
+
+## Перевычисляет агрегированный статус (~5 Гц из _process) и эмитит net_status_changed при СМЕНЕ
+## состояния — чтобы UI-индикатор ловил и «беззвучные» переходы (CONNECTING, обрыв) без событий.
+func _poll_net_status(delta: float) -> void:
+	_status_accum += delta
+	if _status_accum < 0.2:
+		return
+	_status_accum = 0.0
+	var st := connection_status()
+	if int(st["state"]) != _last_status_state:
+		_last_status_state = int(st["state"])
+		net_status_changed.emit(st)
+
+
 ## Доступен ли нативный WebRTC-аддон (для десктопа его надо положить в addons/webrtc).
 func webrtc_available() -> bool:
 	return ClassDB.class_exists("WebRTCPeerConnection") \
@@ -218,7 +293,10 @@ func connect_to_server() -> void:
 	var err := _ws.connect_to_url(url)
 	if err != OK:
 		push_warning("Не удалось подключиться к %s (%d)" % [url, err])
+		_last_error = "Не удалось начать подключение к %s (ошибка %d)" % [url, err]
 		_ws = null
+		return
+	_last_error = ""
 
 
 ## Нормализует адрес сигналинга под WebSocketPeer: https→wss, http→ws, ws/wss — как есть.
@@ -742,6 +820,7 @@ func _can_rpc() -> bool:
 
 
 func _process(_delta: float) -> void:
+	_poll_net_status(_delta)
 	if _ws == null:
 		return
 	_ws.poll()
@@ -753,13 +832,18 @@ func _process(_delta: float) -> void:
 	if state == WebSocketPeer.STATE_OPEN:
 		if not _was_open:
 			_was_open = true
+			_last_error = ""
 			connection_changed.emit(true)
 		while _ws.get_available_packet_count() > 0:
 			_on_ws_message(_ws.get_packet().get_string_from_utf8())
 	elif state == WebSocketPeer.STATE_CLOSED:
 		# Сокет закрылся (сервер недоступен/упал/idle-timeout прокси) — сбрасываемся в офлайн.
+		var code := _ws.get_close_code()
+		var reason := _ws.get_close_reason()
 		_nlog("WS CLOSED code=%d reason=%s -> офлайн (был online=%s)" % [
-			_ws.get_close_code(), _ws.get_close_reason(), str(_was_open)])
+			code, reason, str(_was_open)])
+		_last_error = "Сигналинг закрыл соединение (код %d%s)" % [
+			code, ": " + reason if reason != "" else ""]
 		disconnect_from_server()
 		return
 	# Истечение TTL эфемерных объектов — обязанность авторитета (единый владелец состояния и
@@ -816,7 +900,9 @@ func _on_ws_message(raw: String) -> void:
 			if str(msg.get("room", "")) == _room:
 				_room = ""
 				_teardown_mesh()
-			room_denied.emit(str(msg.get("room", "")), str(msg.get("reason", "")))
+			var deny_reason := str(msg.get("reason", ""))
+			_last_error = "Комната закрыта%s" % (": " + deny_reason if deny_reason != "" else "")
+			room_denied.emit(str(msg.get("room", "")), deny_reason)
 		"offer":
 			_on_remote_offer(int(msg.get("from", 0)), str(msg.get("data", "")))
 		"answer":

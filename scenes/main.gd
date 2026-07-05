@@ -38,6 +38,11 @@ var _player: Player
 # старый — его корутина увидит снесённый контейнер и сама прекратится.
 var _world_gen: WorldGenerator = null
 var _status: Label
+# «Светофор» связи слева от строки статуса: цвет = агрегированное состояние WebRTC-связи
+# (NetworkManager.connection_status), тултип — развёрнутый текст. Кружок = Panel с круглым
+# StyleBoxFlat, чей bg_color мы перекрашиваем.
+var _conn_dot: Panel
+var _conn_dot_style: StyleBoxFlat
 @onready var _passive_cursor: TextureRect = $UI/PassiveCursor
 @onready var _active_cursor: TextureRect = $UI/ActiveCursor
 
@@ -1128,14 +1133,31 @@ func _setup_ui_extras() -> void:
 	_active_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_on_aim_target_changed(false, "")
 
-	# Строка статуса внизу.
+	# «Светофор» связи — маленький кружок слева от строки статуса. MOUSE_FILTER_PASS, чтобы
+	# показывался тултип с развёрнутым статусом, но клики уходили сквозь него.
+	_conn_dot = Panel.new()
+	_conn_dot_style = StyleBoxFlat.new()
+	_conn_dot_style.set_corner_radius_all(6)
+	_conn_dot.add_theme_stylebox_override("panel", _conn_dot_style)
+	_conn_dot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_conn_dot.offset_left = 8
+	_conn_dot.offset_right = 20
+	_conn_dot.offset_top = -26
+	_conn_dot.offset_bottom = -14
+	_conn_dot.mouse_filter = Control.MOUSE_FILTER_PASS
+	ui.add_child(_conn_dot)
+
+	# Строка статуса внизу (сдвинута вправо, чтобы освободить место под «светофор»).
 	_status = Label.new()
 	_status.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_status.offset_left = 8
+	_status.offset_left = 28
 	_status.offset_bottom = -8
 	_status.offset_top = -32
 	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(_status)
+
+	NetworkManager.net_status_changed.connect(_update_conn_indicator)
+	_update_conn_indicator()
 
 	_build_debug_overlay(ui)
 
@@ -1216,6 +1238,19 @@ func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
 	print("[VRWeb] ", text)
+
+
+## Перекрашивает «светофор» связи и обновляет его тултип. Зовётся при старте и по
+## NetworkManager.net_status_changed (сигнал передаёт готовый словарь статуса).
+func _update_conn_indicator(status: Dictionary = {}) -> void:
+	if _conn_dot == null:
+		return
+	if status.is_empty():
+		status = NetworkManager.connection_status()
+	_conn_dot_style.bg_color = status.get("color", Color.GRAY)
+	var detail := str(status.get("detail", ""))
+	_conn_dot.tooltip_text = str(status.get("label", "")) \
+		+ ("\n" + detail if detail != "" else "")
 
 
 ## Сериализация хранимого документа страницы БЕЗ блока <vrweb> — read-only часть консоли
