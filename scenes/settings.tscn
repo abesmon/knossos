@@ -48,7 +48,8 @@ horizontal_alignment = 1
 
 [node name="TabContainer" type="TabContainer" parent="Panel/Margin/VBoxContainer" unique_id=1851533998]
 layout_mode = 2
-current_tab = 0
+size_flags_vertical = 3
+current_tab = 5
 tab_0/title = "Основные"
 tab_1/title = "Сеть"
 tab_2/title = "Звук"
@@ -57,43 +58,51 @@ tab_4/title = "Пользователи"
 tab_5/title = "Мир"
 tab_6/title = "Аккаунт"
 
-[node name="GeneralSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=991100000]
+[node name="GeneralSettings" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=991100000]
+visible = false
 layout_mode = 2
-theme_override_constants/separation = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 metadata/_tab_index = 0
 metadata/_tab_name = "Основные"
 
-[node name="HomeLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings" unique_id=991100001]
+[node name="Content" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings" unique_id=614048879]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="HomeLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content" unique_id=991100001]
 layout_mode = 2
 tooltip_text = "Этот адрес загрузится автоматически при запуске. Если поле пустое — приложение откроется на пустом экране, ожидая ввода адреса."
 text = "Домашняя страница"
 
-[node name="HomeRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings" unique_id=991100002]
+[node name="HomeRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content" unique_id=991100002]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Home" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow" unique_id=991100003]
+[node name="Home" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/HomeRow" unique_id=991100003]
 custom_minimum_size = Vector2(320, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Адрес страницы, открываемой при запуске"
 
-[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow" unique_id=991100004]
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/HomeRow" unique_id=991100004]
 layout_mode = 2
 tooltip_text = "Очистить (не загружать страницу при запуске)"
 text = "✕"
 
-[node name="FovRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings" unique_id=991100005]
+[node name="FovRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content" unique_id=991100005]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow" unique_id=991100006]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/FovRow" unique_id=991100006]
 custom_minimum_size = Vector2(96, 0)
 layout_mode = 2
 tooltip_text = "Угол обзора камеры (вертикальный FOV). Больше — шире обзор, но сильнее искажения по краям."
 text = "Обзор (FOV)"
 
-[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow" unique_id=991100007]
+[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/FovRow" unique_id=991100007]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -101,190 +110,204 @@ min_value = 30.0
 max_value = 120.0
 value = 75.0
 
-[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow" unique_id=991100008]
+[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/FovRow" unique_id=991100008]
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
 text = "75°"
 horizontal_alignment = 2
 
-[node name="NetSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=1884775178]
+[node name="NetSettings" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=1884775178]
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 metadata/_tab_index = 1
 metadata/_tab_name = "Сеть"
 
-[node name="Online" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=76194372]
+[node name="Content" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=1997244692]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="Online" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=76194372]
 layout_mode = 2
 text = "Онлайн-режим"
 
-[node name="UrlLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=986153950]
+[node name="UrlLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=986153950]
 layout_mode = 2
 text = "Адрес сигнального сервера"
 
-[node name="UrlRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=12448080]
+[node name="UrlRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=12448080]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Url" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow" unique_id=1142363022]
+[node name="Url" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UrlRow" unique_id=1142363022]
 custom_minimum_size = Vector2(320, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "https://signaling.vrweb.home.syrupmg.ru (по умолчанию)"
 
-[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow" unique_id=570625056]
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UrlRow" unique_id=570625056]
 layout_mode = 2
 tooltip_text = "Очистить (вернуть адрес по умолчанию)"
 text = "✕"
 
-[node name="NickLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=1311280410]
+[node name="NickLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=1311280410]
 layout_mode = 2
 text = "Ник"
 
-[node name="NickRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=1359936515]
+[node name="NickRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=1359936515]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Nick" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow" unique_id=1484066113]
+[node name="Nick" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/NickRow" unique_id=1484066113]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Guest-XXXX (по умолчанию)"
 
-[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow" unique_id=1227214934]
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/NickRow" unique_id=1227214934]
 layout_mode = 2
 tooltip_text = "Очистить (сгенерировать Guest-XXXX)"
 text = "✕"
 
-[node name="FaceLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=1138240026]
+[node name="FaceLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=1138240026]
 layout_mode = 2
 text = "Лицо (PNG/JPG, сохранится как 256×256)"
 
-[node name="FaceRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=308751277]
+[node name="FaceRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=308751277]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="Preview" type="TextureRect" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow" unique_id=1464710068]
+[node name="Preview" type="TextureRect" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/FaceRow" unique_id=1464710068]
 custom_minimum_size = Vector2(64, 64)
 layout_mode = 2
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Pick" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow" unique_id=1491469660]
+[node name="Pick" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/FaceRow" unique_id=1491469660]
 layout_mode = 2
 size_flags_vertical = 4
 text = "Выбрать…"
 
-[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow" unique_id=702666424]
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/FaceRow" unique_id=702666424]
 layout_mode = 2
 size_flags_vertical = 4
 tooltip_text = "Вернуть лицо по умолчанию"
 text = "Сбросить"
 
-[node name="AvatarLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=156735911]
+[node name="AvatarLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=156735911]
 layout_mode = 2
 text = "Адрес аватара (vrwebavatar://N или https://…tscn)"
 
-[node name="AvatarRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=2130071836]
+[node name="AvatarRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=2130071836]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Avatar" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow" unique_id=356523571]
+[node name="Avatar" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/AvatarRow" unique_id=356523571]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "vrwebavatar://1 (по умолчанию)"
 
-[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow" unique_id=1930368877]
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/AvatarRow" unique_id=1930368877]
 layout_mode = 2
 tooltip_text = "Очистить (вернуть аватар по умолчанию)"
 text = "✕"
 
-[node name="UserIdLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=991000010]
+[node name="UserIdLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=991000010]
 layout_mode = 2
 text = "Ваш сетевой ID (самозаявленный — можно переиздать)"
 
-[node name="UserIdRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings" unique_id=991000011]
+[node name="UserIdRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=991000011]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="UserId" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow" unique_id=991000012]
+[node name="UserId" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UserIdRow" unique_id=991000012]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "—"
 editable = false
 
-[node name="Copy" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow" unique_id=991000014]
+[node name="Copy" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UserIdRow" unique_id=991000014]
 layout_mode = 2
 tooltip_text = "Скопировать ID в буфер обмена"
 text = "Копировать"
 
-[node name="Reissue" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow" unique_id=991000013]
+[node name="Reissue" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UserIdRow" unique_id=991000013]
 layout_mode = 2
 tooltip_text = "Переиздать ID: сгенерировать новый. Внимание: выданные вам ранги/права привязаны к старому ID и будут потеряны."
 text = "Переиздать"
 
-[node name="SoundSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=783756793]
+[node name="SoundSettings" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=783756793]
 visible = false
 layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 metadata/_tab_index = 2
 metadata/_tab_name = "Звук"
 
-[node name="ModeRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1321079378]
+[node name="Content" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1496134230]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ModeRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=1321079378]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ModeLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ModeRow" unique_id=1321079380]
+[node name="ModeLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ModeRow" unique_id=1321079380]
 layout_mode = 2
 text = "Режим микрофона"
 
-[node name="Mode" type="OptionButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ModeRow" unique_id=1321079381]
+[node name="Mode" type="OptionButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ModeRow" unique_id=1321079381]
 layout_mode = 2
 size_flags_horizontal = 3
 tooltip_text = "Как голос уходит в сеть. Микрофон при этом работает всегда (когда онлайн)."
 
-[node name="Denoise" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1321079379]
+[node name="Denoise" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=1321079379]
 layout_mode = 2
 tooltip_text = "Шумоподавление микрофона (RNNoise): убирает фоновый шум из передаваемого голоса"
 text = "Шумоподавление (RNNoise)"
 
-[node name="MicLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1797282142]
+[node name="MicLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=1797282142]
 layout_mode = 2
 text = "Микрофон"
 
-[node name="MicRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1996763480]
+[node name="MicRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=1996763480]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Device" type="OptionButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow" unique_id=1360650143]
+[node name="Device" type="OptionButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/MicRow" unique_id=1360650143]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Refresh" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow" unique_id=655347507]
+[node name="Refresh" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/MicRow" unique_id=655347507]
 layout_mode = 2
 tooltip_text = "Обновить список устройств"
 text = "⟳"
 
-[node name="TestRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=1767273973]
+[node name="TestRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=1767273973]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Test" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/TestRow" unique_id=422420779]
+[node name="Test" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/TestRow" unique_id=422420779]
 layout_mode = 2
 toggle_mode = true
 text = "Проверить микрофон"
 
-[node name="Monitor" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/TestRow" unique_id=1846417094]
+[node name="Monitor" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/TestRow" unique_id=1846417094]
 layout_mode = 2
 tooltip_text = "Проигрывать микрофон обратно (в наушниках, чтобы не было эха)"
 text = "Слышать себя"
 
-[node name="Level" type="ProgressBar" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796913]
+[node name="Level" type="ProgressBar" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796913]
 custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
 max_value = 0.3
 step = 0.001
 show_percentage = false
 
-[node name="Threshold" type="ColorRect" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Level" unique_id=864796939]
+[node name="Threshold" type="ColorRect" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/Level" unique_id=864796939]
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.133
@@ -297,17 +320,17 @@ tooltip_text = "Порог активации голоса"
 mouse_filter = 2
 color = Color(1, 0.55, 0, 0.9)
 
-[node name="GainRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796931]
+[node name="GainRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796931]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/GainRow" unique_id=864796932]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/GainRow" unique_id=864796932]
 custom_minimum_size = Vector2(96, 0)
 layout_mode = 2
 tooltip_text = "Усиление сигнала микрофона до передачи. <100% тише, >100% громче."
 text = "Усиление"
 
-[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/GainRow" unique_id=864796933]
+[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/GainRow" unique_id=864796933]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -315,23 +338,23 @@ max_value = 3.0
 step = 0.05
 value = 1.0
 
-[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/GainRow" unique_id=864796934]
+[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/GainRow" unique_id=864796934]
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
 text = "100%"
 horizontal_alignment = 2
 
-[node name="ThreshRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796935]
+[node name="ThreshRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796935]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ThreshRow" unique_id=864796936]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ThreshRow" unique_id=864796936]
 custom_minimum_size = Vector2(96, 0)
 layout_mode = 2
 tooltip_text = "Порог активации голоса: выше — нужно говорить громче, чтобы началась передача. Подбирайте, глядя на индикатор уровня выше."
 text = "Порог"
 
-[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ThreshRow" unique_id=864796937]
+[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ThreshRow" unique_id=864796937]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -339,43 +362,43 @@ max_value = 0.15
 step = 0.005
 value = 0.04
 
-[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ThreshRow" unique_id=864796938]
+[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ThreshRow" unique_id=864796938]
 custom_minimum_size = Vector2(48, 0)
 layout_mode = 2
 text = "27%"
 horizontal_alignment = 2
 
-[node name="OutLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796914]
+[node name="OutLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796914]
 layout_mode = 2
 text = "Вывод звука"
 
-[node name="OutRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796915]
+[node name="OutRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796915]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Device" type="OptionButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/OutRow" unique_id=864796916]
+[node name="Device" type="OptionButton" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/OutRow" unique_id=864796916]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Refresh" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/OutRow" unique_id=864796917]
+[node name="Refresh" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/OutRow" unique_id=864796917]
 layout_mode = 2
 tooltip_text = "Обновить список устройств"
 text = "⟳"
 
-[node name="VolLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796918]
+[node name="VolLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796918]
 layout_mode = 2
 text = "Громкость"
 
-[node name="VolMaster" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796919]
+[node name="VolMaster" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796919]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolMaster" unique_id=864796920]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolMaster" unique_id=864796920]
 custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Общая"
 
-[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolMaster" unique_id=864796921]
+[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolMaster" unique_id=864796921]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -383,22 +406,22 @@ max_value = 1.0
 step = 0.01
 value = 1.0
 
-[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolMaster" unique_id=864796922]
+[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolMaster" unique_id=864796922]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
 text = "100%"
 horizontal_alignment = 2
 
-[node name="VolWorld" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796923]
+[node name="VolWorld" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796923]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolWorld" unique_id=864796924]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolWorld" unique_id=864796924]
 custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Мир"
 
-[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolWorld" unique_id=864796925]
+[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolWorld" unique_id=864796925]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -406,22 +429,22 @@ max_value = 1.0
 step = 0.01
 value = 1.0
 
-[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolWorld" unique_id=864796926]
+[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolWorld" unique_id=864796926]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
 text = "100%"
 horizontal_alignment = 2
 
-[node name="VolVoice" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings" unique_id=864796927]
+[node name="VolVoice" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content" unique_id=864796927]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolVoice" unique_id=864796928]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolVoice" unique_id=864796928]
 custom_minimum_size = Vector2(72, 0)
 layout_mode = 2
 text = "Голос"
 
-[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolVoice" unique_id=864796929]
+[node name="Slider" type="HSlider" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolVoice" unique_id=864796929]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
@@ -429,115 +452,120 @@ max_value = 1.0
 step = 0.01
 value = 1.0
 
-[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolVoice" unique_id=864796930]
+[node name="Value" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolVoice" unique_id=864796930]
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
 text = "100%"
 horizontal_alignment = 2
 
-[node name="MiscSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=864797000]
+[node name="MiscSettings" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=864797000]
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 metadata/_tab_index = 3
 metadata/_tab_name = "Прочее"
 
-[node name="CacheLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings" unique_id=864797001]
+[node name="Content" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings" unique_id=1034126072]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="CacheLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content" unique_id=864797001]
 layout_mode = 2
 text = "Кэш"
 
-[node name="CacheRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings" unique_id=864797002]
+[node name="CacheRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content" unique_id=864797002]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="Size" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow" unique_id=864797003]
+[node name="Size" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content/CacheRow" unique_id=864797003]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Размер кэша: …"
 
-[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow" unique_id=864797004]
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content/CacheRow" unique_id=864797004]
 layout_mode = 2
 tooltip_text = "Удалить кэш скачанных аватаров и видео"
 text = "Очистить кэш"
 
-[node name="CacheHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings" unique_id=864797005]
+[node name="CacheHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content" unique_id=864797005]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "Кэшируются скачанные аватары и видео. Их можно безопасно удалить — при необходимости загрузятся заново."
 autowrap_mode = 3
 
-[node name="UsersSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=991000020]
+[node name="UsersSettings" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=991000020]
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 8
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 metadata/_tab_index = 4
 metadata/_tab_name = "Пользователи"
 
-[node name="UsersHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings" unique_id=991000021]
+[node name="Content" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings" unique_id=864336092]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="UsersHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Content" unique_id=991000021]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "Пиры в текущем инстансе и их ранги (меньше — больше прав)."
 autowrap_mode = 3
 
-[node name="UsersScroll" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings" unique_id=991000022]
-custom_minimum_size = Vector2(440, 260)
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="List" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings/UsersScroll" unique_id=991000023]
+[node name="List" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Content" unique_id=991000023]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 6
 
-[node name="Empty" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings" unique_id=991000024]
+[node name="Empty" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Content" unique_id=991000024]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "В инстансе больше никого."
 
-[node name="WorldSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=992100000]
-visible = false
+[node name="WorldSettings" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=992100000]
 layout_mode = 2
-theme_override_constants/separation = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 metadata/_tab_index = 5
 metadata/_tab_name = "Мир"
 
-[node name="InfoScroll" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100001]
-custom_minimum_size = Vector2(440, 260)
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="Info" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll" unique_id=992100002]
+[node name="Content" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=1397150498]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="Thumb" type="TextureRect" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100003]
+[node name="Thumb" type="TextureRect" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100003]
 custom_minimum_size = Vector2(0, 180)
 layout_mode = 2
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Title" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100004]
+[node name="Title" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100004]
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "—"
 autowrap_mode = 3
 
-[node name="Url" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100005]
+[node name="Url" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100005]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 autowrap_mode = 3
 
-[node name="Desc" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100006]
+[node name="Desc" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100006]
 layout_mode = 2
 autowrap_mode = 3
 
-[node name="MetaLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100007]
+[node name="MetaLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100007]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "О странице"
 
-[node name="Meta" type="RichTextLabel" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info" unique_id=992100008]
+[node name="Meta" type="RichTextLabel" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100008]
 custom_minimum_size = Vector2(0, 60)
 layout_mode = 2
 size_flags_vertical = 3
@@ -545,140 +573,143 @@ bbcode_enabled = true
 fit_content = true
 scroll_active = false
 
-[node name="MakeHome" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100009]
+[node name="MakeHome" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100009]
 layout_mode = 2
 tooltip_text = "Сделать этот инстанс домашним: он будет загружаться при запуске"
 text = "Сделать инстанс домашним"
 
-[node name="HomeStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100010]
+[node name="HomeStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100010]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.8, 0.55, 1)
 text = "Это ваш домашний инстанс."
 
-[node name="GoHome" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings" unique_id=992100011]
+[node name="GoHome" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content" unique_id=992100011]
 layout_mode = 2
 tooltip_text = "Загрузить домашний инстанс"
 text = "Вернуться домой"
 
-[node name="AccountSettings" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=993300000]
+[node name="AccountSettings" type="ScrollContainer" parent="Panel/Margin/VBoxContainer/TabContainer" unique_id=993300000]
 visible = false
 layout_mode = 2
-theme_override_constants/separation = 10
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 metadata/_tab_index = 6
 metadata/_tab_name = "Аккаунт"
 
-[node name="ServerLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300001]
+[node name="Content" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=1344697945]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="ServerLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300001]
 layout_mode = 2
 tooltip_text = "Сервер, на котором живёт ваш аккаунт (идентичность nick@domain). Каждый может поднять свой — см. docs/home-server.md."
 text = "Домашний сервер"
 
-[node name="ServerRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300002]
+[node name="ServerRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300002]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Server" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow" unique_id=993300003]
+[node name="Server" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/ServerRow" unique_id=993300003]
 custom_minimum_size = Vector2(320, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "https://home.example.com"
 
-[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow" unique_id=993300004]
+[node name="Clear" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/ServerRow" unique_id=993300004]
 layout_mode = 2
 tooltip_text = "Очистить (вернуть сервер по умолчанию)"
 text = "✕"
 
-[node name="ServerStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300005]
+[node name="ServerStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300005]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "—"
 autowrap_mode = 3
 
-[node name="AccountStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300006]
+[node name="AccountStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300006]
 layout_mode = 2
 text = "—"
 autowrap_mode = 3
 
-[node name="CertStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300007]
+[node name="CertStatus" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300007]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "—"
 autowrap_mode = 3
 
-[node name="LoginBox" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300008]
+[node name="LoginBox" type="VBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300008]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="NickRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox" unique_id=993300009]
+[node name="NickRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox" unique_id=993300009]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/NickRow" unique_id=993300010]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/NickRow" unique_id=993300010]
 custom_minimum_size = Vector2(96, 0)
 layout_mode = 2
 text = "Имя"
 
-[node name="Nick" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/NickRow" unique_id=993300011]
+[node name="Nick" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/NickRow" unique_id=993300011]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "имя аккаунта (a-z, 0-9, ._-)"
 
-[node name="PassRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox" unique_id=993300012]
+[node name="PassRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox" unique_id=993300012]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/PassRow" unique_id=993300013]
+[node name="Name" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/PassRow" unique_id=993300013]
 custom_minimum_size = Vector2(96, 0)
 layout_mode = 2
 text = "Пароль"
 
-[node name="Pass" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/PassRow" unique_id=993300014]
+[node name="Pass" type="LineEdit" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/PassRow" unique_id=993300014]
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "минимум 8 символов"
 secret = true
 
-[node name="AuthButtons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox" unique_id=993300015]
+[node name="AuthButtons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox" unique_id=993300015]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Login" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons" unique_id=993300016]
+[node name="Login" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/AuthButtons" unique_id=993300016]
 layout_mode = 2
 tooltip_text = "Войти в существующий аккаунт на домашнем сервере"
 text = "Войти"
 
-[node name="Register" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons" unique_id=993300017]
+[node name="Register" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/AuthButtons" unique_id=993300017]
 layout_mode = 2
 tooltip_text = "Создать аккаунт на домашнем сервере (если регистрация открыта)"
 text = "Зарегистрироваться"
 
-[node name="AuthedBox" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300018]
+[node name="AuthedBox" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300018]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Logout" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox" unique_id=993300019]
+[node name="Logout" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AuthedBox" unique_id=993300019]
 layout_mode = 2
 tooltip_text = "Выйти: отозвать токен и забыть сертификат идентичности"
 text = "Выйти"
 
-[node name="Refresh" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox" unique_id=993300020]
+[node name="Refresh" type="Button" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AuthedBox" unique_id=993300020]
 layout_mode = 2
 tooltip_text = "Заново опросить сервер и продлить сертификат идентичности"
 text = "Обновить"
 
-[node name="AuthError" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300021]
+[node name="AuthError" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300021]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.5, 0.5, 1)
 autowrap_mode = 3
 
-[node name="AccountHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings" unique_id=993300022]
+[node name="AccountHint" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content" unique_id=993300022]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
 text = "Вход даёт подписанный сертификат идентичности: другие игроки видят подтверждённый адрес nick@domain вместо самозаявленного ID. Без входа вы — аноним."
 autowrap_mode = 3
-
-[node name="Spacer" type="Control" parent="Panel/Margin/VBoxContainer" unique_id=1499833373]
-layout_mode = 2
-size_flags_vertical = 3
 
 [node name="Buttons" type="HBoxContainer" parent="Panel/Margin/VBoxContainer" unique_id=1634399168]
 layout_mode = 2

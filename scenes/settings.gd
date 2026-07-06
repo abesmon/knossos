@@ -16,84 +16,86 @@ signal space_requested
 ## Верх диапазона ползунка порога активации (RMS) — для перевода значения в проценты в подписи.
 const THRESH_MAX := 0.15
 
-@onready var _online: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Online
-@onready var _mode: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ModeRow/Mode
-@onready var _denoise: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Denoise
-@onready var _device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Device
-@onready var _device_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/MicRow/Refresh
-@onready var _test: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/TestRow/Test
-@onready var _monitor: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/TestRow/Monitor
-@onready var _level: ProgressBar = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Level
-@onready var _thresh_marker: ColorRect = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Level/Threshold
-@onready var _gain_slider: HSlider = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/GainRow/Slider
-@onready var _gain_value: Label = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/GainRow/Value
-@onready var _thresh_slider: HSlider = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ThreshRow/Slider
-@onready var _thresh_value: Label = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/ThreshRow/Value
-@onready var _out_device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/OutRow/Device
-@onready var _out_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/OutRow/Refresh
+@onready var _online: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/Online
+@onready var _mode: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ModeRow/Mode
+@onready var _denoise: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/Denoise
+@onready var _device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/MicRow/Device
+@onready var _device_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/MicRow/Refresh
+@onready var _test: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/TestRow/Test
+@onready var _monitor: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/TestRow/Monitor
+@onready var _level: ProgressBar = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/Level
+@onready var _thresh_marker: ColorRect = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/Level/Threshold
+@onready var _gain_slider: HSlider = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/GainRow/Slider
+@onready var _gain_value: Label = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/GainRow/Value
+@onready var _thresh_slider: HSlider = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ThreshRow/Slider
+@onready var _thresh_value: Label = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ThreshRow/Value
+@onready var _out_device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/OutRow/Device
+@onready var _out_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/OutRow/Refresh
 ## Ползунки громкости шин: имя шины (как в Settings.AUDIO_BUSES) → HSlider + его Label-значение.
 @onready var _vol_sliders := {
-	"Master": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolMaster/Slider,
-	"World": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolWorld/Slider,
-	"Voice": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolVoice/Slider,
+	"Master": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolMaster/Slider,
+	"World": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolWorld/Slider,
+	"Voice": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolVoice/Slider,
 }
 @onready var _vol_values := {
-	"Master": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolMaster/Value,
-	"World": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolWorld/Value,
-	"Voice": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/VolVoice/Value,
+	"Master": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolMaster/Value,
+	"World": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolWorld/Value,
+	"Voice": $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/VolVoice/Value,
 }
-@onready var _home: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow/Home
-@onready var _home_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/HomeRow/Clear
-@onready var _fov_slider: HSlider = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow/Slider
-@onready var _fov_value: Label = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/FovRow/Value
-@onready var _url: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Url
-@onready var _url_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UrlRow/Clear
-@onready var _nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow/Nick
-@onready var _nick_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/NickRow/Clear
-@onready var _face_preview: TextureRect = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow/Preview
-@onready var _face_pick: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow/Pick
-@onready var _face_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/FaceRow/Clear
-@onready var _avatar: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Avatar
-@onready var _avatar_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/AvatarRow/Clear
-@onready var _user_id: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow/UserId
-@onready var _user_id_copy: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow/Copy
-@onready var _user_id_reissue: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/UserIdRow/Reissue
+@onready var _home: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/HomeRow/Home
+@onready var _home_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/HomeRow/Clear
+@onready var _fov_slider: HSlider = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/FovRow/Slider
+@onready var _fov_value: Label = $Panel/Margin/VBoxContainer/TabContainer/GeneralSettings/Content/FovRow/Value
+@onready var _url: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UrlRow/Url
+@onready var _url_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UrlRow/Clear
+@onready var _nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/NickRow/Nick
+@onready var _nick_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/NickRow/Clear
+@onready var _face_preview: TextureRect = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/FaceRow/Preview
+@onready var _face_pick: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/FaceRow/Pick
+@onready var _face_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/FaceRow/Clear
+@onready var _avatar: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/AvatarRow/Avatar
+@onready var _avatar_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/AvatarRow/Clear
+@onready var _user_id: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UserIdRow/UserId
+@onready var _user_id_copy: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UserIdRow/Copy
+@onready var _user_id_reissue: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UserIdRow/Reissue
 @onready var _face_dialog: FileDialog = $FaceDialog
-@onready var _cache_size: Label = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow/Size
-@onready var _cache_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/CacheRow/Clear
+@onready var _cache_size: Label = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content/CacheRow/Size
+@onready var _cache_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content/CacheRow/Clear
 @onready var _tabs: TabContainer = $Panel/Margin/VBoxContainer/TabContainer
-@onready var _users_root: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings
-@onready var _world_root: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings
-@onready var _world_thumb: TextureRect = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Thumb
-@onready var _world_title: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Title
-@onready var _world_url: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Url
-@onready var _world_desc: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Desc
-@onready var _world_meta_label: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/MetaLabel
-@onready var _world_meta: RichTextLabel = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/InfoScroll/Info/Meta
-@onready var _world_make_home: Button = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/MakeHome
-@onready var _world_home_status: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/HomeStatus
-@onready var _world_go_home: Button = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/GoHome
-@onready var _users_list: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/UsersScroll/List
-@onready var _users_empty: Label = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Empty
+# Корни вкладок — сами ScrollContainer'ы (прямые дети TabContainer): по ним ищем индекс вкладки
+# и переставляем порядок в _setup_tabs. Контент каждой вкладки лежит в дочернем VBox «Content».
+@onready var _users_tab: ScrollContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings
+@onready var _world_tab: ScrollContainer = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings
+@onready var _world_thumb: TextureRect = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/Thumb
+@onready var _world_title: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/Title
+@onready var _world_url: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/Url
+@onready var _world_desc: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/Desc
+@onready var _world_meta_label: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/MetaLabel
+@onready var _world_meta: RichTextLabel = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/Meta
+@onready var _world_make_home: Button = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/MakeHome
+@onready var _world_home_status: Label = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/HomeStatus
+@onready var _world_go_home: Button = $Panel/Margin/VBoxContainer/TabContainer/WorldSettings/Content/GoHome
+@onready var _users_list: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Content/List
+@onready var _users_empty: Label = $Panel/Margin/VBoxContainer/TabContainer/UsersSettings/Content/Empty
 # Вкладка «Аккаунт» — домашний сервер и федеративная идентичность (см. docs/home-server.md).
-@onready var _account_root: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings
-@onready var _hs_server: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow/Server
-@onready var _hs_server_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerRow/Clear
-@onready var _hs_server_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/ServerStatus
-@onready var _hs_account_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AccountStatus
-@onready var _hs_cert_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/CertStatus
-@onready var _hs_login_box: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox
-@onready var _hs_nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/NickRow/Nick
-@onready var _hs_pass: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/PassRow/Pass
-@onready var _hs_login: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons/Login
-@onready var _hs_register: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/LoginBox/AuthButtons/Register
-@onready var _hs_authed_box: HBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox
-@onready var _hs_logout: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox/Logout
-@onready var _hs_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthedBox/Refresh
+@onready var _account_tab: ScrollContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings
+@onready var _hs_server: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/ServerRow/Server
+@onready var _hs_server_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/ServerRow/Clear
+@onready var _hs_server_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/ServerStatus
+@onready var _hs_account_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AccountStatus
+@onready var _hs_cert_status: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/CertStatus
+@onready var _hs_login_box: VBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox
+@onready var _hs_nick: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/NickRow/Nick
+@onready var _hs_pass: LineEdit = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/PassRow/Pass
+@onready var _hs_login: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/AuthButtons/Login
+@onready var _hs_register: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/LoginBox/AuthButtons/Register
+@onready var _hs_authed_box: HBoxContainer = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AuthedBox
+@onready var _hs_logout: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AuthedBox/Logout
+@onready var _hs_refresh: Button = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AuthedBox/Refresh
 # «Моё пространство» — создаётся в коде (нет в .tscn), кладётся в AuthedBox. Вход в
 # персональное пространство домашнего сервера, независимый от домашней страницы.
 var _hs_space: Button
-@onready var _hs_error: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/AuthError
+@onready var _hs_error: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AuthError
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
 
@@ -308,9 +310,9 @@ func _on_cache_clear() -> void:
 ## ломать редакторские tab_N/title), поэтому переставляем их в рантайме. Заголовки задаём явно
 ## по имени узла — надёжнее, чем полагаться на индексные tab_N/title после move_child.
 func _setup_tabs() -> void:
-	_tabs.move_child(_world_root, 1)
-	_tabs.move_child(_users_root, 2)
-	_tabs.move_child(_account_root, 4)  # после «Сети» — обе про серверы
+	_tabs.move_child(_world_tab, 1)
+	_tabs.move_child(_users_tab, 2)
+	_tabs.move_child(_account_tab, 4)  # после «Сети» — обе про серверы
 	var titles := {
 		"GeneralSettings": "Основные",
 		"WorldSettings": "Мир",
@@ -332,7 +334,7 @@ func _setup_tabs() -> void:
 ## (и, если она была активной, уводим на «Основные») — по аналогии с «Пользователями».
 func _update_world_availability() -> void:
 	var available := _instance_url != ""
-	var idx := _tabs.get_tab_idx_from_control(_world_root)
+	var idx := _tabs.get_tab_idx_from_control(_world_tab)
 	if idx < 0:
 		return
 	_tabs.set_tab_hidden(idx, not available)
@@ -544,7 +546,7 @@ func _users_dirty() -> void:
 ## была активной, уводим на «Сеть»).
 func _update_users_availability() -> void:
 	var available := NetworkManager.is_online() and NetworkManager.in_room()
-	var idx := _tabs.get_tab_idx_from_control(_users_root)
+	var idx := _tabs.get_tab_idx_from_control(_users_tab)
 	if idx < 0:
 		return
 	_tabs.set_tab_hidden(idx, not available)
