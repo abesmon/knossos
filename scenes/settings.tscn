@@ -130,9 +130,9 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
-[node name="Online" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=76194372]
+[node name="Offline" type="CheckButton" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=76194372]
 layout_mode = 2
-text = "Онлайн-режим"
+text = "Оффлайн-режим"
 
 [node name="UrlLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=986153950]
 layout_mode = 2

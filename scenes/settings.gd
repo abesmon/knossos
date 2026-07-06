@@ -16,7 +16,7 @@ signal space_requested
 ## Верх диапазона ползунка порога активации (RMS) — для перевода значения в проценты в подписи.
 const THRESH_MAX := 0.15
 
-@onready var _online: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/Online
+@onready var _offline: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/Offline
 @onready var _mode: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/ModeRow/Mode
 @onready var _denoise: CheckButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/Denoise
 @onready var _device: OptionButton = $Panel/Margin/VBoxContainer/TabContainer/SoundSettings/Content/MicRow/Device
@@ -208,7 +208,7 @@ func _ready() -> void:
 func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_instance_url = instance_url
 	_page_meta = page_meta
-	_online.button_pressed = Settings.online_enabled
+	_offline.button_pressed = not Settings.online_enabled
 	_mode.select(_mode_to_index(Settings.voice_mode))
 	_denoise.button_pressed = Settings.voice_denoise
 	_home.text = Settings.home_page
@@ -949,7 +949,7 @@ func _on_user_id_reissue() -> void:
 
 
 func _on_save() -> void:
-	Settings.online_enabled = _online.button_pressed
+	Settings.online_enabled = not _offline.button_pressed
 	# Режим микрофона уже применён живьём (_on_mode_selected) — здесь только фиксируем на сохранение.
 	Settings.voice_mode = _index_to_mode(_mode.selected)
 	# Денойз применяем живьём (пересоберёт энкодер), чтобы изменение действовало сразу.

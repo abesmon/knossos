@@ -22,7 +22,10 @@ const DEFAULT_AVATAR_URI := "vrwebavatar://1"
 ## Master — общий, World — звуки мира/страниц (видео, <audio>), Voice — голос пиров.
 const AUDIO_BUSES := ["Master", "World", "Voice"]
 
-var online_enabled: bool = false
+## Онлайн по умолчанию. В настройках переключатель инвертирован — это «Оффлайн-режим»
+## (включён → online_enabled = false, соединения нет). Персистим инвертированный ключ
+## offline_enabled, чтобы «нет настройки» = онлайн.
+var online_enabled: bool = true
 ## Режим микрофона. Микрофон захватывается всегда (когда онлайн), а в сеть звук уходит по политике
 ## режима — см. VoiceManager:
 ##   VOICE_MODE_PTT — push-to-talk: голос идёт, только пока зажата клавиша V;
@@ -197,7 +200,7 @@ func load_settings() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(_path) != OK:
 		return
-	online_enabled = cfg.get_value("net", "online_enabled", online_enabled)
+	online_enabled = not cfg.get_value("net", "offline_enabled", not online_enabled)
 	voice_mode = cfg.get_value("voice", "mode", voice_mode)
 	if voice_mode != VOICE_MODE_PTT and voice_mode != VOICE_MODE_VAD:
 		voice_mode = VOICE_MODE_PTT
@@ -227,7 +230,7 @@ func load_settings() -> void:
 ## Сохраняет текущие значения на диск и оповещает подписчиков.
 func save() -> void:
 	var cfg := ConfigFile.new()
-	cfg.set_value("net", "online_enabled", online_enabled)
+	cfg.set_value("net", "offline_enabled", not online_enabled)
 	cfg.set_value("voice", "mode", voice_mode)
 	cfg.set_value("voice", "input_device", input_device)
 	cfg.set_value("voice", "mic_gain", mic_gain)
