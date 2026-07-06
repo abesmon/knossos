@@ -1,0 +1,40 @@
+# docs / client
+
+Здесь собраны документы про конкретные фичи и особенности **клиента Knossos** — референсной
+реализации VRWeb на Godot 4. Всё, что не про правила генерации пространства ([space/](../space/))
+и не про сетевой слой ([network/](../network/)), а именно про то, как устроен и что умеет сам
+клиент: медиа, ввод, инструменты, сборка.
+
+Как устроен базовый пайплайн (URL → HTML → топология → геометрия → прогулка) — в
+[implementation.md](../implementation.md).
+
+## Медиа и звук
+
+- [audio.md](audio.md) — звуковые шины, громкости и выбор устройств вывода.
+- [voice-chat.md](voice-chat.md) — голосовой чат: Opus поверх data-каналов mesh, VAD,
+  джиттер-буфер, пространственный звук от капсулы.
+- [video-player.md](video-player.md) — видео-плеер (как в VRChat): логический плеер → текстура
+  → поверхности, синхронизация воспроизведения по сети.
+- [gif-support.md](gif-support.md) — собственный декодер GIF на GDScript, анимация через
+  `AnimatedTexture`.
+- [godot-coreaudio-input-rate-bug.md](godot-coreaudio-input-rate-bug.md) — заметка о баге Godot
+  на macOS: входной AudioUnit не переконфигурируется под новую частоту устройства.
+
+## Внешний вид и ввод
+
+- [avatars.md](avatars.md) — система аватаров в стиле VRChat.
+- [settings.md](settings.md) — глобальные настройки приложения (автолоад `Settings`, экран
+  настроек).
+- [pencil-tool.md](pencil-tool.md) — инструменты рисования: карандаш и ластик.
+- [space-console.md](space-console.md) — консоль пространства (`~`) и ручное редактирование
+  vrweb-слоя.
+
+## Ресурсы, производительность, платформа
+
+- [local-resources.md](local-resources.md) — локальные ресурсы и офлайн/тестовый запуск HTML
+  (схемы `vrweblocal://` / `vrwebresource://`).
+- [performance-streaming.md](performance-streaming.md) — стриминг геометрии и ресурсов, работа
+  без стопоров главного потока.
+- [deeplinks.md](deeplinks.md) — диплинки (собственные схемы приложения).
+- [build.md](build.md) — сборка билдов под Windows / macOS / Linux.
+- [build-config.md](build-config.md) — приватный конфиг сборки.
