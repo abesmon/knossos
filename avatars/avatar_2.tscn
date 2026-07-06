@@ -39,7 +39,6 @@ default_texture = ExtResource("2_avggo")
 resource_local_to_scene = true
 transparency = 1
 cull_mode = 2
-shading_mode = 0
 albedo_texture = SubResource("Marker_face")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wcqh8"]
