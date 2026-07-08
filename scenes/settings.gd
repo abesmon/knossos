@@ -63,6 +63,7 @@ const THRESH_MAX := 0.15
 @onready var _user_id_reissue: Button = $Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content/UserIdRow/Reissue
 @onready var _face_dialog: FileDialog = $FaceDialog
 @onready var _cache_size: Label = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content/CacheRow/Size
+@onready var _cache_open: Button = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content/CacheRow/Open
 @onready var _cache_clear: Button = $Panel/Margin/VBoxContainer/TabContainer/MiscSettings/Content/CacheRow/Clear
 @onready var _tabs: TabContainer = $Panel/Margin/VBoxContainer/TabContainer
 # Корни вкладок — сами ScrollContainer'ы (прямые дети TabContainer): по ним ищем индекс вкладки
@@ -183,6 +184,7 @@ func _ready() -> void:
 	# Усиление и порог активации микрофона — применяем живьём (слышно/видно при проверке).
 	_gain_slider.value_changed.connect(_on_gain_changed)
 	_thresh_slider.value_changed.connect(_on_thresh_changed)
+	_cache_open.pressed.connect(_on_cache_open)
 	_cache_clear.pressed.connect(_on_cache_clear)
 	# Раздел «Пользователи» — живой список пиров и рангов. Любое изменение состава/таблицы/
 	# авторитета/онлайна перестраивает его (хэндлеры no-op, пока экран скрыт). unbind отбрасывает
@@ -311,6 +313,11 @@ func _refresh_net_status() -> void:
 ## Обновляет подпись с текущим размером дискового кэша (аватары + видео).
 func _update_cache_size() -> void:
 	_cache_size.text = "Размер кэша: %s" % Cache.format_size(Cache.total_size())
+
+
+## «Открыть папку» — показывает каталог кэша в системном файловом менеджере (Finder/Проводник).
+func _on_cache_open() -> void:
+	Cache.open_dir()
 
 
 ## «Очистить кэш» — удаляет скачанные аватары и видео, обновляет подпись с размером.

@@ -28,6 +28,15 @@ static func clear() -> int:
 	return freed
 
 
+## Открывает корневой каталог кэша в системном файловом менеджере (Finder/Проводник).
+## Оба каталога кэша лежат под одним корнем user:// — открываем его (создаём, если ещё нет,
+## иначе менеджеру нечего показать). Путь глобализуем: shell работает с реальным путём ФС.
+static func open_dir() -> void:
+	var root := Sandbox.resolve("user://")
+	DirAccess.make_dir_recursive_absolute(root)
+	OS.shell_show_in_file_manager(ProjectSettings.globalize_path(root))
+
+
 ## Человекочитаемый размер ("0 Б", "12 КБ", "3.4 МБ", "1.2 ГБ").
 static func format_size(bytes: int) -> String:
 	var units := ["Б", "КБ", "МБ", "ГБ"]
