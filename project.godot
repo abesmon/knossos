@@ -27,11 +27,18 @@ driver/mix_rate=48000
 
 [autoload]
 
+Log="*res://scripts/log.gd"
 Settings="*res://scripts/settings.gd"
 NetworkManager="*res://scripts/network_manager.gd"
 VoiceManager="*res://scripts/voice/voice_manager.gd"
 HomeServer="*res://scripts/home_server.gd"
 BuildConfig="*res://config/build_config.gd"
+
+[debug]
+
+file_logging/enable_file_logging=true
+file_logging/log_path="user://logs/godot.log"
+file_logging/max_log_files=10
 
 [display]
 

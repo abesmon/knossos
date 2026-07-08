@@ -62,7 +62,7 @@ static func inject(ext: Dictionary, image_loader: ImageLoader, host: Node) -> vo
 				if mesh != null and is_instance_valid(obj):
 					obj.set(prop, mesh))
 		else:
-			push_warning("[VRWeb] ExtResource type «%s» пока не поддержан" % type)
+			Log.warn("extres", "ExtResource type «%s» пока не поддержан" % type)
 
 
 ## Узел — один из аудиопроигрывателей (есть свойства autoplay/playing и метод play()).

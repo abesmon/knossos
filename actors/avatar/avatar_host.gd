@@ -33,7 +33,7 @@ func set_avatar(scene: PackedScene) -> void:
 func _mount(node: Node) -> void:
 	var avatar := node as Avatar
 	if avatar == null:
-		push_error("AvatarHost: корень сцены аватара не наследует Avatar")
+		Log.err("avatar", "корень сцены аватара не наследует Avatar")
 		node.queue_free()
 		return
 	if _avatar != null:

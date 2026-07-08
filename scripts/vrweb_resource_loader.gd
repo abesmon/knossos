@@ -153,7 +153,7 @@ static func build_gltf_scene(bytes: PackedByteArray) -> Node:
 	var state := GLTFState.new()
 	var err := doc.append_from_buffer(bytes, "", state)
 	if err != OK:
-		push_warning("[VRWeb] GLTF не распарсился (err %d)" % err)
+		Log.warn("resload", "GLTF не распарсился (err %d)" % err)
 		return null
 	return doc.generate_scene(state)
 

@@ -29,7 +29,7 @@ var ice_servers: Dictionary = {"iceServers": []}
 func _init() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(PATH) != OK:
-		push_warning("BuildConfig: %s не найден — онлайн-функции недоступны. "
+		Log.warn("build", "%s не найден — онлайн-функции недоступны. "
 			% PATH + "Скопируйте config/build.example.cfg в config/build.private.cfg и впишите адреса.")
 		return
 	signaling_url = cfg.get_value("net", "signaling_url", signaling_url)

@@ -85,7 +85,7 @@ func _resolve_remote(uri: String, on_ready: Callable) -> void:
 
 func _scene_from_bytes(uri: String, result: int, code: int, body: PackedByteArray) -> PackedScene:
 	if result != HTTPRequest.RESULT_SUCCESS or code >= 400 or body.is_empty():
-		push_warning("[Avatar] не удалось скачать аватар: %s (result %d, code %d)" % [uri, result, code])
+		Log.warn("avatar", "не удалось скачать аватар: %s (result %d, code %d)" % [uri, result, code])
 		return null
 	var cache_dir := Sandbox.resolve(CACHE_DIR)
 	DirAccess.make_dir_recursive_absolute(cache_dir)

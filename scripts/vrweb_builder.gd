@@ -171,7 +171,7 @@ func _collect_ext(block: HtmlNode) -> void:
 		var type := def.get_attr("type")
 		var path := def.get_attr("path")
 		if id == "" or path == "":
-			push_warning("[VRWeb] <ExtResource> без id/path — пропущен")
+			Log.warn("builder", "<ExtResource> без id/path — пропущен")
 			continue
 		_ext_defs[id] = {"type": type, "url": PageFetcher.resolve_url(path, _base_url)}
 
@@ -189,10 +189,10 @@ func _build_resources(block: HtmlNode) -> void:
 		var id := def.get_attr("id")
 		var type := def.get_attr("type")
 		if id == "":
-			push_warning("[VRWeb] <Resource> без id — пропущен")
+			Log.warn("builder", "<Resource> без id — пропущен")
 			continue
 		if not _can_instantiate(type):
-			push_warning("[VRWeb] неизвестный тип ресурса «%s» (id=%s)" % [type, id])
+			Log.warn("builder", "неизвестный тип ресурса «%s» (id=%s)" % [type, id])
 			continue
 		_resources[id] = ClassDB.instantiate(type)
 
@@ -234,11 +234,11 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_video_screen(elem)
 	var cls := elem.raw_tag
 	if not _can_instantiate(cls):
-		push_warning("[VRWeb] неизвестный класс узла «%s» — пропущен" % cls)
+		Log.warn("builder", "неизвестный класс узла «%s» — пропущен" % cls)
 		return null
 	var obj: Object = ClassDB.instantiate(cls)
 	if not (obj is Node):
-		push_warning("[VRWeb] «%s» — не Node, пропущен" % cls)
+		Log.warn("builder", "«%s» — не Node, пропущен" % cls)
 		if obj is Object and not (obj is RefCounted):
 			(obj as Object).free()
 		return null
@@ -277,7 +277,7 @@ func _apply_attributes(obj: Object, elem: HtmlNode) -> void:
 			if _ext_defs.has(id):
 				_ext_targets.append({"obj": obj, "prop": key, "id": id})
 			else:
-				push_warning("[VRWeb] ссылка на неизвестный ExtResource «%s»" % id)
+				Log.warn("builder", "ссылка на неизвестный ExtResource «%s»" % id)
 			continue
 		obj.set(key, _resolve_value(raw))
 
@@ -293,13 +293,13 @@ func _build_ext_scene(elem: HtmlNode) -> Node:
 		node.set(key, _resolve_value(elem.attributes[key]))
 	var src := elem.get_attr("src")
 	if not src.begins_with(EXTRESOURCE_PREFIX):
-		push_warning("[VRWeb] <ExtScene> без src=\"ExtResource:::<id>\"")
+		Log.warn("builder", "<ExtScene> без src=\"ExtResource:::<id>\"")
 		return node
 	var id := src.substr(EXTRESOURCE_PREFIX.length())
 	if _ext_defs.has(id):
 		_ext_targets.append({"obj": node, "id": id, "child": true})
 	else:
-		push_warning("[VRWeb] <ExtScene> ссылается на неизвестный ExtResource «%s»" % id)
+		Log.warn("builder", "<ExtScene> ссылается на неизвестный ExtResource «%s»" % id)
 	return node
 
 
@@ -394,7 +394,7 @@ func _resolve_value(raw: String) -> Variant:
 	if raw.begins_with(SUBRESOURCE_PREFIX):
 		var id := raw.substr(SUBRESOURCE_PREFIX.length())
 		if not _resources.has(id):
-			push_warning("[VRWeb] ссылка на неизвестный SubResource «%s»" % id)
+			Log.warn("builder", "ссылка на неизвестный SubResource «%s»" % id)
 			return null
 		return _resources[id]
 	var parsed: Variant = str_to_var(raw)
@@ -427,13 +427,13 @@ func _build_spawn(block: HtmlNode) -> Dictionary:
 		if child.raw_tag != SPAWN_POINT_TAG:
 			continue
 		if not child.has_attr("transform"):
-			push_warning("[VRWeb] <SpawnerPoint> без transform — пропущен")
+			Log.warn("builder", "<SpawnerPoint> без transform — пропущен")
 			continue
 		var value: Variant = _resolve_value(child.get_attr("transform"))
 		if value is Transform3D:
 			points.append(value)
 		else:
-			push_warning("[VRWeb] <SpawnerPoint> transform не Transform3D — пропущен")
+			Log.warn("builder", "<SpawnerPoint> transform не Transform3D — пропущен")
 	if points.is_empty():
 		return {}
 

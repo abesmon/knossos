@@ -230,4 +230,4 @@ func _format_room(room_id: int) -> String:
 func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
-	print("[SpaceLayout] ", text)
+	Log.info("layout", text)

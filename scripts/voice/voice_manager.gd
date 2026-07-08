@@ -286,7 +286,7 @@ func _setup_capture() -> void:
 	if _encoder != null:
 		_enc_chunk_in = _encoder.calc_audio_chunk_size(VoiceCodec.OPUS_CHUNK_SIZE)
 	else:
-		push_warning("Opus недоступен: положите аддон twovoip в addons/twovoip — голос не будет кодироваться")
+		Log.warn("voice", "Opus недоступен: положите аддон twovoip в addons/twovoip — голос не будет кодироваться")
 
 	# Локальный loopback-плеер (для «слышать себя»): генератор на частоте микшера.
 	# Буфер с запасом (0.4 с) — Bluetooth-вывод даёт высокую/рваную задержку, на коротком

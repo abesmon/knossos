@@ -75,7 +75,7 @@ static func is_available() -> bool:
 ## несколько плееров на сцене.
 func _vlog(msg: String) -> void:
 	if DEBUG:
-		print("[VRWeb video %s] %s" % [id if id != "" else _src_url, msg])
+		Log.info("video", "%s: %s" % [id if id != "" else _src_url, msg])
 
 
 ## Параметры из тега. Зовётся билдером до add_child (до _ready), как VrwebMirror.setup.
@@ -90,7 +90,7 @@ func setup(p_id: String, p_src_url: String, p_autoplay: bool, p_loop: bool, p_vo
 func _ready() -> void:
 	if _src_url == "" or not is_available():
 		if _src_url != "":
-			push_warning("[VRWeb] видео недоступно: положите аддон FFmpeg в addons/ffmpeg/")
+			Log.warn("video", "видео недоступно: положите аддон FFmpeg в addons/ffmpeg/")
 		return
 	_want_playing = _autoplay
 	_vsp = VideoStreamPlayer.new()
@@ -179,7 +179,7 @@ func _download(url: String, part_path: String, final_path: String) -> void:
 		_downloading = false
 		_http.queue_free()
 		_http = null
-		push_warning("[VRWeb] не удалось запросить видео: " + url)
+		Log.warn("video", "не удалось запросить видео: " + url)
 		_vlog("HTTPRequest.request() != OK — запрос не ушёл")
 		return
 	set_process(true)   # пуллим размер файла для раннего старта декода
@@ -206,7 +206,7 @@ func _on_download_done(result: int, code: int, part_path: String, final_path: St
 			_vlog("открываю файл целиком (ранний старт не случился)")
 			_open_file(_download_path)
 	else:
-		push_warning("[VRWeb] видео не докачалось: %s (код %d)" % [_src_url, code])
+		Log.warn("video", "видео не докачалось: %s (код %d)" % [_src_url, code])
 		# Если успели стартовать прогрессивно — оставляем .part (доиграется до реального конца).
 		# Иначе чистим заглушку 403/404, чтобы битый файл не закэшировался.
 		if not _ever_started and FileAccess.file_exists(part_path):

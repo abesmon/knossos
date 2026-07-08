@@ -70,7 +70,7 @@ func _bind_screen(screen: VrwebVideoScreen) -> void:
 			_register(p)
 		screen.bind(_players[pid])
 		return
-	push_warning("[VRWeb] <VRWebVideoScreen> без player/src — не к чему привязать")
+	Log.warn("video", "<VRWebVideoScreen> без player/src — не к чему привязать")
 
 
 # --- Синхронизация ---

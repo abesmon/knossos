@@ -1247,7 +1247,7 @@ func _on_aim_target_changed(active: bool, hint: String) -> void:
 func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
-	print("[VRWeb] ", text)
+	Log.info("main", text)
 
 
 ## Перекрашивает «светофор» связи и обновляет его тултип. Зовётся при старте и по

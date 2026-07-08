@@ -188,7 +188,7 @@ func _session() -> String:
 ## Лог диагностики сети. Префикс: [NET <инстанс> id=<peer_id> t=<ms>].
 func _nlog(msg: String) -> void:
 	if NET_DEBUG:
-		print("[NET %s id=%d t=%d] %s" % [_session(), _my_id, Time.get_ticks_msec(), msg])
+		Log.info("net", "%s id=%d t=%d %s" % [_session(), _my_id, Time.get_ticks_msec(), msg])
 
 
 func _ready() -> void:
@@ -276,7 +276,7 @@ func webrtc_available() -> bool:
 ## (main._join_current_room) сразу после нас зовёт join_room — вход в комнату восстановится.
 func connect_to_server() -> void:
 	if not webrtc_available():
-		push_warning("WebRTC недоступен: положите аддон webrtc-native в addons/webrtc")
+		Log.warn("net", "WebRTC недоступен: положите аддон webrtc-native в addons/webrtc")
 		return
 	var target := Settings.effective_signaling_url()
 	if _ws != null:
@@ -292,7 +292,7 @@ func connect_to_server() -> void:
 	_nlog("connect_to_server -> %s" % url)
 	var err := _ws.connect_to_url(url)
 	if err != OK:
-		push_warning("Не удалось подключиться к %s (%d)" % [url, err])
+		Log.warn("net", "Не удалось подключиться к %s (%d)" % [url, err])
 		_last_error = "Не удалось начать подключение к %s (ошибка %d)" % [url, err]
 		_ws = null
 		return
@@ -570,7 +570,7 @@ func verified_address_of(peer_id: int) -> String:
 ## предупреждением (их обновление всё равно отклонят получатели). Рассылает всю таблицу.
 func set_rank(user_id: String, rank: int) -> void:
 	if not has_authority():
-		push_warning("set_rank: только авторитет может менять ранги")
+		Log.warn("net", "set_rank: только авторитет может менять ранги")
 		return
 	if user_id == "":
 		return
@@ -582,7 +582,7 @@ func set_rank(user_id: String, rank: int) -> void:
 ## Убрать запись о ранге (пользователь вернётся к DEFAULT_RANK). Только авторитет.
 func clear_rank(user_id: String) -> void:
 	if not has_authority():
-		push_warning("clear_rank: только авторитет может менять ранги")
+		Log.warn("net", "clear_rank: только авторитет может менять ранги")
 		return
 	if _ranks.erase(user_id):
 		ranks_changed.emit()
@@ -1105,7 +1105,7 @@ func _recv_certificate(cert_json: String, signature_b64: String) -> void:
 	if not _connections.has(id) or not _can_rpc():
 		return
 	if not res.get("ok", false):
-		push_warning("Сертификат пира %d отклонён: %s" % [id, res.get("error", "")])
+		Log.warn("net", "Сертификат пира %d отклонён: %s" % [id, res.get("error", "")])
 		return
 	_verified.erase(id)
 	_peer_certs[id] = {"json": cert_json, "address": res.address, "public_key": res.public_key}

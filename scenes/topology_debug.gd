@@ -256,4 +256,4 @@ func _escape(s: String) -> String:
 func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
-	print("[Topology] ", text)
+	Log.info("topology", text)

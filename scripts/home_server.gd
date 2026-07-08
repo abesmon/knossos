@@ -114,7 +114,7 @@ func _ready() -> void:
 	_load_state()
 	_load_known_servers()
 	if insecure_identity():
-		push_warning("HomeServer: небезопасный режим идентичности ВКЛЮЧЁН (%s / %s). "
+		Log.warn("home", "небезопасный режим идентичности ВКЛЮЧЁН (%s / %s). "
 			% [INSECURE_ARG, INSECURE_ENV] + "Строгая проверка источника ключей отключена — "
 			+ "только для локальной разработки/тестов, НЕ для прода.")
 	Settings.changed.connect(_on_settings_changed)
@@ -400,7 +400,7 @@ func _ensure_key() -> bool:
 		if loaded.load(_key_path) == OK:
 			_key = loaded
 			return true
-		push_warning("HomeServer: %s не читается — генерирую новый ключ" % _key_path)
+		Log.warn("home", "%s не читается — генерирую новый ключ" % _key_path)
 	var thread := Thread.new()
 	thread.start(func(): return Crypto.new().generate_rsa(2048))
 	while thread.is_alive():
@@ -530,11 +530,11 @@ func _accept_key_origin(url: String, domain: String, what: String) -> bool:
 	if _origin_is_canonical(url, domain):
 		return true
 	if insecure_identity():
-		push_warning("HomeServer: %s заявляет домен «%s», но ключи взяты из неканоничного "
+		Log.warn("home", "%s заявляет домен «%s», но ключи взяты из неканоничного "
 			% [what, domain] + "источника %s (не https://%s). Подозрительно; принято только "
 			% [url, domain] + "из-за insecure-режима — в проде было бы отклонено.")
 		return true
-	push_warning("HomeServer: %s заявляет домен «%s», но ключи доступны только с https://%s "
+	Log.warn("home", "%s заявляет домен «%s», но ключи доступны только с https://%s "
 		% [what, domain, domain] + "(строгий режим). Источник %s отклонён. Для локалки: %s / %s=1."
 		% [url, INSECURE_ARG, INSECURE_ENV])
 	return false
