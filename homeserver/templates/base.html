@@ -37,6 +37,9 @@
 <header>
   <a class="brand" href="/">{{ cfg.name }}</a>
   <nav>
+    {% if cfg.presence_enabled %}
+      <a href="/presence">Онлайн</a>
+    {% endif %}
     {% if user %}
       <a href="/account">{{ user['nickname'] }}@{{ cfg.domain }}</a>
     {% else %}

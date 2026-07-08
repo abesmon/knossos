@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Онлайн — {{ cfg.name }}{% endblock %}
+{% block content %}
+<h1>Кто где сейчас</h1>
+<p class="muted">Страницы, на которых сейчас есть люди (по данным сигналинга этого сервера).
+Приватные инстансы и персональные пространства в выдачу не попадают.</p>
+
+{% if rooms %}
+<div class="card">
+  <table>
+    <tr><th>Страница</th><th>Людей</th><th>Теги</th></tr>
+    {% for r in rooms %}
+    <tr>
+      <td><a href="https://{{ r.url }}" class="mono">{{ r.url }}</a></td>
+      <td>{{ r.count }}</td>
+      <td>{% for t in r.tags %}<code>{{ t }}</code> {% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
+<div class="card"><p class="muted">Сейчас никого нет в сети.</p></div>
+{% endif %}
+{% endblock %}

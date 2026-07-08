@@ -812,6 +812,8 @@ func _setup_net() -> void:
 	# «Моё пространство» с вкладки «Аккаунт» — персональное пространство домашнего сервера,
 	# отдельно от домашней страницы (разные сущности, см. docs/personal-spaces.md).
 	_settings_overlay.space_requested.connect(_on_space_requested)
+	# Клик по странице в «Кто где сейчас» (presence.v1, docs/presence.md) — обычная навигация.
+	_settings_overlay.presence_url_requested.connect(_on_presence_url_requested)
 
 	_settings_btn.pressed.connect(_open_settings)
 	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
@@ -861,6 +863,14 @@ func _on_home_requested() -> void:
 ## (см. docs/personal-spaces.md).
 func _on_space_requested() -> void:
 	await _go_to_personal_space()
+
+
+## Страница из presence-списка настроек (presence.v1): переход как по введённому адресу
+## (URL из выдачи — канонический ключ без схемы, резолвер подставит https).
+func _on_presence_url_requested(url: String) -> void:
+	_address.text = url
+	_navigate(url, "", true)
+	_player.capture_mouse(true)
 
 
 ## Переход в персональное пространство домашнего сервера (personal-spaces.v1). Его адрес НЕ

@@ -22,13 +22,15 @@ discovery — `/.well-known/vrweb`, сигналинг — `ws://host:8080/signa
 Конфиг: `homeserver.cfg` (см. [homeserver.example.cfg](homeserver.example.cfg));
 любое значение можно переопределить env-переменными `VRWEB_DOMAIN`, `VRWEB_NAME`,
 `VRWEB_HOMEPAGE`, `VRWEB_BASE_URL`, `VRWEB_SIGNALING_URL`, `VRWEB_DATA_DIR`,
-`VRWEB_REGISTRATION_OPEN`, `HOST`, `PORT`. Данные (SQLite + подписывающий ключ) —
-в `data/`; бэкапить целиком.
+`VRWEB_REGISTRATION_OPEN`, `VRWEB_PRESENCE_ENABLED`, `VRWEB_PRESENCE_ACCESS`, `HOST`,
+`PORT`. Данные (SQLite + подписывающий ключ) — в `data/`; бэкапить целиком.
 
 Помимо идентичности сервер хостит **персональные пространства** пользователей
 (`/s/<slug>`, управление — `/space` на веб-морде) и принимает флаш дельты эфемерного
 слоя (`/api/v1/spaces/flush`) — см. [docs/personal-spaces.md](../docs/network/personal-spaces.md)
-и [docs/page-persistence.md](../docs/network/page-persistence.md).
+и [docs/page-persistence.md](../docs/network/page-persistence.md). Ещё сервер отдаёт
+**presence** «где люди» (`/api/v1/presence`, веб-версия — `/presence`) —
+см. [docs/presence.md](../docs/network/presence.md).
 
 ## Запуск в Docker
 

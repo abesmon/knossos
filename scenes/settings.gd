@@ -12,6 +12,9 @@ signal home_requested
 ## docs/personal-spaces.md). Домашняя страница — произвольная закладка старта; пространство —
 ## хостируемый сервером дом пользователя.
 signal space_requested
+## Клик по странице в разделе «Кто где сейчас» (presence.v1, docs/presence.md):
+## просим main перейти по URL и закрываемся.
+signal presence_url_requested(url: String)
 
 ## Верх диапазона ползунка порога активации (RMS) — для перевода значения в проценты в подписи.
 const THRESH_MAX := 0.15
@@ -95,6 +98,16 @@ const THRESH_MAX := 0.15
 # «Моё пространство» — создаётся в коде (нет в .tscn), кладётся в AuthedBox. Вход в
 # персональное пространство домашнего сервера, независимый от домашней страницы.
 var _hs_space: Button
+# Раздел «Кто где сейчас» (presence.v1, docs/presence.md) — создаётся в коде, кладётся в
+# конец Content вкладки «Аккаунт». Виден, когда сервер анонсирует presence.v1 (логин не
+# обязателен — публичные серверы отвечают и анониму).
+var _presence_box: VBoxContainer
+var _presence_refresh: Button
+var _presence_list: VBoxContainer
+var _presence_status: Label
+# Поколение запроса presence: ответ устаревшего (нажали «Обновить» повторно/переоткрыли
+# экран) молча отбрасывается, чтобы не перетереть более свежий список.
+var _presence_gen := 0
 @onready var _hs_error: Label = $Panel/Margin/VBoxContainer/TabContainer/AccountSettings/Content/AuthError
 @onready var _save: Button = $Panel/Margin/VBoxContainer/Buttons/Save
 @onready var _cancel: Button = $Panel/Margin/VBoxContainer/Buttons/Cancel
@@ -199,6 +212,7 @@ func _ready() -> void:
 	_hs_space.tooltip_text = "Перейти в персональное пространство на домашнем сервере"
 	_hs_space.pressed.connect(_on_go_space)
 	_hs_authed_box.add_child(_hs_space)
+	_build_presence_section()
 	HomeServer.state_changed.connect(_account_dirty)
 
 
@@ -226,6 +240,7 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_hs_error.text = ""
 	_hs_pass.text = ""
 	_refresh_account()
+	_refresh_presence()
 	_nick.text = Settings.nick
 	_avatar.text = Settings.avatar_uri
 	_user_id.text = Settings.user_id
@@ -485,6 +500,8 @@ func _refresh_account() -> void:
 	# «Моё пространство» — только когда сервер анонсирует personal-spaces.v1 (иначе идти некуда).
 	_hs_space.visible = logged and HomeServer.supports("personal-spaces.v1")
 	_hs_space.disabled = busy
+	# «Кто где сейчас» — когда сервер анонсирует presence.v1 (логин не обязателен).
+	_presence_box.visible = HomeServer.supports("presence.v1")
 
 
 ## Если адрес сервера в поле отличается от сохранённого — применяем и персистим сразу
@@ -530,6 +547,86 @@ func _on_hs_refresh() -> void:
 	_commit_hs_server_field()
 	await HomeServer.refresh()
 	_account_dirty()
+
+
+# --- Раздел «Кто где сейчас» (presence.v1, docs/presence.md) ---
+
+## Собирает раздел presence в конце Content вкладки «Аккаунт»: заголовок с кнопкой
+## «Обновить», строка статуса и список страниц-кнопок (заполняет _refresh_presence).
+func _build_presence_section() -> void:
+	var content := _hs_authed_box.get_parent()  # AccountSettings/Content
+	_presence_box = VBoxContainer.new()
+	_presence_box.name = "PresenceBox"
+	_presence_box.visible = false
+	var header := HBoxContainer.new()
+	var title := Label.new()
+	title.text = "Кто где сейчас"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	_presence_refresh = Button.new()
+	_presence_refresh.text = "Обновить"
+	_presence_refresh.tooltip_text = "Заново запросить у домашнего сервера, где сейчас люди"
+	_presence_refresh.pressed.connect(_refresh_presence)
+	header.add_child(_presence_refresh)
+	_presence_box.add_child(header)
+	_presence_status = Label.new()
+	_presence_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_presence_box.add_child(_presence_status)
+	_presence_list = VBoxContainer.new()
+	_presence_box.add_child(_presence_list)
+	content.add_child(_presence_box)
+
+
+## Запрашивает сводку у домашнего сервера и пересобирает список. Устаревшие ответы
+## (запрос перезапущен) отбрасываются по поколению.
+func _refresh_presence() -> void:
+	if not HomeServer.supports("presence.v1"):
+		return
+	_presence_gen += 1
+	var gen := _presence_gen
+	_presence_status.text = "Загрузка…"
+	_presence_refresh.disabled = true
+	var res: Dictionary = await HomeServer.fetch_presence()
+	if gen != _presence_gen:
+		return
+	_presence_refresh.disabled = false
+	for child in _presence_list.get_children():
+		child.queue_free()
+	if not res["ok"]:
+		_presence_status.text = str(res["error"])
+		return
+	var rooms: Array = res["rooms"]
+	var total := int(res.get("total", rooms.size()))
+	if rooms.is_empty():
+		_presence_status.text = "Сейчас никого нет в сети."
+	elif total > rooms.size():
+		# Сервер обрезал выдачу (его право по контракту) — не выдаём частичное за полное.
+		_presence_status.text = "Показаны %d из %d страниц." % [rooms.size(), total]
+	else:
+		_presence_status.text = ""
+	for room in rooms:
+		if typeof(room) != TYPE_DICTIONARY:
+			continue
+		var url := str(room.get("url", ""))
+		if url == "":
+			continue
+		var count := int(room.get("count", 0))
+		var text := "%s — %d чел." % [url, count]
+		var tags: Array = room.get("tags", []) if typeof(room.get("tags")) == TYPE_ARRAY else []
+		if not tags.is_empty():
+			text += "  [%s]" % ", ".join(tags.map(func(t): return str(t)))
+		var row := Button.new()
+		row.text = text
+		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		row.tooltip_text = "Перейти на эту страницу"
+		row.pressed.connect(_on_presence_go.bind(url))
+		_presence_list.add_child(row)
+
+
+## Клик по странице из presence-списка: просим main перейти и закрываемся.
+func _on_presence_go(url: String) -> void:
+	presence_url_requested.emit(url)
+	_close()
 
 
 # --- Раздел «Пользователи» (см. docs/ranks.md) ---

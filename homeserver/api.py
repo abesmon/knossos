@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 import accounts
 import identity
 import keys
+import presence
 
 # Версионированные капабилити ДОМАШНЕГО СЕРВЕРА — то, на что клиент может рассчитывать в
 # связке клиент↔домашний-сервер (клиент сверяет со своими, работает пересечение). Каждая
@@ -22,11 +24,18 @@ import keys
 #                       signing_keys в discovery); см. docs/home-server.md;
 #   signaling.v1      — WebRTC-handshake через /signal этого сервера; см. docs/multiplayer.md;
 #   personal-spaces.v1 — хостит персональные пространства пользователя (/api/v1/spaces/home);
-#                       см. docs/personal-spaces.md.
+#                       см. docs/personal-spaces.md;
+#   presence.v1       — сводка «где люди» (/api/v1/presence); выключается конфигом, поэтому
+#                       добавляется в features() динамически; см. docs/presence.md.
 # ВАЖНО: persistence flush — это свойство САМОЙ СТРАНИЦЫ (атрибут `persist` на её блоке
 # <vrweb>), а НЕ фича домашнего сервера. Страницы наших пространств его несут, но обнаруживает
 # его клиент по странице, а не по этому списку. См. docs/page-persistence.md.
 FEATURES = ["identity.v1", "signaling.v1", "personal-spaces.v1"]
+
+
+def features(cfg) -> list[str]:
+    """Анонсируемые капабилити: базовые + включаемые конфигом."""
+    return FEATURES + (["presence.v1"] if cfg.presence_enabled else [])
 
 
 def api_error(status: int, code: str, message: str) -> HTTPException:
@@ -66,7 +75,7 @@ def well_known(request: Request) -> dict:
             "domain": st.cfg.domain,
             "name": st.cfg.name,
         },
-        "features": FEATURES,
+        "features": features(st.cfg),
         "config": {
             "signaling_url": st.cfg.effective_signaling_url(),
             "homepage": st.cfg.effective_homepage(),
@@ -118,6 +127,28 @@ def account(request: Request, user: sqlite3.Row = Depends(bearer_user)) -> dict:
         "nickname": user["nickname"],
         "created_at": user["created_at"],
     }
+
+
+@router.get("/api/v1/presence")
+def presence_snapshot(request: Request, url: str = "", limit: int = 0, offset: int = 0) -> dict:
+    """Сводка «где люди» (presence.v1, docs/presence.md). Доступ — по конфигу:
+    public (любой GET) или authenticated (только пользователи ЭТОГО сервера;
+    федеративный доступ чужих клиентов — отдельная будущая история).
+
+    ?url= — точечный запрос по одной странице; ?limit=/&offset= — пагинация
+    (limit <= 0 — без ограничения). total в ответе — размер выдачи ДО пагинации;
+    страницы режутся по живым данным, между запросами выдача может измениться."""
+    st = request.app.state
+    if not st.cfg.presence_enabled:
+        raise api_error(404, "presence_disabled", "Presence на этом сервере выключен.")
+    if st.cfg.presence_access == "authenticated":
+        bearer_user(request)
+    rooms = presence.snapshot(st.cfg, st.hub, url)
+    total = len(rooms)
+    rooms = rooms[max(0, offset):]
+    if limit > 0:
+        rooms = rooms[:limit]
+    return {"rooms": rooms, "total": total, "generated_at": int(time.time())}
 
 
 @router.post("/api/v1/identity/certify")

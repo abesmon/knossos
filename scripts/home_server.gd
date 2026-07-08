@@ -56,8 +56,9 @@ func insecure_identity() -> bool:
 
 ## Капабилити, которые поддерживает ЭТОТ клиент; с сервером работает пересечение
 ## (см. «features» в docs/home-server.md). personal-spaces.v1 — персональные
-## пространства (docs/personal-spaces.md).
-const CLIENT_FEATURES := ["identity.v1", "signaling.v1", "personal-spaces.v1"]
+## пространства (docs/personal-spaces.md); presence.v1 — сводка «где люди»
+## (docs/presence.md).
+const CLIENT_FEATURES := ["identity.v1", "signaling.v1", "personal-spaces.v1", "presence.v1"]
 ## Единственный поддерживаемый алгоритм подписи (см. шапку).
 const ALGORITHM := "rsa-sha256"
 ## Кэш signing_keys домена считается свежим сутки; протухший используется как fallback,
@@ -291,6 +292,48 @@ func fetch_home_space() -> Dictionary:
 		return {"ok": true, "url": str(res.data.get("url", "")),
 			"name": str(res.data.get("name", "")), "error": ""}
 	return {"ok": false, "url": "", "name": "", "error": _err_msg(res, "Сервер не ответил.")}
+
+
+# --- Presence «где люди» (presence.v1, docs/presence.md) ---
+
+## Сводка занятых страниц с домашнего сервера: { ok, rooms, total, error }, где rooms —
+## [{url, count, tags}] по убыванию людности (url — канонический ключ страницы, без схемы —
+## навигация подставит https), total — размер выдачи ДО пагинации (rooms.size() < total —
+## выдача обрезана). Аргументы (все опциональны):
+##   url    — точечный запрос «сколько людей на этой странице?» (выдача только по ней);
+##   limit  — не больше N записей (<= 0 — без ограничения);
+##   offset — пропустить первые N (страницы режутся по живым данным — между запросами
+##            выдача может сдвинуться).
+## Контракт не обещает ни точных count, ни полной картины — только то, что видно этому
+## серверу (docs/presence.md). Логин не обязателен: публичный сервер отвечает и анониму;
+## когда залогинены на этом же сервере — шлём Bearer (сервер с access=authenticated
+## иначе ответит 401, а персонализированная выдача — на его усмотрение).
+func fetch_presence(url := "", limit := 0, offset := 0) -> Dictionary:
+	var base := server_url()
+	if base == "":
+		return {"ok": false, "rooms": [], "total": 0, "error": "Адрес домашнего сервера не задан."}
+	if not supports("presence.v1"):
+		return {"ok": false, "rooms": [], "total": 0, "error": "Сервер не поддерживает presence."}
+	var params := PackedStringArray()
+	if url != "":
+		params.append("url=" + url.uri_encode())
+	if limit > 0:
+		params.append("limit=%d" % limit)
+	if offset > 0:
+		params.append("offset=%d" % offset)
+	var endpoint := base + "/api/v1/presence"
+	if not params.is_empty():
+		endpoint += "?" + "&".join(params)
+	var headers := PackedStringArray()
+	var auth := auth_header_for(base)
+	if auth != "":
+		headers.append(auth)
+	var res := await _http(HTTPClient.METHOD_GET, endpoint, headers)
+	if res.code == 200 and typeof(res.data) == TYPE_DICTIONARY \
+			and typeof(res.data.get("rooms")) == TYPE_ARRAY:
+		var rooms: Array = res.data["rooms"]
+		return {"ok": true, "rooms": rooms, "total": int(res.data.get("total", rooms.size())), "error": ""}
+	return {"ok": false, "rooms": [], "total": 0, "error": _err_msg(res, "Сервер не ответил.")}
 
 
 ## Заголовок Authorization для запроса к URL — только если это НАШ домашний сервер

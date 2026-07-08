@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import configparser
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -19,6 +19,14 @@ class Config:
     domain: str = "localhost"
     name: str = "VRWeb Home"
     homepage: str = ""
+    # Presence («где люди», docs/presence.md): включённость фичи и кому отдавать выдачу.
+    # access: "public" — любой GET; "authenticated" — только своим пользователям (Bearer).
+    # Федеративный доступ (сервер-серверу) — отдельная будущая история, не этот флаг.
+    presence_enabled: bool = True
+    presence_access: str = "public"
+    # Теги страниц для presence-выдачи: URL -> список тегов. Заполняет админ сервера
+    # (секция INI [presence.tags]: `<url> = tag1, tag2`); URL нормализуется при выдаче.
+    presence_tags: dict[str, list[str]] = field(default_factory=dict)
     # Публичный базовый URL сервера (для абсолютных ссылок: страницы пространств,
     # persist-endpoint). "" -> производный https://{domain}. Для локальной разработки —
     # http://127.0.0.1:8080 (иначе клиент не попадёт по сгенерированным ссылкам).
@@ -47,6 +55,8 @@ def load_config(path: str | None = None) -> Config:
     ini_path = Path(path or os.environ.get("VRWEB_CONFIG", Path(__file__).with_name("homeserver.cfg")))
     if ini_path.is_file():
         ini = configparser.ConfigParser()
+        # Ключи не даункейзим: в [presence.tags] ключ — URL, а в пути страницы регистр значим.
+        ini.optionxform = str
         ini.read(ini_path, encoding="utf-8")
         s = ini["homeserver"] if ini.has_section("homeserver") else ini["DEFAULT"]
         cfg.domain = s.get("domain", cfg.domain)
@@ -60,6 +70,11 @@ def load_config(path: str | None = None) -> Config:
         cfg.cert_ttl_days = s.getint("cert_ttl_days", cfg.cert_ttl_days)
         cfg.host = s.get("host", cfg.host)
         cfg.port = s.getint("port", cfg.port)
+        cfg.presence_enabled = s.getboolean("presence_enabled", cfg.presence_enabled)
+        cfg.presence_access = s.get("presence_access", cfg.presence_access)
+        if ini.has_section("presence.tags"):
+            for url, tags in ini.items("presence.tags"):
+                cfg.presence_tags[url] = [t.strip() for t in tags.split(",") if t.strip()]
 
     env = os.environ
     cfg.domain = env.get("VRWEB_DOMAIN", cfg.domain)
@@ -71,6 +86,9 @@ def load_config(path: str | None = None) -> Config:
         cfg.data_dir = Path(env["VRWEB_DATA_DIR"])
     if "VRWEB_REGISTRATION_OPEN" in env:
         cfg.registration_open = env["VRWEB_REGISTRATION_OPEN"].lower() in ("1", "true", "yes", "on")
+    if "VRWEB_PRESENCE_ENABLED" in env:
+        cfg.presence_enabled = env["VRWEB_PRESENCE_ENABLED"].lower() in ("1", "true", "yes", "on")
+    cfg.presence_access = env.get("VRWEB_PRESENCE_ACCESS", cfg.presence_access)
     cfg.host = env.get("HOST", cfg.host)
     cfg.port = int(env.get("PORT", cfg.port))
     return cfg

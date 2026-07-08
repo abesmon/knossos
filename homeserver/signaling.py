@@ -69,6 +69,11 @@ class SignalingHub:
         elif mtype in SIGNAL_TYPES:
             await self._relay(peer, msg)
 
+    def room_counts(self) -> dict[str, int]:
+        """Снимок занятости: ключ комнаты -> число участников. Источник presence
+        (docs/presence.md); что из этого публично — решает потребитель, не хаб."""
+        return {room: len(members) for room, members in self._rooms.items() if members}
+
     def room_has_address(self, room: str, address: str) -> bool:
         """Есть ли в комнате аутентифицированный участник с этим адресом (presence
         для «дверь открыта, пока хозяин дома»)."""

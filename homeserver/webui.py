@@ -16,8 +16,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import accounts
+import api
+import presence
 import spaces
-from api import FEATURES
 
 COOKIE = "vrweb_session"
 
@@ -39,7 +40,7 @@ def _cookie_user(request: Request) -> sqlite3.Row | None:
 def _page(request: Request, name: str, **ctx) -> HTMLResponse:
     st = request.app.state
     ctx.setdefault("user", _cookie_user(request))
-    ctx.update(cfg=st.cfg, version=st.version, features=FEATURES, request=request)
+    ctx.update(cfg=st.cfg, version=st.version, features=api.features(st.cfg), request=request)
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -96,6 +97,19 @@ def account_page(request: Request):
         return RedirectResponse("/login", status_code=303)
     keys = accounts.user_keys(request.app.state.db, user["id"])
     return _page(request, "account.html", user=user, keys=keys)
+
+
+# --- Presence (docs/presence.md): та же выдача, что /api/v1/presence, для удобства
+# в браузере. Подчиняется тому же конфигу доступа: authenticated — только под логином. ---
+
+@router.get("/presence", response_class=HTMLResponse)
+def presence_page(request: Request):
+    st = request.app.state
+    if not st.cfg.presence_enabled:
+        return RedirectResponse("/", status_code=303)
+    if st.cfg.presence_access == "authenticated" and _cookie_user(request) is None:
+        return RedirectResponse("/login", status_code=303)
+    return _page(request, "presence.html", rooms=presence.snapshot(st.cfg, st.hub))
 
 
 # --- Персональное пространство (docs/personal-spaces.md): управление — здесь, на

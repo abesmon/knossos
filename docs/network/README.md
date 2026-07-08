@@ -23,5 +23,7 @@
   `nick@domain`, discovery, федерация (референс — `homeserver/` на FastAPI).
 - [personal-spaces.md](personal-spaces.md) — персональные пространства как модуль домашнего
   сервера.
+- [presence.md](presence.md) — presence «где люди»: сводка занятых страниц от домашнего
+  сервера, приватность и модель доверия.
 - [page-persistence.md](page-persistence.md) — персистенция страницы: флаш эфемерного слоя в
   страницу, протокол сохранения изменений мира.
