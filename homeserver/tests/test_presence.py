@@ -119,6 +119,23 @@ def test_personal_space_hidden(client):
         assert _rooms(client) == []
 
 
+def test_local_pages_hidden(client):
+    # Локальные/не-веб страницы не должны утекать в чужую presence-таблицу: ключ
+    # vrwebresource сохраняет схему, а старый клиент срезал бы vrweblocal до пути ФС.
+    with joined(client, "vrwebresource://test_pages/demo.html"), \
+            joined(client, "/Users/alice/secret.html"), \
+            joined(client, "example.com/hub"):
+        rooms = _rooms(client)
+    assert [r["url"] for r in rooms] == ["example.com/hub"]
+
+
+def test_point_query_local_stays_hidden(client):
+    # Точечный запрос по локальному ключу тоже пуст — presence не подглядывает за ФС.
+    with joined(client, "vrwebresource://test_pages/demo.html"):
+        data = _presence(client, params={"url": "vrwebresource://test_pages/demo.html"})
+    assert data["rooms"] == [] and data["total"] == 0
+
+
 # --- Доступ и discovery ---
 
 def test_feature_announced(client):

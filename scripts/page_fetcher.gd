@@ -268,6 +268,10 @@ static func _escape_http_url(url: String) -> String:
 ## Один и тот же сайт должен давать один и тот же мир, поэтому НЕ влияют на сид:
 ## схема (http/https), регистр хоста, хвостовой слеш пути и фрагмент (#...).
 ## ВЛИЯЮТ: хост, путь и query (?...) — это разные страницы.
+## Схему срезаем ТОЛЬКО у веба (http/https) — для них «один сайт» не зависит от схемы.
+## Не-веб схемы (vrweblocal/vrwebresource и любые будущие) СОХРАНЯЕМ в ключе: они не веб,
+## их ключи не должны сталкиваться с веб-хостами (иначе локальная demo.html попала бы в
+## комнату сайта demo.html), а presence домашнего сервера тривиально прячет их по "://".
 static func seed_key(url: String) -> String:
 	url = url.strip_edges()
 	# Фрагмент (#anchor) — навигация внутри той же страницы, на сид не влияет.
@@ -280,20 +284,26 @@ static func seed_key(url: String) -> String:
 	if q_pos != -1:
 		query = url.substr(q_pos)
 		url = url.substr(0, q_pos)
-	# Убираем схему.
+	# Веб-схему срезаем, не-веб — сохраняем как префикс (регистр схемы не значим).
+	var prefix := ""
 	var scheme_end := url.find("://")
 	if scheme_end != -1:
+		var scheme := url.substr(0, scheme_end).to_lower()
 		url = url.substr(scheme_end + 3)
-	# Хост (до первого "/") — в нижний регистр; путь регистрозависим.
-	var slash := url.find("/")
-	if slash == -1:
-		url = url.to_lower()
-	else:
-		url = url.substr(0, slash).to_lower() + url.substr(slash)
+		if scheme != "http" and scheme != "https":
+			prefix = scheme + "://"
+	# Регистр хоста нормализуем только у веба/голого хоста (у не-веб схем хоста нет —
+	# после "://" идёт путь ФС/бандла, а он регистрозависим). Путь всегда регистрозависим.
+	if prefix == "":
+		var slash := url.find("/")
+		if slash == -1:
+			url = url.to_lower()
+		else:
+			url = url.substr(0, slash).to_lower() + url.substr(slash)
 	# Убираем хвостовые слеши пути.
 	while url.ends_with("/"):
 		url = url.substr(0, url.length() - 1)
-	return url + query
+	return prefix + url + query
 
 
 ## Глобальный сид сети knossos. Общая основа всей генерации: подмешивается в сид каждого

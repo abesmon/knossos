@@ -90,10 +90,22 @@ def test_apply_node_nested_in_same_flush():
 
 
 def test_seed_key_port():
-    # Паритет с PageFetcher.seed_key: схема/регистр хоста/хвостовой слеш/фрагмент не влияют.
+    # Паритет с PageFetcher.seed_key: веб-схема/регистр хоста/хвостовой слеш/фрагмент не влияют.
     assert vrweb_scene.seed_key("https://Ex.com/Page/") == "ex.com/Page"
     assert vrweb_scene.seed_key("http://ex.com/Page#a") == "ex.com/Page"
     assert vrweb_scene.seed_key("ex.com/p?q=1") == "ex.com/p?q=1"
+
+
+def test_seed_key_keeps_non_web_scheme():
+    # Не-веб схемы СОХРАНЯЮТСЯ в ключе (иначе локальная demo.html столкнулась бы с сайтом
+    # demo.html), путь регистрозависим, регистр схемы нормализуется.
+    assert vrweb_scene.seed_key("vrwebresource://test_pages/Demo.html") \
+        == "vrwebresource://test_pages/Demo.html"
+    assert vrweb_scene.seed_key("vrweblocal:///Users/alice/page.html/") \
+        == "vrweblocal:///Users/alice/page.html"
+    assert vrweb_scene.seed_key("VRWebLocal:///X/") == "vrweblocal:///X"
+    # Веб-ключи не изменились этой правкой.
+    assert vrweb_scene.seed_key("https://demo.html") == "demo.html"
 
 
 # --- API пространств: ленивое создание, ротация ---

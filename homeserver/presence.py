@@ -6,6 +6,9 @@ SignalingHub, у другой реализации это может быть в
 
 Фильтрация приватного — тоже НЕ требование контракта, а добросовестность конкретной
 реализации. Наша reference implementation скрывает из выдачи:
+  - не-веб/локальные страницы (vrweblocal/vrwebresource, см. docs/multiplayer.md): чужой
+    домашний сервер вообще не должен знать про чью-то локальную ФС — а seed_key такой
+    страницы утёк бы путями/именем пользователя;
   - приватные инстансы (query-параметр `vrweb-instance`, см. docs/multiplayer.md):
     такая ссылка — ключ к комнате, анонсировать её = слить ключ;
   - персональные пространства этого сервера (/s/<slug>): slug — секретный адрес,
@@ -36,13 +39,23 @@ def snapshot(cfg: Config, hub, url: str = "") -> list[dict]:
     wanted = vrweb_scene.seed_key(url) if url else ""
     out = []
     for room, count in hub.room_counts().items():
-        if room == "" or _has_private_param(room) or room.startswith(space_prefix):
+        if not room or not _is_public_web_room(room):
+            continue
+        if _has_private_param(room) or room.startswith(space_prefix):
             continue
         if wanted and room != wanted:
             continue
         out.append({"url": room, "count": count, "tags": tags.get(room, [])})
     out.sort(key=lambda e: (-e["count"], e["url"]))
     return out
+
+
+def _is_public_web_room(room: str) -> bool:
+    """Публично анонсируем только веб-страницы. Ключ веб-комнаты — host+path без схемы
+    (seed_key срезает http/https) и всегда начинается с хоста. Не-веб страницы
+    (vrweblocal/vrwebresource) сохраняют схему → в ключе есть "://"; а ключ от СТАРОГО
+    клиента, срезавшего vrweblocal, начинается с "/" (путь ФС без хоста) — тоже прячем."""
+    return "://" not in room and not room.startswith("/")
 
 
 def _has_private_param(room: str) -> bool:

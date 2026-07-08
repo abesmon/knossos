@@ -277,7 +277,9 @@ def rev_of(markup: str) -> str:
 
 def seed_key(url: str) -> str:
     """Порт PageFetcher.seed_key (клиент): канонический ключ страницы = ключ комнаты.
-    Не влияют: схема, регистр хоста, хвостовые слеши, фрагмент. Влияют: хост, путь, query."""
+    Веб-схему (http/https) срезаем, не-веб (vrweblocal/vrwebresource/…) сохраняем как
+    префикс — их ключи не должны сталкиваться с веб-хостами, а presence прячет их по "://".
+    Не влияют: веб-схема, регистр хоста, хвостовые слеши, фрагмент. Влияют: хост, путь, query."""
     url = url.strip()
     hash_pos = url.find("#")
     if hash_pos != -1:
@@ -287,14 +289,21 @@ def seed_key(url: str) -> str:
     if q_pos != -1:
         query = url[q_pos:]
         url = url[:q_pos]
+    prefix = ""
     scheme_end = url.find("://")
     if scheme_end != -1:
+        scheme = url[:scheme_end].lower()
         url = url[scheme_end + 3:]
-    slash = url.find("/")
-    if slash == -1:
-        url = url.lower()
-    else:
-        url = url[:slash].lower() + url[slash:]
+        if scheme not in ("http", "https"):
+            prefix = scheme + "://"
+    # Регистр хоста нормализуем только у веба/голого хоста; у не-веб схем после "://"
+    # идёт регистрозависимый путь ФС/бандла — не трогаем.
+    if prefix == "":
+        slash = url.find("/")
+        if slash == -1:
+            url = url.lower()
+        else:
+            url = url[:slash].lower() + url[slash:]
     while url.endswith("/"):
         url = url[:-1]
-    return url + query
+    return prefix + url + query
