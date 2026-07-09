@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://ctoolsltest01"]
+
+[ext_resource type="Script" path="res://tests/tool_system_test.gd" id="1_toolsystest"]
+
+[node name="ToolSystemTest" type="Node"]
+script = ExtResource("1_toolsystest")

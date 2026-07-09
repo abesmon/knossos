@@ -27,6 +27,8 @@
 - [avatars.md](avatars.md) — система аватаров в стиле VRChat.
 - [settings.md](settings.md) — глобальные настройки приложения (автолоад `Settings`, экран
   настроек).
+- [tools.md](tools.md) — система инструментов: `PlayerTool`/`ToolManager`, слоты, запрос
+  активации, системные инструменты, задел под «инструмент как эфемерный объект».
 - [pencil-tool.md](pencil-tool.md) — инструменты рисования: карандаш и ластик.
 - [space-console.md](space-console.md) — консоль пространства (`~`) и ручное редактирование
   vrweb-слоя.

@@ -1,21 +1,18 @@
-class_name ToolController
-extends Node3D
+class_name DrawingTool
+extends PlayerTool
 
-## Слой инструментов рисования (Godot-сторона): держит активный инструмент (нет/карандаш/ластик),
-## визуал «в руке» и логику ведения. Создаётся Player'ом (см. Player._setup_tools), получает камеру
-## и корень мира. Кнопка 2 у Player циклит инструмент; ЛКМ Player маршрутит сюда (press/release).
+## Инструмент рисования: «вложенный» инструмент с внутренним циклом режимов
+## НЕТ → КАРАНДАШ → ЛАСТИК → НЕТ (каждый запрос активации — шаг цикла). Держит визуал «в руке»
+## и логику ведения; артефакт — штрих (kind="stroke", актор StrokeActor).
 ##
-## Данные и сеть — в эфемерном слое (kind="stroke"): рисование строит StrokePath, при отпускании
-## ЛКМ один op=add уходит в NetworkManager (финализация при отпускании). Материализация — StrokeActor.
-## Полное описание — в docs/pencil-tool.md.
+## Данные и сеть — в эфемерном слое: рисование строит StrokePath, при отпускании ЛКМ один op=add
+## уходит в NetworkManager (финализация при отпускании). Материализация — StrokeActor.
+## Полное описание — docs/client/pencil-tool.md, система инструментов — docs/client/tools.md.
 
 enum Mode { NONE, PENCIL, ERASER }
 
 const STROKE := preload("res://actors/stroke/stroke.tscn")
 
-## Положение «кисти» (основания инструмента) относительно камеры: правее/ниже центра и слегка
-## дальше от лица. Остриё выносится вперёд от кисти на TIP_REACH — туда и попадает точка рисования.
-const HAND_OFFSET := Vector3(0.14, -0.14, -0.55)
 ## Вынос рабочего конца (остриё карандаша / торец ластика) вперёд от кисти, вдоль -Z (м). Точка
 ## рисования/стирания берётся ИЗ маркера-остриё — визуал и логика совмещены по построению.
 const TIP_REACH := 0.45
@@ -26,9 +23,6 @@ const STROKE_WIDTH := 0.02
 const DRAW_DIST := 1.0
 
 var _mode: int = Mode.NONE
-var _cam: Camera3D
-var _world: Node3D                      # куда вешать превью/офлайн-штрихи (живут в мире, гибнут при навигации)
-var _held: Node3D                       # визуал инструмента в руке (под камерой)
 var _tip: Node3D                        # маркер рабочего конца — отсюда фактически рисуем/стираем
 
 var _drawing := false
@@ -41,10 +35,8 @@ var _erasing := false
 var _pending: Dictionary = {}
 
 
-## Player зовёт после добавления в дерево: камера для прицела/визуала, world — корень для штрихов.
-func setup(camera: Camera3D, world_root: Node3D) -> void:
-	_cam = camera
-	_world = world_root
+func setup(camera: Camera3D, world_root: Node3D, player: Player) -> void:
+	super(camera, world_root, player)
 	if not NetworkManager.scene_object_added.is_connected(_on_scene_object_added):
 		NetworkManager.scene_object_added.connect(_on_scene_object_added)
 
@@ -54,34 +46,59 @@ func _exit_tree() -> void:
 		NetworkManager.scene_object_added.disconnect(_on_scene_object_added)
 
 
-## Активен ли инструмент (карандаш/ластик) — Player по этому решает, отдать ли ЛКМ нам или порталу.
-func is_armed() -> bool:
-	return _mode != Mode.NONE
+func tool_id() -> StringName:
+	return &"drawing"
 
 
-func current_mode() -> int:
-	return _mode
-
-
-## Кнопка 2: цикл НЕТ → КАРАНДАШ → ЛАСТИК → НЕТ. Прерывает незавершённый штрих.
-func cycle() -> String:
+## Шаг внутреннего цикла режимов. Прерывает незавершённый штрих. Возврат false (режим НЕТ) —
+## менеджер уберёт инструмент.
+func activation_request() -> bool:
 	_cancel_draw()
 	_erasing = false
 	_mode = (_mode + 1) % 3
-	_refresh_held()
-	return tool_name()
+	if _equipped:
+		_refresh_held_visual()   # смена режима на уже экипированном инструменте — обновить меш
+	hint_changed.emit(_hint_for_mode())
+	return _mode != Mode.NONE
 
 
-func tool_name() -> String:
+## Деактивация менеджером (чужой хоткей / конец цикла): полный сброс до режима НЕТ.
+func _on_unequip() -> void:
+	_cancel_draw()
+	_erasing = false
+	_mode = Mode.NONE
+	_tip = null
+
+
+## Потеря захвата мыши (Esc/потеря фокуса): прервать незавершённый штрих, инструмент остаётся в руке.
+func on_mouse_capture_changed(captured: bool) -> void:
+	if not captured:
+		_cancel_draw()
+		_erasing = false
+
+
+func descriptor() -> Dictionary:
 	match _mode:
-		Mode.PENCIL: return "карандаш"
-		Mode.ERASER: return "ластик"
-	return ""
+		Mode.PENCIL:
+			var c := _stroke_color()
+			return {"kind": "tool-pencil", "props": {"color": [c.r, c.g, c.b], "width": STROKE_WIDTH}}
+		Mode.ERASER:
+			return {"kind": "tool-eraser", "props": {"radius": ERASER_RADIUS}}
+	return {"kind": "", "props": {}}
 
 
-# --- Ввод от Player (ЛКМ) ---
+func _hint_for_mode() -> String:
+	match _mode:
+		Mode.PENCIL:
+			return "Инструмент: карандаш — зажмите ЛКМ, чтобы рисовать"
+		Mode.ERASER:
+			return "Инструмент: ластик — зажмите ЛКМ, чтобы стирать"
+	return "Инструмент убран — ЛКМ снова взаимодействует с порталами"
 
-func press() -> void:
+
+# --- Основное действие (ЛКМ) ---
+
+func primary_pressed() -> void:
 	match _mode:
 		Mode.PENCIL:
 			_begin_stroke()
@@ -90,7 +107,7 @@ func press() -> void:
 			_erase_at(_draw_point())   # стереть сразу под прицелом, не дожидаясь движения
 
 
-func release() -> void:
+func primary_released() -> void:
 	if _mode == Mode.PENCIL and _drawing:
 		_finish_stroke()
 	_erasing = false
@@ -180,23 +197,14 @@ func _erase_at(p: Vector3) -> void:
 
 # --- Визуал «в руке» ---
 
-func _refresh_held() -> void:
-	if is_instance_valid(_held):
-		_held.queue_free()
-	_held = null
-	_tip = null
-	if _mode == Mode.NONE or _cam == null:
-		return
-	_held = _make_held(_mode)
-	_cam.add_child(_held)
-	_held.position = HAND_OFFSET
-
-
 ## Процедурный визуал инструмента (placeholder). Кладём в контейнер-«кисть»; рабочий конец выносим
 ## вперёд на TIP_REACH и помечаем маркером _tip — ИЗ него берётся точка рисования/стирания
 ## (_draw_point), поэтому остриё визуала и фактический источник линии совмещены по построению.
 ## Меш ориентируем сами (цилиндр Godot стоит вдоль +Y, ластик — куб), маркер — вдоль -Z.
-func _make_held(mode: int) -> Node3D:
+func make_held_node() -> Node3D:
+	_tip = null
+	if _mode == Mode.NONE:
+		return null
 	var holder := Node3D.new()
 	var tip := Node3D.new()
 	tip.position = Vector3(0, 0, -TIP_REACH)   # рабочий конец прямо перед кистью
@@ -206,7 +214,7 @@ func _make_held(mode: int) -> Node3D:
 	var mi := MeshInstance3D.new()
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	if mode == Mode.PENCIL:
+	if _mode == Mode.PENCIL:
 		var cyl := CylinderMesh.new()
 		cyl.top_radius = 0.003      # верх (+Y → после поворота -Z) — остриё
 		cyl.bottom_radius = 0.012

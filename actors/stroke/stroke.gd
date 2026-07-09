@@ -8,7 +8,7 @@ extends Node3D
 ##
 ## Два пути использования:
 ##  • Канонический — EphemeralView инстанцирует из записи журнала и зовёт setup_object(object).
-##  • Превью/локальный — ToolController сам инстанцирует, рисует по ходу ведения append_point() и
+##  • Превью/локальный — DrawingTool сам инстанцирует, рисует по ходу ведения append_point() и
 ##    (офлайн) финализирует setup_object с готовым props.
 ##
 ## Состоит в группе "ephemeral_stroke" — по ней ластик находит штрихи для хит-теста (hit_by).
@@ -48,7 +48,7 @@ func setup_object(object: Dictionary) -> void:
 	_rebuild()
 
 
-# --- Превью/локальный режим (ToolController) ---
+# --- Превью/локальный режим (DrawingTool) ---
 
 ## Начать живой штрих: задать цвет/толщину и очистить точки. Дальше — append_point по ходу ведения.
 func begin_preview(color: Color, width: float) -> void:

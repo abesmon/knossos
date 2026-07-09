@@ -10,9 +10,6 @@ const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
 const SPACE_CONSOLE_SCRIPT := preload("res://scripts/space_console.gd")
 
-## TTL пузыря — временного портала «ушёл сюда» (см. docs/ephemeral-changes.md).
-const BUBBLE_TTL := 30.0
-
 @onready var _world: Node3D = $world
 @onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/address bar"
 # cancel/refresh — одно место в навбаре: во время загрузки виден cancel (прервать),
@@ -94,7 +91,6 @@ var _loading: bool = false
 var _pending_history_push: bool = false
 
 var _image_dialog_open := false   # открыт файловый диалог инструмента размещения (кнопка 3)
-var _place_transform := Transform3D.IDENTITY   # подтверждённый трансформ размещаемой картинки
 var _settings_overlay: Control
 var _debug_panel: PanelContainer
 var _debug_label: Label
@@ -129,11 +125,6 @@ func _ready() -> void:
 	_player.aim_target_changed.connect(_on_aim_target_changed)
 	_player.debug_toggled.connect(_on_debug_toggled)
 	_player.debug_probed.connect(_on_debug_probed)
-	_player.tool_changed.connect(_on_tool_changed)
-	# Кнопка 3 — режим прицеливания размещения картинки: подсказка в статусе + создание
-	# объекта по подтверждённому трансформу (файловый диалог + add в эфемерный слой).
-	_player.image_placement_active.connect(_on_image_placement_active)
-	_player.image_placement_confirmed.connect(_on_image_placement_confirmed)
 	# Браузинг мира и UI взаимоисключающи: пока мышь захвачена, элементы навбара/чата
 	# делаем нефокусируемыми, чтобы их нельзя было активировать с клавиатуры (Tab/Space/Enter).
 	_player.mouse_capture_changed.connect(_on_mouse_capture_changed)
@@ -142,6 +133,14 @@ func _ready() -> void:
 	# Esc при уже свободной мыши (возимся с UI) открывает настройки.
 	_player.settings_requested.connect(_open_settings)
 	_world.add_child(_player)
+	# Система инструментов (см. docs/client/tools.md) создаётся в Player._ready — подключаемся
+	# после add_child. Подсказки инструментов — в строку статуса; инструменту размещения картинки
+	# нужен файловый диалог — пикер (UI) живёт здесь, результат возвращается через provide_file.
+	_player.tools.status_hint.connect(_set_status)
+	_player.tools.image_pick_requested.connect(_on_image_pick_requested)
+	# База для относительных URL офлайн-размещения картинок — знание о навигации остаётся тут.
+	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
+	image_tool.base_url_provider = func() -> String: return _base_url
 
 	_cancel.pressed.connect(_on_cancel)
 	_refresh.pressed.connect(_on_refresh)
@@ -394,32 +393,19 @@ func _navigate(url: String, base: String, push_history: bool) -> void:
 	_fetcher.fetch(url, base)
 
 
-## Запрашивает эфемерное изменение kind="bubble" в покидаемой комнате: временный портал в точке,
-## где стоит игрок, указывающий на URL назначения. Зовётся из _on_fetched (переход состоялся),
-## пока _current_url ещё старый. Только онлайн, находясь в комнате, и только если целевая комната
-## (seed_key) отличается от текущей (иначе это reload/переход внутри той же страницы — пузырь не
-## нужен). target — финальный адрес назначения (после редиректа). Позиция хранится как [x,y,z]
-## ради JSON-сериализуемости журнала. См. docs/ephemeral-changes.md.
+## Роняет «пузырь» — временный портал «ушёл сюда» — в покидаемой комнате через системный
+## BubbleTool. Зовётся из _on_fetched (переход состоялся), пока _current_url ещё старый.
+## Навигационные проверки — здесь (это знание о навигации, не об инструменте): переход только
+## если целевая комната (seed_key) отличается от текущей (иначе это reload/переход внутри той же
+## страницы — пузырь не нужен). target — финальный адрес назначения (после редиректа).
+## См. docs/ephemeral-changes.md и docs/client/tools.md.
 func _drop_leave_bubble(target: String) -> void:
-	if not (Settings.online_enabled and NetworkManager.in_room()) or _current_url == "" or _player == null:
+	if _current_url == "" or _player == null:
 		return
 	if target == "" or PageFetcher.seed_key(target) == PageFetcher.seed_key(_current_url):
 		return
-	var p := _player.global_position
-	# Действие add: инициатор описывает только нужную мутацию. id — наш адрес объекта (для будущих
-	# правок/удаления своего пузыря). parent="" — корень мира (детерминированные координаты).
-	NetworkManager.request_scene_action({
-		"op": "add",
-		"id": NetworkManager.new_object_id(),
-		"kind": "bubble",
-		"parent": "",
-		"ttl": BUBBLE_TTL,
-		"props": {
-			"url": target,
-			"position": [p.x, p.y, p.z],
-			"label": Settings.nick,
-		},
-	})
+	var bubble: BubbleTool = _player.tools.get_tool(&"bubble")
+	bubble.drop(target)
 
 
 func _on_fetched(html: String, final_url: String) -> void:
@@ -1223,44 +1209,26 @@ func _on_debug_toggled(on: bool) -> void:
 		_set_status("Отладка OFF")
 
 
-## Сменился инструмент рисования (кнопка 2): подсказка в статус-строке. См. ToolController.
-func _on_tool_changed(tool_name: String) -> void:
-	if tool_name == "":
-		_set_status("Инструмент убран — ЛКМ снова взаимодействует с порталами")
-	else:
-		_set_status("Инструмент: %s — зажмите ЛКМ, чтобы %s" % [
-			tool_name, "рисовать" if tool_name == "карандаш" else "стирать"])
-
-
 func _on_debug_probed(text: String) -> void:
 	if _debug_label != null:
 		_debug_label.text = text if text != "" else "Наведи прицел на объект…"
 
 
-# --- Инструмент размещения изображений (кнопка 3, см. docs/network/realtime-resources.md) ---
+# --- Файловый пикер для инструмента размещения изображений (кнопка 3) ---
+# Пикер — UI, поэтому живёт здесь; логика инструмента (прицеливание, спавн) — в
+# ImagePlacementTool. См. docs/network/realtime-resources.md и docs/client/tools.md.
 
-## Режим прицеливания включён/выключен: подсказка в строке статуса.
-func _on_image_placement_active(active: bool) -> void:
-	if active:
-		_set_status("Наведите точку · ЛКМ — выбрать картинку · ПКМ или 3 — отмена")
-	else:
-		_set_status("")
-
-
-## Место подтверждено (ЛКМ): выбрать картинку из локального хранилища и разместить по
-## трансформу прицеливания. Файл импортируется в realtime-ресурс (BlobStore, компактный
-## блоб + ссылка по хэшу), в эфемерный слой уходит ОБЫЧНЫЙ vrweb-node с тегом <VRWebImage> —
-## материализация, консоль пространства и персистенция работают готовыми путями.
-func _on_image_placement_confirmed(xform: Transform3D) -> void:
+## Инструменту нужен файл картинки: открыть диалог и вернуть результат через provide_file.
+func _on_image_pick_requested(filters: PackedStringArray) -> void:
 	if _image_dialog_open:
-		return
-	_place_transform = xform
+		return   # диалог уже открыт; его колбэк и завершит ожидание инструмента (provide_file)
 	_image_dialog_open = true
 	_player.capture_mouse(false)
-	var filters := PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp,*.gif;Изображения"])
 	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
 		DisplayServer.file_dialog_show("Разместить изображение", "", "", false,
-			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters, _on_image_file_chosen)
+			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters,
+			func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
+				_image_file_chosen(ok and not paths.is_empty(), paths[0] if not paths.is_empty() else ""))
 		return
 	# Fallback без нативного диалога ОС: встроенный FileDialog с доступом к ФС.
 	var dlg := FileDialog.new()
@@ -1269,9 +1237,9 @@ func _on_image_placement_confirmed(xform: Transform3D) -> void:
 	dlg.filters = filters
 	dlg.title = "Разместить изображение"
 	dlg.file_selected.connect(func(path: String) -> void:
-		_on_image_file_chosen(true, PackedStringArray([path]), 0))
+		_image_file_chosen(true, path))
 	dlg.canceled.connect(func() -> void:
-		_on_image_file_chosen(false, PackedStringArray(), 0))
+		_image_file_chosen(false, ""))
 	dlg.visibility_changed.connect(func() -> void:
 		if not dlg.visible:
 			dlg.queue_free())
@@ -1279,36 +1247,12 @@ func _on_image_placement_confirmed(xform: Transform3D) -> void:
 	dlg.popup_centered_ratio(0.6)
 
 
-## Файл выбран (или диалог отменён). Импорт синхронный: декод+пережим крупной картинки —
-## доли секунды, для инструмента приемлемо.
-func _on_image_file_chosen(ok: bool, paths: PackedStringArray, _filter: int) -> void:
+## Файл выбран (или диалог отменён): вернуть захват мыши и отдать результат инструменту.
+func _image_file_chosen(ok: bool, path: String) -> void:
 	_image_dialog_open = false
 	_player.capture_mouse(true)
-	if not ok or paths.is_empty():
-		return
-	var url: String = BlobStore.import_image(FileAccess.get_file_as_bytes(paths[0]))
-	if url == "":
-		_set_status("Не удалось разместить: формат не распознан или файл не ужимается в лимит")
-		return
-	# Полный трансформ прицеливания (позиция + разворот по нормали/лицом к игроку) — одним
-	# атрибутом transform; var_to_str даёт литерал Transform3D(...), парсимый обратно билдером.
-	var attrs := {
-		"src": url,
-		"alt": paths[0].get_file(),
-		"transform": var_to_str(_place_transform),
-	}
-	if NetworkManager.in_room():
-		NetworkManager.request_scene_action({
-			"op": "add", "id": NetworkManager.new_object_id(), "kind": SceneHtml.KIND_NODE,
-			"parent": "", "ttl": 0.0,
-			"props": {"tag": VrwebBuilder.IMAGE_TAG, "attrs": attrs},
-		})
-	else:
-		# Офлайн (вне комнаты) — локальный узел напрямую в мир, как офлайн-штрихи карандаша.
-		var node := VrwebBuilder.build_element(VrwebBuilder.IMAGE_TAG, attrs, {}, _base_url)
-		if node != null:
-			_world.add_child(node)
-	_set_status("Изображение размещено: %s" % paths[0].get_file())
+	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
+	image_tool.provide_file(ok, path)
 
 
 ## Подсветка прицела: над кликабельным/портальным объектом включается активная нода курсора,
