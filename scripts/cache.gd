@@ -6,8 +6,9 @@ extends Object
 ## очистить. Все пути идут через Sandbox.resolve() — как и везде, где трогаем user://
 ## (см. scripts/sandbox.gd).
 
-## Каталоги кэша (как объявлены в AvatarResolver.CACHE_DIR и VrwebVideoPlayer.CACHE_DIR).
-const DIRS := ["user://avatar_cache/", "user://video_cache/"]
+## Каталоги кэша (как объявлены в AvatarResolver.CACHE_DIR, VrwebVideoPlayer.CACHE_DIR
+## и BlobStore.CACHE_DIR).
+const DIRS := ["user://avatar_cache/", "user://video_cache/", "user://blob_cache/"]
 
 
 ## Суммарный размер всех каталогов кэша в байтах.

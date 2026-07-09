@@ -41,6 +41,8 @@ const EXT_SCENE_TAG := "ExtScene"
 const MIRROR_TAG := "VRWebMirror"
 const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
 const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
+const IMAGE_TAG := "VRWebImage"
+const BLOB_TAG := "VRWebBlob"
 const SUBRESOURCE_PREFIX := "SubResource:::"
 const EXTRESOURCE_PREFIX := "ExtResource:::"
 const MODE_COMBINE := "combine"
@@ -74,6 +76,10 @@ const VIDEO_SCREEN_RESERVED := {
 	"player": true, "src": true, "size": true,
 	"autoplay": true, "loop": true, "volume": true,
 }
+
+## Атрибуты <VRWebImage>, которые задают саму картинку, а не свойства узла Node3D.
+## width/height — желаемый размер квада в МЕТРАХ (0/нет = натуральный размер текстуры).
+const IMAGE_RESERVED := {"src": true, "alt": true, "width": true, "height": true}
 
 var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
@@ -232,6 +238,12 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_video_player(elem)
 	if elem.raw_tag == VIDEO_SCREEN_TAG:
 		return _build_video_screen(elem)
+	if elem.raw_tag == IMAGE_TAG:
+		return _build_image(elem)
+	if elem.raw_tag == BLOB_TAG:
+		# Документная форма realtime-ресурса — не узел: байты уходят в BlobStore.
+		_ingest_blob(elem)
+		return null
 	var cls := elem.raw_tag
 	if not _can_instantiate(cls):
 		Log.warn("builder", "неизвестный класс узла «%s» — пропущен" % cls)
@@ -355,6 +367,42 @@ func _build_video_screen(elem: HtmlNode) -> Node:
 			continue
 		node.set(key, _resolve_value(elem.attributes[key]))
 	return node
+
+
+## <VRWebImage src="<url>" alt="..." width="2" height="1.5" position="Vector3(...)"/> —
+## картинка, размещённая в мире (кастомный тег, см. docs/network/realtime-resources.md).
+## Строит PlacedImage (квад с текстурой, якорь центром); src — realtime-ресурс
+## (vrwebblob://) или обычный URL; width/height — метры (0/нет = натуральный размер).
+## Прочие атрибуты (position, rotation…) — обычные свойства Node3D. Именно этот тег
+## создаёт инструмент размещения (клавиша 3) через эфемерный kind="vrweb-node".
+func _build_image(elem: HtmlNode) -> Node:
+	var node := PlacedImage.new()
+	var src := elem.get_attr("src")
+	# Блоб-ссылки абсолютны и не принадлежат origin'у страницы — общий резолв их исковеркал бы.
+	if src != "" and not BlobProtocol.is_blob_url(src):
+		src = PageFetcher.resolve_url(src, _base_url)
+	node.setup(elem.get_attr("alt"), null,
+			_attr_float(elem, "width", 0.0), _attr_float(elem, "height", 0.0))
+	node.src = src
+	for key in elem.attributes:
+		if IMAGE_RESERVED.has(key):
+			continue
+		node.set(key, _resolve_value(elem.attributes[key]))
+	return node
+
+
+## <VRWebBlob hash="<64 hex sha256>" data="<base64>"/> — вшитые в документ байты
+## realtime-ресурса: страница (или запечённый флаш) несёт блоб инлайн, и ссылки
+## vrwebblob:// резолвятся без p2p. Хэш сверяет BlobStore.ingest — байты, не совпадающие
+## с адресом, молча отбрасываются (подсунуть подмену через документ нельзя).
+func _ingest_blob(elem: HtmlNode) -> void:
+	var hex := elem.get_attr("hash").to_lower()
+	if not BlobProtocol.valid_hex(hex):
+		Log.warn("builder", "<VRWebBlob> с кривым hash — пропущен")
+		return
+	if BlobStore.has_hex(hex):
+		return
+	BlobStore.ingest(hex, Marshalls.base64_to_raw(elem.get_attr("data")))
 
 
 ## Булев атрибут элемента или fallback (атрибута нет / значение не bool-литерал).

@@ -123,6 +123,7 @@ files/folders»). Уже прописано в обоих пресетах.
 | `vrwebresource://` → `res://…` (бандл-ресурс) | `ResourceLoader.load()` — следует import-ремапу |
 | `vrweblocal://` → файл ОС | сырые байты через `FileAccess` (ОС-файлы не импортируются) |
 | `http(s)://` | сырые байты через `HTTPRequest` |
+| `vrwebblob://sha256/<hex>` (realtime-ресурс) | сырые байты из `BlobStore` (локальный кэш или p2p-догрузка у пиров) — см. [realtime-resources.md](../network/realtime-resources.md) |
 
 Развилка инкапсулирована в загрузчиках: `PageFetcher.is_bundle_resource(url)` отличает
 бандл-ресурс, и для него `ImageLoader`/`VrwebResourceLoader` идут в `ResourceLoader`; для

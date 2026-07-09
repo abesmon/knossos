@@ -9,6 +9,10 @@ extends Node
 ## Живёт внутри текущего мира (`_world`): при навигации мир сносится вместе с лоадером,
 ## незавершённые запросы умирают — нет смысла дотягивать картинки старой страницы.
 
+## Группа для поиска лоадера текущего мира из узлов, которых строит не WorldGenerator
+## (PlacedImage из эфемерного слоя/vrweb-тега). Лоадер один на мир (см. main._rebuild_world).
+const GROUP := "image_loader"
+
 const MAX_CONCURRENT := 6
 const USER_AGENT := "VRWeb/0.1 (Godot; +knossos)"
 # Размер чанка чтения тела HTTPRequest. Дефолтные 64 КБ при use_threads дают массу итераций
@@ -25,6 +29,10 @@ var _queue: Array[String] = []  # url'ы в очереди на загрузку
 var _active: int = 0
 
 
+func _ready() -> void:
+	add_to_group(GROUP)
+
+
 ## Просит текстуру для url. Когда готова (или не удалось — тогда null) — зовёт on_ready(tex).
 func request_image(url: String, on_ready: Callable) -> void:
 	if url == "":
@@ -36,8 +44,23 @@ func request_image(url: String, on_ready: Callable) -> void:
 		_waiters[url].append(on_ready)
 		return
 	_waiters[url] = [on_ready]
+	# Realtime-ресурс (vrwebblob://) — байты отдаёт BlobStore (локально или догрузкой у пиров,
+	# см. docs/network/realtime-resources.md). Слот _active на время ожидания НЕ занимаем:
+	# блоба может не быть в комнате вовсе — очередь картинок страницы не должна встать.
+	# Колбэк — СВЯЗАННЫЙ метод (не лямбда): когда мир снесёт лоадер, Callable станет
+	# невалидным и BlobStore вычистит ожидание (перестанет качать ненужное).
+	if BlobStore.is_blob_url(url):
+		BlobStore.request(url, _on_blob_bytes.bind(url))
+		return
 	_queue.append(url)
 	_pump()
+
+
+## Байты realtime-ресурса пришли (локально или доехали от пира). Слот берём только на сам
+## декод — готовый путь _finish → _deliver его освободит и разбудит ожидающих.
+func _on_blob_bytes(bytes: PackedByteArray, url: String) -> void:
+	_active += 1
+	_finish(url, bytes, PackedStringArray())
 
 
 func _pump() -> void:
@@ -197,11 +220,16 @@ func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 	return ImageTexture.create_from_image(img)
 
 
-## Возвращает формат по сигнатуре байтов для контейнеров, где ошибочный MIME/расширение
-## встречаются в вебе. Пока нужен WebP: RIFF .... WEBP, в том числе animated WebP.
+## Возвращает формат по сигнатуре байтов. Сигнатура надёжнее MIME/расширения (в вебе они
+## часто врут), а у realtime-ресурсов (vrwebblob://) нет ни заголовков, ни расширения —
+## сигнатура для них единственный источник типа.
 static func _signature_image_type(body: PackedByteArray) -> String:
 	if _is_webp(body):
 		return "webp"
+	if body.size() >= 4 and body[0] == 0x89 and body[1] == 0x50 and body[2] == 0x4E and body[3] == 0x47:
+		return "png"
+	if body.size() >= 2 and body[0] == 0xFF and body[1] == 0xD8:
+		return "jpg"
 	return ""
 
 

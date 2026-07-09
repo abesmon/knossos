@@ -29,6 +29,7 @@ driver/mix_rate=48000
 
 Log="*res://scripts/log.gd"
 Settings="*res://scripts/settings.gd"
+BlobStore="*res://scripts/blob_store.gd"
 NetworkManager="*res://scripts/network_manager.gd"
 VoiceManager="*res://scripts/voice/voice_manager.gd"
 HomeServer="*res://scripts/home_server.gd"

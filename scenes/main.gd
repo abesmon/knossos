@@ -93,6 +93,8 @@ var _loading: bool = false
 # при повторной навигации, а не копить его (омнибокс браузера: A→C, а не A→B→C).
 var _pending_history_push: bool = false
 
+var _image_dialog_open := false   # открыт файловый диалог инструмента размещения (кнопка 3)
+var _place_transform := Transform3D.IDENTITY   # подтверждённый трансформ размещаемой картинки
 var _settings_overlay: Control
 var _debug_panel: PanelContainer
 var _debug_label: Label
@@ -128,6 +130,10 @@ func _ready() -> void:
 	_player.debug_toggled.connect(_on_debug_toggled)
 	_player.debug_probed.connect(_on_debug_probed)
 	_player.tool_changed.connect(_on_tool_changed)
+	# Кнопка 3 — режим прицеливания размещения картинки: подсказка в статусе + создание
+	# объекта по подтверждённому трансформу (файловый диалог + add в эфемерный слой).
+	_player.image_placement_active.connect(_on_image_placement_active)
+	_player.image_placement_confirmed.connect(_on_image_placement_confirmed)
 	# Браузинг мира и UI взаимоисключающи: пока мышь захвачена, элементы навбара/чата
 	# делаем нефокусируемыми, чтобы их нельзя было активировать с клавиатуры (Tab/Space/Enter).
 	_player.mouse_capture_changed.connect(_on_mouse_capture_changed)
@@ -1229,6 +1235,80 @@ func _on_tool_changed(tool_name: String) -> void:
 func _on_debug_probed(text: String) -> void:
 	if _debug_label != null:
 		_debug_label.text = text if text != "" else "Наведи прицел на объект…"
+
+
+# --- Инструмент размещения изображений (кнопка 3, см. docs/network/realtime-resources.md) ---
+
+## Режим прицеливания включён/выключен: подсказка в строке статуса.
+func _on_image_placement_active(active: bool) -> void:
+	if active:
+		_set_status("Наведите точку · ЛКМ — выбрать картинку · ПКМ или 3 — отмена")
+	else:
+		_set_status("")
+
+
+## Место подтверждено (ЛКМ): выбрать картинку из локального хранилища и разместить по
+## трансформу прицеливания. Файл импортируется в realtime-ресурс (BlobStore, компактный
+## блоб + ссылка по хэшу), в эфемерный слой уходит ОБЫЧНЫЙ vrweb-node с тегом <VRWebImage> —
+## материализация, консоль пространства и персистенция работают готовыми путями.
+func _on_image_placement_confirmed(xform: Transform3D) -> void:
+	if _image_dialog_open:
+		return
+	_place_transform = xform
+	_image_dialog_open = true
+	_player.capture_mouse(false)
+	var filters := PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp,*.gif;Изображения"])
+	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		DisplayServer.file_dialog_show("Разместить изображение", "", "", false,
+			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters, _on_image_file_chosen)
+		return
+	# Fallback без нативного диалога ОС: встроенный FileDialog с доступом к ФС.
+	var dlg := FileDialog.new()
+	dlg.access = FileDialog.ACCESS_FILESYSTEM
+	dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dlg.filters = filters
+	dlg.title = "Разместить изображение"
+	dlg.file_selected.connect(func(path: String) -> void:
+		_on_image_file_chosen(true, PackedStringArray([path]), 0))
+	dlg.canceled.connect(func() -> void:
+		_on_image_file_chosen(false, PackedStringArray(), 0))
+	dlg.visibility_changed.connect(func() -> void:
+		if not dlg.visible:
+			dlg.queue_free())
+	add_child(dlg)
+	dlg.popup_centered_ratio(0.6)
+
+
+## Файл выбран (или диалог отменён). Импорт синхронный: декод+пережим крупной картинки —
+## доли секунды, для инструмента приемлемо.
+func _on_image_file_chosen(ok: bool, paths: PackedStringArray, _filter: int) -> void:
+	_image_dialog_open = false
+	_player.capture_mouse(true)
+	if not ok or paths.is_empty():
+		return
+	var url: String = BlobStore.import_image(FileAccess.get_file_as_bytes(paths[0]))
+	if url == "":
+		_set_status("Не удалось разместить: формат не распознан или файл не ужимается в лимит")
+		return
+	# Полный трансформ прицеливания (позиция + разворот по нормали/лицом к игроку) — одним
+	# атрибутом transform; var_to_str даёт литерал Transform3D(...), парсимый обратно билдером.
+	var attrs := {
+		"src": url,
+		"alt": paths[0].get_file(),
+		"transform": var_to_str(_place_transform),
+	}
+	if NetworkManager.in_room():
+		NetworkManager.request_scene_action({
+			"op": "add", "id": NetworkManager.new_object_id(), "kind": SceneHtml.KIND_NODE,
+			"parent": "", "ttl": 0.0,
+			"props": {"tag": VrwebBuilder.IMAGE_TAG, "attrs": attrs},
+		})
+	else:
+		# Офлайн (вне комнаты) — локальный узел напрямую в мир, как офлайн-штрихи карандаша.
+		var node := VrwebBuilder.build_element(VrwebBuilder.IMAGE_TAG, attrs, {}, _base_url)
+		if node != null:
+			_world.add_child(node)
+	_set_status("Изображение размещено: %s" % paths[0].get_file())
 
 
 ## Подсветка прицела: над кликабельным/портальным объектом включается активная нода курсора,
