@@ -3,6 +3,7 @@ vrweb_scene (индекс/слияние/rev/seed_key), API пространст
 пока хозяин дома», оба пути авторизации флаша (Bearer и сертификат+proof)."""
 
 import base64
+import hashlib
 import json
 import secrets
 import time
@@ -87,6 +88,65 @@ def test_apply_node_nested_in_same_flush():
     assert {r["outcome"] for r in out["results"].values()} == {"applied"}
     index = vrweb_scene.build_index(vrweb_scene.parse_fragment(out["markup"]))
     assert index["u1.2"]["parent_id"] == "u1.1"
+
+
+def _blob_object(raw: bytes) -> dict:
+    hex_hash = hashlib.sha256(raw).hexdigest()
+    return {"id": "blob:" + hex_hash, "kind": "vrweb-blob", "parent": "",
+            "props": {"algo": "sha256", "hash": hex_hash,
+                      "data": base64.b64encode(raw).decode("ascii")}}
+
+
+def test_apply_blob_bakes_inline_and_dedups():
+    raw = b"\x89PNG\r\n\x1a\n fake image bytes"
+    obj = _blob_object(raw)
+    hex_hash = obj["props"]["hash"]
+    out = vrweb_scene.apply_objects("", [obj])
+    assert out["results"][obj["id"]]["outcome"] == "applied"
+    assert out["changed"]
+    # Блоб запечён инлайн как <VRWebBlob> с байтами, сходящимися с адресом.
+    assert "<VRWebBlob" in out["markup"]
+    assert ('hash="%s"' % hex_hash) in out["markup"]
+    assert base64.b64encode(raw).decode("ascii") in out["markup"]
+    # Повторный флаш того же блоба — дедуп по содержимому, без дубля.
+    out2 = vrweb_scene.apply_objects(out["markup"], [obj])
+    assert out2["results"][obj["id"]]["outcome"] == "rejected"
+    assert not out2["changed"]
+    assert out2["markup"].count("<VRWebBlob") == 1
+
+
+def test_apply_blob_rejects_hash_and_id_mismatch():
+    obj = _blob_object(b"real bytes")
+    # data не сходится с объявленным хэшем.
+    tampered = {**obj, "props": {**obj["props"], "data": base64.b64encode(b"other").decode()}}
+    r = vrweb_scene.apply_objects("", [tampered])["results"][obj["id"]]
+    assert r["outcome"] == "rejected" and r["reason"] == "hash mismatch"
+    # id не согласован с хэшем.
+    bad_id = {**obj, "id": "blob:" + "0" * 64}
+    r2 = vrweb_scene.apply_objects("", [bad_id])["results"]["blob:" + "0" * 64]
+    assert r2["outcome"] == "rejected" and r2["reason"] == "id/hash mismatch"
+
+
+def test_blob_tag_cannot_be_forged_via_node_or_patch():
+    # Через kind=vrweb-node <VRWebBlob> с непроверенными байтами не создать.
+    forge = {"id": "x1", "kind": "vrweb-node", "parent": "",
+             "props": {"tag": "VRWebBlob", "attrs": {"hash": "0" * 64, "data": "Zm9v"}}}
+    out = vrweb_scene.apply_objects("", [forge])
+    assert out["results"]["x1"]["outcome"] == "rejected"
+    assert "VRWebBlob" not in out["markup"]
+    # Запечённый блоб иммутабелен: патч по его id отклоняется.
+    baked = vrweb_scene.apply_objects("", [_blob_object(b"bytes")])["markup"]
+    hex_hash = hashlib.sha256(b"bytes").hexdigest()
+    patched = vrweb_scene.apply_objects(baked, [
+        {"id": "vpatch:blob:" + hex_hash, "kind": "vrweb-patch", "parent": "",
+         "props": {"set": {"data": "ZXZpbA=="}}}])
+    assert patched["results"]["vpatch:blob:" + hex_hash]["outcome"] == "rejected"
+    assert not patched["changed"]
+
+
+def test_blob_advertised_in_capability():
+    assert "vrweb-blob" in vrweb_scene.ACCEPTED_KINDS
+    assert vrweb_scene.MAX_BYTES >= vrweb_scene.MAX_BLOB_BYTES
 
 
 def test_seed_key_port():
@@ -263,6 +323,36 @@ def test_flush_bearer_applies_and_bumps_rev(client):
                      json={"v": 1, "payload": payload})
     assert r2.status_code == 409
     assert r2.json()["error"]["current_rev"] == out["rev"]
+
+
+def test_flush_bakes_blob_and_advertises_capability(client):
+    token = _register(client)["access_token"]
+    url = _home(client, token)["url"]
+
+    cap = client.get("/api/v1/spaces/flush", params={"url": url}).json()
+    assert "vrweb-blob" in cap["accepts_kinds"]
+    assert cap["max_bytes"] >= vrweb_scene.MAX_BLOB_BYTES
+
+    raw = b"\x89PNG\r\n\x1a\n realtime image"
+    hex_hash = hashlib.sha256(raw).hexdigest()
+    blob = {"id": "blob:" + hex_hash, "kind": "vrweb-blob", "parent": "",
+            "props": {"algo": "sha256", "hash": hex_hash,
+                      "data": base64.b64encode(raw).decode("ascii")}}
+    node = {"id": "img1", "kind": "vrweb-node", "parent": "",
+            "props": {"tag": "VRWebImage",
+                      "attrs": {"src": "vrwebblob://sha256/" + hex_hash}}}
+
+    rev = _page_rev(client, token, url)
+    payload = _flush_payload(url, rev, [blob, node])   # блоб первым, как шлёт клиент
+    r = client.post("/api/v1/spaces/flush", headers=_auth(token),
+                    json={"v": 1, "payload": payload})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["status"] == "applied"
+    # Страница самодостаточна: и вшитый блоб, и узел со ссылкой на него.
+    page = client.get("/s/" + _slug(url), headers=_auth(token)).text
+    assert "<VRWebBlob" in page and ('hash="%s"' % hex_hash) in page
+    assert 'src="vrwebblob://sha256/%s"' % hex_hash in page
 
 
 def test_flush_forbidden_for_stranger(client):

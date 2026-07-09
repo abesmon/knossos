@@ -17,22 +17,34 @@ Python-порт клиентского SceneHtml (scripts/ephemeral/scene_html.g
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import re
 from dataclasses import dataclass, field
 
 KIND_NODE = "vrweb-node"
 KIND_PATCH = "vrweb-patch"
+KIND_BLOB = "vrweb-blob"
 PATCH_PREFIX = "vpatch:"
 PAGE_PREFIX = "page:"
-ACCEPTED_KINDS = (KIND_PATCH, KIND_NODE)
+BLOB_PREFIX = "blob:"
+BLOB_TAG = "VRWebBlob"        # мета-тег документной формы блоба (см. realtime-resources.md)
+BLOB_ALGO = "sha256"
+ACCEPTED_KINDS = (KIND_PATCH, KIND_NODE, KIND_BLOB)
 
 # Лимиты запроса флаша (анонсируются capability-ответом).
 MAX_OBJECTS = 256
-MAX_BYTES = 256 * 1024
+# Тело поднято с 256 КиБ под документную форму блобов (base64 внутри флаша). Эта
+# реализация НЕ раскладывает блобы файлами, а печёт их в разметку страницы (страницы
+# лежат в простой БД) — потолок берём с запасом под несколько картинок + саму дельту.
+MAX_BYTES = 4 * 1024 * 1024
+MAX_BLOB_BYTES = 2 * 1024 * 1024   # один блоб (декодированный) — паритет с клиентским BlobProtocol
+MAX_BLOBS = 4                      # блобов за флаш: страница в БД, не файловое хранилище
 
 _TAG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
 _ATTR_RE = re.compile(r"^[a-z_][a-z0-9_.:-]*$")
+_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass
@@ -169,6 +181,8 @@ def apply_objects(markup: str, objects: list) -> dict:
     results: dict = {}
     applied = 0
     inserted: dict = {}   # id объекта -> Element, вставленный в ЭТОМ флаше
+    blob_hashes = _existing_blob_hashes(elements)   # уже запечённые блобы (дедуп по содержимому)
+    blob_count = 0
 
     def reject(oid: str, reason: str) -> None:
         results[oid] = {"outcome": "rejected", "reason": reason}
@@ -188,6 +202,16 @@ def apply_objects(markup: str, objects: list) -> dict:
             continue
         if kind not in ACCEPTED_KINDS:
             reject(oid, "kind not accepted")
+            continue
+        if kind == KIND_BLOB:
+            blob_count += 1
+            if blob_count > MAX_BLOBS:
+                reject(oid, "too many blobs")
+                continue
+            outcome = _apply_blob(elements, blob_hashes, oid, props)
+            results[oid] = outcome
+            if outcome["outcome"] == "applied":
+                applied += 1
             continue
         index = build_index(elements)   # после каждой мутации адреса актуальны
         if kind == KIND_PATCH:
@@ -211,6 +235,9 @@ def _apply_patch(elements: list[Element], index: dict, oid: str, props: dict) ->
     if rec is None:
         return {"outcome": "rejected", "reason": "node not found"}
     elem: Element = rec["elem"]
+    if elem.tag == BLOB_TAG:
+        # Блоб иммутабелен и адресуется хэшем: правка data/hash порвала бы контент-адресацию.
+        return {"outcome": "rejected", "reason": "blob is immutable"}
     if props.get("removed", False):
         siblings = rec["parent_elem"].children if rec["parent_elem"] is not None else elements
         siblings.remove(elem)
@@ -236,6 +263,9 @@ def _apply_node(elements: list[Element], index: dict, inserted: dict,
     attrs = props.get("attrs", {})
     if not _TAG_RE.match(tag):
         return {"outcome": "rejected", "reason": "bad tag"}
+    if tag == BLOB_TAG:
+        # Мимо верификации хэша <VRWebBlob> не создать: только через kind=vrweb-blob.
+        return {"outcome": "rejected", "reason": "blob must use vrweb-blob kind"}
     if not isinstance(attrs, dict):
         return {"outcome": "rejected", "reason": "bad attrs"}
     for k in attrs:
@@ -263,6 +293,66 @@ def _apply_node(elements: list[Element], index: dict, inserted: dict,
             return {"outcome": "rejected", "reason": "parent missing"}
         parent_elem.children.append(elem)
     inserted[oid] = elem
+    return {"outcome": "applied"}
+
+
+# ============================================================================
+#  Документная форма блоба (realtime-ресурсы, docs/network/realtime-resources.md)
+# ============================================================================
+#
+# Клиент присылает псевдо-объекты { id:"blob:<hex>", kind:"vrweb-blob",
+# props:{algo:"sha256", hash:"<hex>", data:"<base64>"} } первыми в дельте. Эта
+# реализация НЕ сохраняет их файлами, а печёт инлайн в разметку страницы как
+# <VRWebBlob hash="…" algo="sha256" data="…"/>: страница самодостаточна, и клиенты
+# резолвят vrwebblob://-ссылки без p2p. Байты верифицируются хэшем (подмену через
+# документ не пронести), дедуп — по содержимому.
+
+def _existing_blob_hashes(elements: list[Element]) -> set:
+    """Хэши блобов, уже вшитых в страницу (в т.ч. вложенно) — для дедупликации."""
+    found: set = set()
+
+    def walk(items: list[Element]) -> None:
+        for e in items:
+            if e.tag == BLOB_TAG:
+                h = str(e.attrs.get("hash", "")).strip().lower()
+                if h:
+                    found.add(h)
+            walk(e.children)
+
+    walk(elements)
+    return found
+
+
+def _apply_blob(elements: list[Element], blob_hashes: set, oid: str, props: dict) -> dict:
+    algo = str(props.get("algo", BLOB_ALGO))
+    if algo != BLOB_ALGO:
+        return {"outcome": "rejected", "reason": "unsupported algo"}
+    hex_hash = str(props.get("hash", "")).strip().lower()
+    if not _HEX_RE.match(hex_hash):
+        return {"outcome": "rejected", "reason": "bad hash"}
+    # id объекта обязан согласовываться с хэшем — иначе дедуп/адресация врозь.
+    if oid != BLOB_PREFIX + hex_hash:
+        return {"outcome": "rejected", "reason": "id/hash mismatch"}
+    data = props.get("data", "")
+    if not isinstance(data, str):
+        return {"outcome": "rejected", "reason": "bad data"}
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        return {"outcome": "rejected", "reason": "bad base64"}
+    if len(raw) > MAX_BLOB_BYTES:
+        return {"outcome": "rejected", "reason": "blob too large"}
+    if hashlib.sha256(raw).hexdigest() != hex_hash:
+        return {"outcome": "rejected", "reason": "hash mismatch"}
+    if hex_hash in blob_hashes:
+        # Уже запечён (повторный флаш узла со ссылкой на тот же блоб) — как «already persisted».
+        return {"outcome": "rejected", "reason": "already persisted"}
+    # Каноничная перекодировка: в разметку идут байты, ровно сходящиеся с адресом,
+    # без переносов/пробелов, что мог бы внести клиент.
+    canon = base64.b64encode(raw).decode("ascii")
+    elements.append(Element(tag=BLOB_TAG,
+                            attrs={"id": oid, "algo": BLOB_ALGO, "hash": hex_hash, "data": canon}))
+    blob_hashes.add(hex_hash)
     return {"outcome": "applied"}
 
 
