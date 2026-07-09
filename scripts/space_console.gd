@@ -605,8 +605,7 @@ func _set_status(text: String) -> void:
 
 
 func _on_editor_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_S and event.is_command_or_control_pressed():
+	if event.is_action_pressed("console_save"):
 		_editor.accept_event()
 		_on_save()
 

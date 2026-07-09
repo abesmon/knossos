@@ -1085,6 +1085,6 @@ func _close() -> void:
 ## раньше игрока: при открытом оверлее мышь свободна, и иначе Player._unhandled_input принял
 ## бы тот же Esc за «открыть настройки» и погасил бы его (оверлей бы не закрылся).
 func _input(event: InputEvent) -> void:
-	if visible and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+	if visible and event.is_action_pressed("ui_cancel"):
 		_close()
 		get_viewport().set_input_as_handled()

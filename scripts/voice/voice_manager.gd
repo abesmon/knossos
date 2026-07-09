@@ -133,14 +133,14 @@ func set_mode(mode: String) -> void:
 ## клавишу отпустили, уже перейдя в поле. _input идёт ДО GUI, поэтому перехват (set_input_as_handled)
 ## надёжно забирает V у контролов, когда мы её обрабатываем.
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey and event.keycode == KEY_V and not event.echo):
+	if not event.is_action("voice_push_to_talk") or event.is_echo():
 		return
-	if event.pressed:
+	if event.is_action_pressed("voice_push_to_talk"):
 		if _is_text_editing():
 			return   # печатаем 'v' в поле ввода — не перехватываем
 		handle_voice_key(true)
 		get_viewport().set_input_as_handled()
-	else:
+	elif event.is_action_released("voice_push_to_talk"):
 		handle_voice_key(false)
 
 

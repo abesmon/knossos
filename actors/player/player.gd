@@ -210,12 +210,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		_camera.rotate_x(-event.relative.y * mouse_sensitivity)
 		_camera.rotation.x = clamp(_camera.rotation.x, -1.4, 1.4)
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if not event.pressed:
-			# Отпускание ЛКМ — завершить штрих, если рисуем (иначе ни на что не влияет).
-			if _looking and _tool != null and _tool.is_armed():
-				_tool.release()
-		elif _looking:
+	elif event.is_action_pressed("player_main_action"):
+		if _looking:
 			# В режиме размещения ЛКМ подтверждает точку; иначе инструмент рисует/стирает,
 			# а без инструмента — взаимодействие с порталом.
 			if _placing:
@@ -226,49 +222,51 @@ func _unhandled_input(event: InputEvent) -> void:
 				_try_interact()
 		else:
 			capture_mouse(true)
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
-			and event.pressed and _looking and _placing:
-		# ПКМ в режиме размещения — отмена (то же, что повторное нажатие 3).
+	elif event.is_action_released("player_main_action"):
+		# Отпускание основного действия — завершить штрих, если рисуем (иначе ни на что не влияет).
+		if _looking and _tool != null and _tool.is_armed():
+			_tool.release()
+	elif event.is_action_pressed("player_secondary_action") and _looking and _placing:
+		# Вторичное действие в режиме размещения — отмена (то же, что повторное нажатие «place»).
 		_cancel_placement()
-	elif event is InputEventMouseButton and event.pressed and _looking \
-			and (event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+	elif _looking and event.is_action_pressed("player_scale_up"):
 		# Гасим в _physics_process: запрос к direct_space_state безопасен только там.
-		_scroll_pending += -1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0
+		_scroll_pending += -1.0
+	elif _looking and event.is_action_pressed("player_scale_down"):
+		_scroll_pending += 1.0
 	elif event is InputEventPanGesture and _looking:
 		# Тачпад на macOS шлёт прокрутку двумя пальцами не колесом, а pan-жестом (delta.y).
 		_scroll_pending += event.delta.y * TRACKPAD_SCROLL_SCALE
-	elif event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
-			KEY_ESCAPE:
-				if _looking:
-					# Из браузинга мира — сначала отпускаем мышь.
-					capture_mouse(false)
-				else:
-					# Мышь уже свободна (возимся с UI) — Esc открывает настройки.
-					# Гасим событие: иначе тот же Esc долетит до _unhandled_input
-					# оверлея настроек и сразу же его закроет (а закрытие — recapture).
-					settings_requested.emit()
-					get_viewport().set_input_as_handled()
-			KEY_E:
-				_try_interact()
-			KEY_2:
-				# Цикл инструмента рисования: нет → карандаш → ластик → нет.
-				if _tool != null:
-					tool_changed.emit(_tool.cycle())
-			KEY_3:
-				# Переключатель режима прицеливания размещения картинки.
-				if _placing:
-					_cancel_placement()
-				elif _looking:
-					_start_placement()
-			KEY_F3:
-				_toggle_debug()
-			KEY_SPACE:
-				if _looking:
-					_handle_space_tap()
-			KEY_ENTER, KEY_KP_ENTER:
-				if _looking:
-					chat_requested.emit()
+	elif event.is_action_pressed("ui_cancel"):
+		if _looking:
+			# Из браузинга мира — сначала отпускаем мышь.
+			capture_mouse(false)
+		else:
+			# Мышь уже свободна (возимся с UI) — Esc открывает настройки.
+			# Гасим событие: иначе тот же Esc долетит до _unhandled_input
+			# оверлея настроек и сразу же его закроет (а закрытие — recapture).
+			settings_requested.emit()
+			get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("player_interact"):
+		_try_interact()
+	elif event.is_action_pressed("tool_cycle"):
+		# Цикл инструмента рисования: нет → карандаш → ластик → нет.
+		if _tool != null:
+			tool_changed.emit(_tool.cycle())
+	elif event.is_action_pressed("tool_place_image"):
+		# Переключатель режима прицеливания размещения картинки.
+		if _placing:
+			_cancel_placement()
+		elif _looking:
+			_start_placement()
+	elif event.is_action_pressed("debug_toggle"):
+		_toggle_debug()
+	elif event.is_action_pressed("player_jump"):
+		if _looking:
+			_handle_space_tap()
+	elif event.is_action_pressed("player_chat"):
+		if _looking:
+			chat_requested.emit()
 
 
 # --- Инструмент размещения картинок (кнопка 3): прицеливание + превью ---
@@ -461,11 +459,11 @@ func _find_debug_meta(node) -> String:
 func _walk(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= _gravity * delta
-	if _looking and Input.is_physical_key_pressed(KEY_SPACE) and is_on_floor():
+	if _looking and Input.is_action_pressed("player_jump") and is_on_floor():
 		velocity.y = jump_velocity
 
 	var input_dir := _move_axes()
-	var speed := run_speed if Input.is_physical_key_pressed(KEY_SHIFT) else walk_speed
+	var speed := run_speed if Input.is_action_pressed("player_sprint") else walk_speed
 	var dir := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 	if dir != Vector3.ZERO:
 		velocity.x = dir.x * speed
@@ -482,11 +480,11 @@ func _fly() -> void:
 	if _looking:
 		var cam_basis := _camera.global_transform.basis
 		move = -cam_basis.z * (-input_dir.y) + cam_basis.x * input_dir.x
-		if Input.is_physical_key_pressed(KEY_SPACE):
+		if Input.is_action_pressed("player_jump"):
 			move.y += 1.0
-		if Input.is_physical_key_pressed(KEY_CTRL):
+		if Input.is_action_pressed("player_descend"):
 			move.y -= 1.0
-	var speed := run_speed * 1.8 if Input.is_physical_key_pressed(KEY_SHIFT) else fly_speed
+	var speed := run_speed * 1.8 if Input.is_action_pressed("player_sprint") else fly_speed
 	velocity = move.normalized() * speed if move != Vector3.ZERO else Vector3.ZERO
 
 
@@ -495,13 +493,13 @@ func _move_axes() -> Vector2:
 	var d := Vector2.ZERO
 	if not _looking:
 		return d
-	if Input.is_physical_key_pressed(KEY_W):
+	if Input.is_action_pressed("player_move_forward"):
 		d.y -= 1.0
-	if Input.is_physical_key_pressed(KEY_S):
+	if Input.is_action_pressed("player_move_back"):
 		d.y += 1.0
-	if Input.is_physical_key_pressed(KEY_A):
+	if Input.is_action_pressed("player_strafe_left"):
 		d.x -= 1.0
-	if Input.is_physical_key_pressed(KEY_D):
+	if Input.is_action_pressed("player_strafe_right"):
 		d.x += 1.0
 	return d
 

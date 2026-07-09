@@ -295,10 +295,10 @@ func _objects_summary(objects: Array) -> String:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
+		if mb.is_action_pressed("view_zoom_in"):
 			_zoom_at(mb.position, 1.12)
 			accept_event()
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
+		elif mb.is_action_pressed("view_zoom_out"):
 			_zoom_at(mb.position, 1.0 / 1.12)
 			accept_event()
 		elif mb.button_index == MOUSE_BUTTON_LEFT:

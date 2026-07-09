@@ -187,7 +187,7 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
-	if event.physical_keycode != KEY_QUOTELEFT or event.is_command_or_control_pressed():
+	if not event.is_action("ui_console_toggle") or event.is_command_or_control_pressed():
 		return
 	var focus := get_viewport().gui_get_focus_owner()
 	var typing := focus is LineEdit or focus is TextEdit
