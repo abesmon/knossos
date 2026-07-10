@@ -1,0 +1,16 @@
+[mcp_servers.godot]
+command = "npx"
+args = ["@coding-solo/godot-mcp"]
+
+[mcp_servers.godot.env]
+GODOT_PATH = "/Applications/Godot 4.6.3.app/Contents/MacOS/Godot"
+DEBUG = "true"
+
+[mcp_servers.godot-mcp-docs]
+command = "docker"
+args = [
+    "run",
+    "--rm",
+    "-i",
+    "godot-mcp-docs:local",
+]
