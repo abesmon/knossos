@@ -93,6 +93,24 @@ WASD работал на любой раскладке — как раньше `
 - Закрытие оверлеев и снятие захвата мыши — встроенное Godot `ui_cancel` (Esc):
   [scenes/settings.gd](../../scenes/settings.gd), [actors/player/player.gd](../../actors/player/player.gd).
 
+## План VR: semantic actions поверх нескольких источников
+
+`InputMap` остаётся desktop/OpenXR binding layer, но его недостаточно для hybrid controller + hand
+tracking. Между raw bindings и игровыми системами появится per-hand `InputSourceArbiter`:
+
+- controller и skeletal hand могут быть доступны одновременно;
+- source выбирается отдельно для каждой руки и semantic action;
+- hand detection не отключает hardware menu/trigger bindings;
+- ручной override выше auto detection;
+- press/release несут `hand`, `source` и `source_generation`, поэтому release от нового устройства
+  не завершает action, начатый старым;
+- `InteractionRouter` решает, получает действие UI, captured target, tool или world.
+
+Причина такого разделения и известные failure modes VRChat описаны в
+[vrchat-hybrid-lessons.md](vrchat-hybrid-lessons.md#7-ui-и-pointers-hand-identity-должна-быть-явной).
+
+Текущая desktop карта действий не меняется до реализации этого слоя.
+
 ## Что осталось на явных кнопках (и почему)
 
 Не всякая проверка кнопки — это «действие ввода». Указатель в 2D-видах

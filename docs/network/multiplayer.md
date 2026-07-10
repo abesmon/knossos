@@ -158,6 +158,14 @@ playing)` (heartbeat: позиция + состояние). Heartbeat шлёт *
 ключи и как приёмник превращает их в движение модели — сторона клиента (визуализация), в
 [avatars.md](../client/avatars.md).
 
+> **План VR:** high-frequency `PresencePose` не станет обычным набором avatar params. Для
+> serialization spike её можно временно вложить в legacy `_recv_state`, но production contract —
+> отдельный versioned `PlayerMotionSnapshot(root, presence_pose)` в том же transport. Avatar
+> parameters остаются change-driven/slower, voice и grabbed object state имеют собственный
+> lifecycle. Это предотвращает потерю pose у generic/hidden/loading avatar и позволяет отдельно
+> настраивать rate/compression/LOD. См. [vr-mode.md](../client/vr-mode.md#формат-и-доставка-сетевой-позы)
+> и [уроки VRChat](../client/vrchat-hybrid-lessons.md#10-pose-animation-parameters-и-voice-должны-иметь-разные-sync-semantics).
+
 ## Аватар по сети: карточка идентичности
 
 > **Это протокольная сторона аватара** — что и когда летит по проводу (карточка идентичности) и

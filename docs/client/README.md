@@ -25,6 +25,10 @@
 - [controls.md](controls.md) — управление и именованные действия ввода (`InputMap`): WASD,
   взаимодействие, инструменты, голос и т.п. вместо явных клавиш/кнопок.
 - [avatars.md](avatars.md) — система аватаров в стиле VRChat.
+- [vr-mode.md](vr-mode.md) — архитектура и план VR-режима: OpenXR, ввод руками, UI-планшет,
+  трекинг, IK, full body и стыковка с существующими системами.
+- [vrchat-hybrid-lessons.md](vrchat-hybrid-lessons.md) — опыт VRChat в hybrid desktop/VR:
+  generic avatars, IK/calibration, input arbitration, UI pointers, network pose, safety и fallback.
 - [settings.md](settings.md) — глобальные настройки приложения (автолоад `Settings`, экран
   настроек).
 - [tools.md](tools.md) — система инструментов: `PlayerTool`/`ToolManager`, слоты, запрос

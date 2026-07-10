@@ -87,6 +87,25 @@ build/
 | `Windows Desktop` | Windows   | x86_64             | embed_pck=false (exe + pck рядом)    |
 | `Linux`           | Linux     | x86_64             | embed_pck=false (бинарь + pck рядом) |
 
+## План VR: один PC-билд, несколько launch modes
+
+Для будущего PCVR не планируются отдельные desktop- и VR-архивы. Каждый поддерживаемый desktop
+export должен содержать один и тот же клиент и запускаться в `desktop` либо `vr` mode. Две
+launch entries/ярлыка допустимы, но указывают на один executable:
+
+```bash
+knossos --xr-mode off -- --client-mode=desktop
+knossos --xr-mode on -- --client-mode=vr
+```
+
+Custom argument после `--` читает ранний `ClientModeResolver`; engine argument `--xr-mode`
+оставлен отдельно, чтобы схема работала и при возможном переходе с текущего `gl_compatibility` на
+Vulkan. Смена режима выполняется перезапуском процесса. Полная политика выбора, fallback и
+критерии для отдельного standalone-билда описаны в [vr-mode.md](vr-mode.md#режим-запуска-и-состав-билдов).
+
+Standalone Android/Quest при принятии решения о поддержке получит отдельный export preset и
+артефакт, но останется сборкой того же проекта.
+
 ## Нативные зависимости (GDExtension)
 
 В билд должны попасть GDExtension с бинарями под каждую платформу —

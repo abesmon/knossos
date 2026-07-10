@@ -100,6 +100,33 @@
 `RemotePlayer` — носитель аватара: тело делегировано `AvatarHost`, а неймплейт и речевой бабл
 (UI поверх любого аватара) остались на корне.
 
+### План VR: spatial presence не принадлежит аватару
+
+> Статус: целевая архитектура, ещё не реализована. Полный план и этапы — в
+> [vr-mode.md](vr-mode.md#пространственный-риг-существует-без-аватара). Причины, включая потерю
+> IK/head tracking у Generic/fallback avatars в VRChat, разобраны в
+> [vrchat-hybrid-lessons.md](vrchat-hybrid-lessons.md#3-genericnon-humanoid-avatars-показывают-опасность-avatar-driven-tracking).
+
+Не все аватары являются humanoid и не каждый аватар обязан иметь голову, руки, скелет или вообще
+реагировать на tracking. Поэтому в VR `Player`/`RemotePlayer` будет владеть постоянным
+`PresenceRig` с canonical anchors `view`, `left/right aim`, `grip`, `palm`, `tool`, `grab` и
+optional body trackers. `AvatarHost` остаётся сменной визуализацией рядом с ним.
+
+Следствия этого разделения:
+
+- локальная камера всегда идёт от HMD/desktop view anchor, а не от head bone аватара;
+- pointers, инструменты, UI-планшет и захваты всегда используют `PresenceRig`, поэтому продолжают
+  работать с абстрактным, статичным, не загруженным или сломанным аватаром;
+- VR tracking передаётся независимо от `avatar_uri`; смена аватара не обрывает позу рук;
+- аватар может потребить произвольное подмножество anchors через simple node mapping, custom
+  non-humanoid applier или humanoid IK;
+- applier сообщает конкретные `consumed anchors` отдельно для first-person, mirror и remote
+  rendering, а клиент рисует нейтральные fallback hands/view markers для остальных точек;
+- `AvatarParameters` остаётся шиной дискретных/анимационных сигналов. Богатая
+  `PresencePose` не раскладывается по ней как набор костей, а приходит в отдельный pose contract.
+
+Так humanoid IK является расширением аватара, а не обязательным условием VR-присутствия.
+
 > **Почему шина живёт на `AvatarHost`, а не на корне аватара.** Хост переживает смену аватара
 > (и приём сетевых параметров во время неё), поэтому держит шину сам и передаёт ссылку корню
 > через `bind`. Для аппликаторов точка входа к состоянию — корень аватара (`get_params()`) или
