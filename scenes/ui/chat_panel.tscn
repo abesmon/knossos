@@ -1,0 +1,31 @@
+[gd_scene format=3]
+
+[node name="Chat" type="VBoxContainer"]
+visible = false
+layout_mode = 1
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = -260.0
+offset_right = 420.0
+offset_bottom = -40.0
+grow_vertical = 0
+theme_override_constants/separation = 4
+
+[node name="Log" type="RichTextLabel" parent="."]
+custom_minimum_size = Vector2(400, 170)
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+scroll_following = true
+selection_enabled = true
+meta_underlined = true
+
+[node name="Input" type="LineEdit" parent="."]
+custom_minimum_size = Vector2(400, 0)
+layout_mode = 2
+placeholder_text = "Сообщение… (Enter)"
+
+[node name="IdleTimer" type="Timer" parent="."]
+wait_time = 30.0
+one_shot = true

@@ -1,113 +1,12 @@
-[gd_scene format=3 uid="uid://c84gpactvtr31"]
+[gd_scene load_steps=3 format=3 uid="uid://c84gpactvtr31"]
 
 [ext_resource type="Script" uid="uid://bnjojsmm0dv7e" path="res://scenes/main.gd" id="1_main"]
-[ext_resource type="PackedScene" uid="uid://bl40q3bqfvck6" path="res://actors/nav_bar/nav_bar.tscn" id="2_0wfyh"]
-[ext_resource type="Texture2D" uid="uid://blgdxhcj1shmn" path="res://resources/passive cursor.png" id="3_jyhfs"]
-[ext_resource type="Texture2D" uid="uid://dv5rurfr64u3l" path="res://resources/active cursor.png" id="4_tbgi4"]
-[ext_resource type="Texture2D" uid="uid://1bfs1oqfeo3q" path="res://resources/ptt.png" id="5_o6xl0"]
-[ext_resource type="Texture2D" uid="uid://5pyyconfej61" path="res://resources/crossed mic.png" id="6_tipki"]
-[ext_resource type="Texture2D" uid="uid://bb3co5wk7j7d8" path="res://resources/mic.png" id="7_85g3d"]
+[ext_resource type="PackedScene" path="res://scenes/ui/main_ui.tscn" id="2_ui"]
 
 [node name="main" type="Node" unique_id=1839757088]
 script = ExtResource("1_main")
 
-[node name="UI" type="Control" parent="." unique_id=1588106917]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-
-[node name="PanelContainer" parent="UI" unique_id=205157812 instance=ExtResource("2_0wfyh")]
+[node name="UI" parent="." instance=ExtResource("2_ui")]
 layout_mode = 1
-
-[node name="PassiveCursor" type="TextureRect" parent="UI" unique_id=2067102728]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -20.0
-offset_top = -20.0
-offset_right = 20.0
-offset_bottom = 20.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("3_jyhfs")
-stretch_mode = 3
-
-[node name="ActiveCursor" type="TextureRect" parent="UI" unique_id=36239878]
-visible = false
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -20.0
-offset_top = -20.0
-offset_right = 20.0
-offset_bottom = 20.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = ExtResource("4_tbgi4")
-stretch_mode = 3
-
-[node name="Indicators" type="HBoxContainer" parent="UI" unique_id=1605577044]
-layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -132.0
-offset_top = -89.94
-offset_right = 132.0
-offset_bottom = -35.940002
-grow_horizontal = 2
-grow_vertical = 0
-alignment = 1
-
-[node name="micoffstack" type="VBoxContainer" parent="UI/Indicators" unique_id=863002340]
-modulate = Color(1, 0, 0, 1)
-layout_mode = 2
-size_flags_vertical = 8
-alignment = 2
-
-[node name="ptt" type="TextureRect" parent="UI/Indicators/micoffstack" unique_id=891782769]
-visible = false
-layout_mode = 2
-size_flags_vertical = 8
-texture = ExtResource("5_o6xl0")
-stretch_mode = 2
-
-[node name="micoff" type="TextureRect" parent="UI/Indicators/micoffstack" unique_id=866248013]
-layout_mode = 2
-size_flags_vertical = 8
-texture = ExtResource("6_tipki")
-stretch_mode = 2
-
-[node name="miconstack" type="VBoxContainer" parent="UI/Indicators" unique_id=1020073395]
-layout_mode = 2
-size_flags_vertical = 8
-alignment = 2
-
-[node name="ptt" type="TextureRect" parent="UI/Indicators/miconstack" unique_id=1067224237]
-visible = false
-layout_mode = 2
-size_flags_vertical = 8
-texture = ExtResource("5_o6xl0")
-stretch_mode = 2
-
-[node name="micon" type="TextureRect" parent="UI/Indicators/miconstack" unique_id=844651703]
-layout_mode = 2
-size_flags_vertical = 8
-texture = ExtResource("7_85g3d")
-stretch_mode = 2
 
 [node name="world" type="Node3D" parent="." unique_id=1830425431]

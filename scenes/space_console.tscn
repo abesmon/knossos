@@ -1,0 +1,111 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/space_console.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="PanelStyle"]
+bg_color = Color(0.09, 0.1, 0.12, 0.97)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.25, 0.27, 0.32, 1)
+
+[sub_resource type="SystemFont" id="MonoFont"]
+font_names = PackedStringArray("Menlo", "Consolas", "DejaVu Sans Mono", "monospace")
+
+[node name="SpaceConsole" type="PanelContainer"]
+visible = false
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.52
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_styles/panel = SubResource("PanelStyle")
+script = ExtResource("1")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="VBox" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Header" type="HBoxContainer" parent="Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Margin/VBox/Header"]
+layout_mode = 2
+text = "Консоль пространства"
+
+[node name="Status" type="Label" parent="Margin/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.62, 0.65, 0.7, 1)
+text = "Правьте блок <vrweb> — наружу уйдёт только дельта · Ctrl/Cmd+S — сохранить · ~ — закрыть"
+clip_text = true
+
+[node name="Cancel" type="Button" parent="Margin/VBox/Header"]
+layout_mode = 2
+text = "Отменить"
+
+[node name="Save" type="Button" parent="Margin/VBox/Header"]
+layout_mode = 2
+text = "Сохранить"
+
+[node name="Flush" type="Button" parent="Margin/VBox/Header"]
+layout_mode = 2
+tooltip_text = "Сохранить накопленную дельту оверлея в саму страницу на её сервере"
+text = "В страницу"
+
+[node name="Split" type="VSplitContainer" parent="Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="PageSection" type="VBoxContainer" parent="Margin/VBox/Split"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Caption" type="Label" parent="Margin/VBox/Split/PageSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.53, 0.58, 1)
+theme_override_font_sizes/font_size = 11
+text = "Страница (процедурный HTML) — только чтение"
+
+[node name="PageView" type="CodeEdit" parent="Margin/VBox/Split/PageSection"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/font_readonly_color = Color(0.55, 0.58, 0.63, 1)
+theme_override_fonts/font = SubResource("MonoFont")
+theme_override_font_sizes/font_size = 13
+editable = false
+scroll_smooth = true
+gutters_draw_line_numbers = true
+indent_size = 2
+
+[node name="SceneSection" type="VBoxContainer" parent="Margin/VBox/Split"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Caption" type="Label" parent="Margin/VBox/Split/SceneSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.53, 0.58, 1)
+theme_override_font_sizes/font_size = 11
+text = "Сцена <vrweb> — страница + эфемерные изменения (единый слой)"
+
+[node name="Editor" type="CodeEdit" parent="Margin/VBox/Split/SceneSection"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_fonts/font = SubResource("MonoFont")
+theme_override_font_sizes/font_size = 13
+scroll_smooth = true
+gutters_draw_line_numbers = true
+indent_size = 2
+
+[node name="AckTimeout" type="Timer" parent="."]
+wait_time = 5.0
+one_shot = true

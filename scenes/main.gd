@@ -5,20 +5,19 @@ extends Node
 ## Связывает сервисы; сам логику трансляции не содержит.
 
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
-const SETTINGS_SCENE := preload("res://scenes/settings.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
-const SPACE_CONSOLE_SCRIPT := preload("res://scripts/space_console.gd")
 
 @onready var _world: Node3D = $world
-@onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/address bar"
+@onready var _ui: MainUI = $UI
+@onready var _address: LineEdit = _ui.address
 # cancel/refresh — одно место в навбаре: во время загрузки виден cancel (прервать),
 # в покое — refresh (перезагрузить). Переключает _set_loading.
-@onready var _cancel: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/cancel"
-@onready var _refresh: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/refresh"
-@onready var _back_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/back_btn"
-@onready var _fwd_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/fwd_btn"
-@onready var _settings_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/settings"
+@onready var _cancel: Button = _ui.cancel
+@onready var _refresh: Button = _ui.refresh
+@onready var _back_btn: Button = _ui.back_button
+@onready var _fwd_btn: Button = _ui.forward_button
+@onready var _settings_btn: Button = _ui.settings_button
 
 var _fetcher: PageFetcher
 # Загрузчик внешних CSS (docs/css-cascade.md). Постоянный (не в _world): стили нужны до
@@ -34,23 +33,23 @@ var _player: Player
 # после _rebuild_world и не возобновилась). Перезапись при следующей навигации освобождает
 # старый — его корутина увидит снесённый контейнер и сама прекратится.
 var _world_gen: WorldGenerator = null
-var _status: Label
+@onready var _status: Label = _ui.status
 # «Светофор» связи слева от строки статуса: цвет = агрегированное состояние WebRTC-связи
 # (NetworkManager.connection_status), тултип — развёрнутый текст. Кружок = Panel с круглым
 # StyleBoxFlat, чей bg_color мы перекрашиваем.
-var _conn_dot: Panel
+@onready var _conn_dot: Panel = _ui.connection_dot
 var _conn_dot_style: StyleBoxFlat
-@onready var _passive_cursor: TextureRect = $UI/PassiveCursor
-@onready var _active_cursor: TextureRect = $UI/ActiveCursor
+@onready var _passive_cursor: TextureRect = _ui.passive_cursor
+@onready var _active_cursor: TextureRect = _ui.active_cursor
 
 # Индикаторы голоса (низ экрана): два стека — «звук идёт» (micon) и «заглушено» (micoff, красный),
 # в каждом — иконка PTT (видна только в режиме push-to-talk) и иконка микрофона. Активный стек
 # выбирается по политике режима, активная иконка «дышит» прозрачностью по силе голоса.
-@onready var _indicators: Control = $UI/Indicators
-@onready var _micon_stack: Control = $UI/Indicators/miconstack
-@onready var _micoff_stack: Control = $UI/Indicators/micoffstack
-@onready var _micon_ptt: CanvasItem = $UI/Indicators/miconstack/ptt
-@onready var _micoff_ptt: CanvasItem = $UI/Indicators/micoffstack/ptt
+@onready var _indicators: Control = _ui.indicators
+@onready var _micon_stack: Control = _ui.mic_on_stack
+@onready var _micoff_stack: Control = _ui.mic_off_stack
+@onready var _micon_ptt: CanvasItem = _ui.mic_on_ptt
+@onready var _micoff_ptt: CanvasItem = _ui.mic_off_ptt
 
 ## Индикатор голоса: не прозрачнее этого, пока есть речь; после SILENCE_HIDE тишины — 0 (исчезает).
 const VOICE_INDICATOR_MIN_ALPHA := 0.25
@@ -75,7 +74,7 @@ var _current_doc: HtmlNode = null
 # по нему консоль сливает страницу с эфемерным оверлеем, а вьюха адресует живые узлы.
 var _vrweb_index: Dictionary = {"found": false, "attrs": {}, "top": [], "nodes": {}}
 # Консоль пространства (клавиша `~`): HTML-репрезентация + редактирование эфемерного слоя.
-var _console: SpaceConsole
+@onready var _console: SpaceConsole = _ui.console
 # Браузерная история: список записей {url, pose} и индекс текущей. Переход назад/вперёд
 # двигает _history_index; новая навигация обрезает «вперёд» и добавляет запись.
 var _history: Array[Dictionary] = []
@@ -91,19 +90,19 @@ var _loading: bool = false
 var _pending_history_push: bool = false
 
 var _image_dialog_open := false   # открыт файловый диалог инструмента размещения (кнопка 3)
-var _settings_overlay: Control
-var _debug_panel: PanelContainer
-var _debug_label: Label
+@onready var _settings_overlay: Control = _ui.settings_overlay
+@onready var _debug_panel: PanelContainer = _ui.debug_panel
+@onready var _debug_label: Label = _ui.debug_label
 var _remote_view: Node3D
-var _chat_root: VBoxContainer
-var _chat_log: RichTextLabel
-var _chat_input: LineEdit
+@onready var _chat_root: VBoxContainer = _ui.chat_root
+@onready var _chat_log: RichTextLabel = _ui.chat_log
+@onready var _chat_input: LineEdit = _ui.chat_input
 # Чат живёт только в RAM: кольцевой буфер последних CHAT_HISTORY_MAX записей, на диск ничего
 # не пишется. Запись = {kind:"user", nick, text} либо {kind:"system", text} (отбивки переходов).
 const CHAT_HISTORY_MAX := 50
 var _chat_history: Array[Dictionary] = []
 # Таймер угасания: в режиме перемещения через 30с после последнего сообщения лог гаснет до 10%.
-var _chat_idle_timer: Timer
+@onready var _chat_idle_timer: Timer = _ui.chat_idle_timer
 var _chat_fade_tween: Tween
 # Захвачена ли мышь (режим перемещения) — определяет вид чата: поле ввода и угасание.
 var _mouse_captured: bool = true
@@ -112,6 +111,7 @@ var _mouse_captured: bool = true
 func _ready() -> void:
 	_setup_environment()
 	_setup_ui_extras()
+	_ui.image_file_chosen.connect(_image_file_chosen)
 
 	_fetcher = PageFetcher.new()
 	add_child(_fetcher)
@@ -792,11 +792,6 @@ func _update_nav_buttons() -> void:
 # --- Мультиплеер ---
 
 func _setup_net() -> void:
-	var ui: Control = $UI
-
-	# Overlay настроек поверх UI, изначально скрыт.
-	_settings_overlay = SETTINGS_SCENE.instantiate()
-	ui.add_child(_settings_overlay)
 	# Закрытие настроек оставляет мышь свободной (UI-режим) — обратно в перемещение
 	# возвращает клик по 3D, а не само закрытие. Поэтому closed здесь ни к чему не цепляем.
 	# «Вернуться домой» с вкладки «Мир» — грузим домашний инстанс.
@@ -810,7 +805,7 @@ func _setup_net() -> void:
 	_settings_btn.pressed.connect(_open_settings)
 	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
 
-	_build_chat_ui(ui)
+	_build_chat_ui(_ui)
 
 	Settings.changed.connect(_on_settings_changed)
 	# Discovery домашнего сервера завершился (в т.ч. после смены адреса в настройках) —
@@ -916,46 +911,19 @@ func _on_connection_changed(online: bool) -> void:
 # --- Чат ---
 
 func _build_chat_ui(ui: Control) -> void:
-	_chat_root = VBoxContainer.new()
-	_chat_root.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_chat_root.offset_left = 8
-	_chat_root.offset_right = 420
-	_chat_root.offset_top = -260
-	_chat_root.offset_bottom = -40   # над строкой статуса
-	_chat_root.add_theme_constant_override("separation", 4)
-
-	_chat_log = RichTextLabel.new()
-	_chat_log.bbcode_enabled = true
-	_chat_log.scroll_active = true
-	_chat_log.scroll_following = true
-	_chat_log.custom_minimum_size = Vector2(400, 170)
 	# Текст можно выделять мышью и копировать (Ctrl/Cmd+C). Для этого лог должен принимать
 	# события мыши (не IGNORE) — заодно это включает клики по ссылкам ниже.
-	_chat_log.selection_enabled = true
 	# Ссылки в сообщениях ([url]…[/url], см. _linkify) подчёркиваем и делаем кликабельными;
 	# meta_clicked отдаёт href в _on_chat_meta_clicked для перехода/внешнего открытия.
 	_chat_log.meta_underlined = true
 	_chat_log.meta_clicked.connect(_on_chat_meta_clicked)
-	_chat_root.add_child(_chat_log)
-
-	_chat_input = LineEdit.new()
-	_chat_input.placeholder_text = "Сообщение… (Enter)"
-	_chat_input.custom_minimum_size = Vector2(400, 0)
 	_chat_input.max_length = NetworkManager.MAX_CHAT_CHARS   # не ввести больше лимита
 	_chat_input.text_submitted.connect(_on_chat_submitted)
 	_chat_input.focus_entered.connect(func(): _player.capture_mouse(false))
-	_chat_root.add_child(_chat_input)
-
-	ui.add_child(_chat_root)
-	_chat_root.visible = false
 
 	# Таймер бездействия: в режиме перемещения через 30с после последнего сообщения лог
 	# плавно угасает до 10% непрозрачности, чтобы не мешать обзору (см. _on_chat_idle_timeout).
-	_chat_idle_timer = Timer.new()
-	_chat_idle_timer.one_shot = true
-	_chat_idle_timer.wait_time = 30.0
 	_chat_idle_timer.timeout.connect(_on_chat_idle_timeout)
-	add_child(_chat_idle_timer)
 
 
 func _on_chat_submitted(text: String) -> void:
@@ -1129,7 +1097,6 @@ func _setup_environment() -> void:
 
 
 func _setup_ui_extras() -> void:
-	var ui: Control = $UI
 	# Прицел по центру экрана. В сцене лежат две готовые картинки: пассивная и активная.
 	_passive_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_active_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1137,67 +1104,21 @@ func _setup_ui_extras() -> void:
 
 	# «Светофор» связи — маленький кружок слева от строки статуса. MOUSE_FILTER_PASS, чтобы
 	# показывался тултип с развёрнутым статусом, но клики уходили сквозь него.
-	_conn_dot = Panel.new()
-	_conn_dot_style = StyleBoxFlat.new()
-	_conn_dot_style.set_corner_radius_all(6)
+	_conn_dot_style = _conn_dot.get_theme_stylebox("panel").duplicate()
 	_conn_dot.add_theme_stylebox_override("panel", _conn_dot_style)
-	_conn_dot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_conn_dot.offset_left = 8
-	_conn_dot.offset_right = 20
-	_conn_dot.offset_top = -26
-	_conn_dot.offset_bottom = -14
-	_conn_dot.mouse_filter = Control.MOUSE_FILTER_PASS
-	ui.add_child(_conn_dot)
-
-	# Строка статуса внизу (сдвинута вправо, чтобы освободить место под «светофор»).
-	_status = Label.new()
-	_status.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_status.offset_left = 28
-	_status.offset_bottom = -8
-	_status.offset_top = -32
-	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(_status)
 
 	NetworkManager.net_status_changed.connect(_update_conn_indicator)
 	_update_conn_indicator()
 
-	_build_debug_overlay(ui)
-
 	# Консоль пространства (`~`, см. docs/space-console.md): read-only часть — хранимое дерево
 	# страницы БЕЗ блока <vrweb>; редактируемая — единый слитый слой сцены, который консоль
 	# собирает сама из индекса vrweb и эфемерного состояния NetworkManager.
-	_console = SPACE_CONSOLE_SCRIPT.new()
 	_console.setup(_page_html_sans_vrweb, func() -> Dictionary: return _vrweb_index,
 		func() -> String: return _current_url)
-	ui.add_child(_console)
 
 
 ## Оверлей инспектора провенанса (F3): панель в правом верхнем углу с типом топологии и
 ## исходным HTML узла под прицелом. Текст приходит от Player.debug_probed.
-func _build_debug_overlay(ui: Control) -> void:
-	_debug_panel = PanelContainer.new()
-	_debug_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_debug_panel.offset_left = -468
-	_debug_panel.offset_right = -8
-	_debug_panel.offset_top = 8
-	_debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_debug_panel.visible = false
-
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 8)
-	_debug_panel.add_child(margin)
-
-	_debug_label = Label.new()
-	_debug_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_debug_label.custom_minimum_size = Vector2(444, 0)
-	_debug_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_debug_label.add_theme_font_size_override("font_size", 13)
-	margin.add_child(_debug_label)
-
-	ui.add_child(_debug_panel)
-
-
 func _on_debug_toggled(on: bool) -> void:
 	if _debug_panel != null:
 		_debug_panel.visible = on
@@ -1230,21 +1151,8 @@ func _on_image_pick_requested(filters: PackedStringArray) -> void:
 			func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
 				_image_file_chosen(ok and not paths.is_empty(), paths[0] if not paths.is_empty() else ""))
 		return
-	# Fallback без нативного диалога ОС: встроенный FileDialog с доступом к ФС.
-	var dlg := FileDialog.new()
-	dlg.access = FileDialog.ACCESS_FILESYSTEM
-	dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dlg.filters = filters
-	dlg.title = "Разместить изображение"
-	dlg.file_selected.connect(func(path: String) -> void:
-		_image_file_chosen(true, path))
-	dlg.canceled.connect(func() -> void:
-		_image_file_chosen(false, ""))
-	dlg.visibility_changed.connect(func() -> void:
-		if not dlg.visible:
-			dlg.queue_free())
-	add_child(dlg)
-	dlg.popup_centered_ratio(0.6)
+	# Fallback без нативного диалога ОС принадлежит MainUI, а не сцене мира.
+	_ui.open_image_dialog(filters)
 
 
 ## Файл выбран (или диалог отменён): вернуть захват мыши и отдать результат инструменту.
