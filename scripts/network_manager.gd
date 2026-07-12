@@ -43,6 +43,8 @@ signal identity_verified(id: int, address: String)
 ## Транспорт и heartbeat-таймкод идут одним сигналом; различаются по action.
 signal replicated_state_received(object_id: String, schema_id: String, state: Dictionary, changed: Dictionary, revision: int)
 signal replicated_sample_received(sender_id: int, object_id: String, schema_id: String, sample: Dictionary)
+## Итог команды для инициатора. ACK не несёт состояние: canonical результат приходит DELTA.
+signal replicated_command_result(request_id: int, accepted: bool, code: String, revision: int)
 ## online — есть ли активное подключение к сигнальному серверу.
 signal connection_changed(online: bool)
 ## Сменилось агрегированное состояние связи (см. ConnStatus / connection_status()). Эмитится
@@ -82,6 +84,14 @@ signal scene_action_acked(token: int, accepted: bool)
 ## (лог, бабл) не отрисовывалось больше.
 const MAX_CHAT_CHARS := 280
 const MAX_REPLICATED_COMMANDS_PER_SECOND := 30
+const MAX_REPLICATED_COMMAND_BYTES := 16 * 1024
+const MAX_REPLICATED_DELTA_BYTES := 16 * 1024
+const MAX_REPLICATED_SAMPLE_BYTES := 4 * 1024
+const MAX_REPLICATED_SNAPSHOT_BYTES := 1024 * 1024
+const REPLICATED_SNAPSHOT_CHUNK_BYTES := 32 * 1024
+const REPLICATED_SNAPSHOT_CHUNKS_PER_FRAME := 4
+const REPLICATED_SNAPSHOT_TIMEOUT_MS := 10_000
+const REPLICATED_COMMAND_TIMEOUT_MS := 5_000
 
 ## Ранг по умолчанию для тех, кого нет в таблице. Чем МЕНЬШЕ ранг — тем больше прав (0 ≈ админ),
 ## поэтому дефолт берём заведомо «далеко от нуля» — практически без прав. См. docs/ranks.md.
@@ -174,6 +184,13 @@ var _scene := SceneChanges.new()  # машина состояний эфемер
 var _replicated := ReplicatedStateStore.new()
 var _replicated_resync := false
 var _replicated_command_rates := {} # peer_id -> {second, count}
+var _replicated_request_seq := 0
+var _replicated_pending_commands := {} # request_id -> {deadline, authority}
+var _replicated_command_seen := {} # "peer:request" -> ACK (dedupe в рамках комнаты)
+var _replicated_snapshot_seq := 0
+var _replicated_snapshot_rx := {} # один атомарно собираемый transfer
+var _replicated_metrics := {}
+var _replicated_metrics_started_ms := 0
 # Зарезервированные id (узлы vrweb-слоя ТЕКУЩЕЙ страницы): add с таким id отклоняется —
 # анти-коллизия дедупликации персистенции (см. docs/page-persistence.md). Ставит main
 # после индексации страницы; переживает пересоздание _scene при смене комнаты.
@@ -415,7 +432,7 @@ func _on_mp_peer_connected(id: int) -> void:
 		_nlog("я АВТОРИТЕТ -> push snapshot новичку peer=%d (objects=%d)" % [id, _scene.objects().size()])
 		rpc_id(id, "_recv_ranks", _ranks)
 		rpc_id(id, "_recv_scene_snapshot", _scene.snapshot())
-		rpc_id(id, "_recv_replicated_snapshot", _replicated.snapshot())
+		_queue_replicated_snapshot(id)
 	# Недокачанные блобы спрашиваем у новичка адресно: он мог принести байты, которых нет
 	# ни у кого из старожилов (например, автор переподключился). См. docs/network/realtime-resources.md.
 	if _can_rpc():
@@ -453,9 +470,9 @@ func unregister_replicated_schema(schema_id: String) -> void:
 func register_replicated_object(object_id: String, schema_id: String, initial: Dictionary = {},
 		owner_user_id: String = "") -> bool:
 	var ok := _replicated.ensure_object(object_id, schema_id, initial, owner_user_id)
-	if ok and not has_authority() and authority_id() != 0 and _can_rpc():
+	if ok and not _replicated_resync and not has_authority() and authority_id() != 0 and _can_rpc():
 		_replicated_resync = true
-		rpc_id(authority_id(), "_request_replicated_snapshot")
+		_request_replicated_snapshot_from_authority()
 	return ok
 
 
@@ -472,25 +489,76 @@ func replicated_revision(object_id: String, schema_id: String) -> int:
 	return _replicated.revision_of(object_id, schema_id)
 
 
+func replicated_metrics() -> Dictionary:
+	var result := _replicated_metrics.duplicate(true)
+	var elapsed := maxf(0.001, (Time.get_ticks_msec() - _replicated_metrics_started_ms) / 1000.0)
+	var sent := int(result.get("command_sent_bytes", 0)) + int(result.get("delta_sent_bytes", 0)) \
+			+ int(result.get("sample_sent_bytes", 0)) + int(result.get("snapshot_sent_bytes", 0))
+	var received := int(result.get("command_received_bytes", 0)) + int(result.get("delta_received_bytes", 0)) \
+			+ int(result.get("sample_received_bytes", 0)) + int(result.get("snapshot_applied_bytes", 0))
+	result["elapsed_seconds"] = elapsed
+	result["sent_bytes_per_second"] = sent / elapsed
+	result["received_bytes_per_second"] = received / elapsed
+	return result
+
+
+func reset_replicated_metrics() -> void:
+	_replicated_metrics.clear()
+	_replicated_metrics_started_ms = Time.get_ticks_msec()
+
+
 func request_replicated_command(object_id: String, schema_id: String, version: int,
-		command: String, args: Dictionary) -> void:
+		command: String, args: Dictionary) -> int:
+	_replicated_request_seq += 1
+	var request_id := _replicated_request_seq
+	var envelope := {"request_id": request_id, "object_id": object_id, "schema_id": schema_id,
+		"version": version, "command": command, "args": args}
+	if var_to_bytes(envelope).size() > MAX_REPLICATED_COMMAND_BYTES:
+		_metric("command_rejected_too_large")
+		call_deferred("_emit_replicated_command_result", request_id, false, "too_large", -1)
+		return request_id
+	_replicated_pending_commands[request_id] = {
+		"deadline": Time.get_ticks_msec() + REPLICATED_COMMAND_TIMEOUT_MS,
+		"authority": authority_id(),
+	}
+	_metric("command_sent_count")
+	_metric("command_sent_bytes", var_to_bytes(envelope).size())
+	_metric_max("command_max_bytes", var_to_bytes(envelope).size())
 	if has_authority():
-		_commit_replicated_command(object_id, schema_id, version, command, args, _my_id)
+		_commit_replicated_command(request_id, object_id, schema_id, version, command, args, _my_id)
 	elif _can_rpc() and authority_id() != 0:
-		rpc_id(authority_id(), "_recv_replicated_command", object_id, schema_id, version, command, args)
+		rpc_id(authority_id(), "_recv_replicated_command", request_id, object_id, schema_id, version, command, args)
+	else:
+		call_deferred("_emit_replicated_command_result", request_id, false, "authority_changed", -1)
+	return request_id
 
 
 func send_replicated_sample(object_id: String, schema_id: String, version: int, sample: Dictionary) -> void:
-	if not has_authority() or not _replicated.validate_sample(object_id, schema_id, version, sample):
+	var bytes := var_to_bytes(sample).size()
+	if not has_authority() or bytes > MAX_REPLICATED_SAMPLE_BYTES \
+			or not _replicated.validate_sample(object_id, schema_id, version, sample):
+		_metric("sample_rejected_count")
 		return
+	_metric("sample_sent_count")
+	_metric("sample_sent_bytes", bytes)
+	_metric_max("sample_max_bytes", bytes)
 	replicated_sample_received.emit(_my_id, object_id, schema_id, sample.duplicate(true))
 	if _can_rpc():
 		rpc("_recv_replicated_sample", object_id, schema_id, version, sample)
 
 
-func _commit_replicated_command(object_id: String, schema_id: String, version: int,
+func _commit_replicated_command(request_id: int, object_id: String, schema_id: String, version: int,
 		command: String, args: Dictionary, sender: int) -> void:
-	if not has_authority() or not _allow_replicated_command(sender):
+	if not has_authority():
+		_send_replicated_ack(sender, request_id, false, "authority_changed", -1)
+		return
+	var seen_key := "%d:%d" % [sender, request_id]
+	if _replicated_command_seen.has(seen_key):
+		var old: Dictionary = _replicated_command_seen[seen_key]
+		_send_replicated_ack(sender, request_id, old["accepted"], old["code"], old["revision"])
+		return
+	if not _allow_replicated_command(sender):
+		_finish_replicated_command(sender, seen_key, request_id, false, "rate_limited", -1)
 		return
 	var context := {
 		"peer_id": sender,
@@ -501,8 +569,52 @@ func _commit_replicated_command(object_id: String, schema_id: String, version: i
 		"authority_msec": Time.get_ticks_msec(),
 	}
 	var result := _replicated.commit_command(object_id, schema_id, version, command, args, context)
-	if bool(result.get("ok", false)) and _can_rpc():
-		rpc("_recv_replicated_delta", result["delta"])
+	if not bool(result.get("ok", false)):
+		_finish_replicated_command(sender, seen_key, request_id, false,
+				_normalize_replicated_error(str(result.get("error", "internal_error"))), -1)
+		return
+	var delta: Dictionary = result["delta"]
+	var revision := int(delta["revision"])
+	_metric("command_accepted_count")
+	_metric("delta_sent_count")
+	_metric("delta_sent_bytes", var_to_bytes(delta).size())
+	_metric_max("delta_max_bytes", var_to_bytes(delta).size())
+	if _can_rpc():
+		rpc("_recv_replicated_delta", delta)
+	_finish_replicated_command(sender, seen_key, request_id, true, "accepted", revision)
+
+
+func _finish_replicated_command(sender: int, seen_key: String, request_id: int,
+		accepted: bool, code: String, revision: int) -> void:
+	_replicated_command_seen[seen_key] = {"accepted": accepted, "code": code, "revision": revision}
+	if not accepted:
+		_metric("command_rejected_count")
+		_metric("command_rejected_" + code)
+	_send_replicated_ack(sender, request_id, accepted, code, revision)
+
+
+func _send_replicated_ack(sender: int, request_id: int, accepted: bool, code: String, revision: int) -> void:
+	_metric("ack_sent_count")
+	if sender == _my_id:
+		call_deferred("_emit_replicated_command_result", request_id, accepted, code, revision)
+	elif _can_rpc() and _connected_peers.has(sender):
+		rpc_id(sender, "_recv_replicated_ack", request_id, accepted, code, revision)
+
+
+func _emit_replicated_command_result(request_id: int, accepted: bool, code: String, revision: int) -> void:
+	_replicated_pending_commands.erase(request_id)
+	_metric("ack_received_count")
+	replicated_command_result.emit(request_id, accepted, code, revision)
+
+
+func _normalize_replicated_error(code: String) -> String:
+	match code:
+		"access_denied", "invalid_args", "unknown_object", "unknown_command", "schema_version", "too_large":
+			return code
+		"rejected", "invalid_patch":
+			return "invalid_state"
+		_:
+			return "internal_error"
 
 
 func _allow_replicated_command(sender: int) -> bool:
@@ -513,6 +625,40 @@ func _allow_replicated_command(sender: int) -> bool:
 	rate["count"] = int(rate["count"]) + 1
 	_replicated_command_rates[sender] = rate
 	return int(rate["count"]) <= MAX_REPLICATED_COMMANDS_PER_SECOND
+
+
+func _metric(name: String, amount: int = 1) -> void:
+	if _replicated_metrics_started_ms == 0:
+		_replicated_metrics_started_ms = Time.get_ticks_msec()
+	_replicated_metrics[name] = int(_replicated_metrics.get(name, 0)) + amount
+
+
+func _metric_max(name: String, value: int) -> void:
+	_replicated_metrics[name] = maxi(int(_replicated_metrics.get(name, 0)), value)
+
+
+func _fail_replicated_pending(code: String) -> void:
+	for request_id in _replicated_pending_commands.keys():
+		_emit_replicated_command_result(int(request_id), false, code, -1)
+
+
+func _replicated_tick() -> void:
+	var now := Time.get_ticks_msec()
+	for request_id in _replicated_pending_commands.keys():
+		if now >= int((_replicated_pending_commands[request_id] as Dictionary)["deadline"]):
+			_metric("command_timeout_count")
+			_emit_replicated_command_result(int(request_id), false, "timeout", -1)
+	if not _replicated_snapshot_rx.is_empty() \
+			and now >= int(_replicated_snapshot_rx.get("deadline", 0)):
+		_metric("snapshot_timeout_count")
+		_replicated_snapshot_rx.clear()
+		_request_replicated_snapshot_from_authority()
+
+
+func _request_replicated_snapshot_from_authority() -> void:
+	if _can_rpc() and authority_id() != 0 and not has_authority():
+		_metric("resync_requested_count")
+		rpc_id(authority_id(), "_request_replicated_snapshot")
 
 
 ## Разослать голосовой кадр (закодированный VoiceCodec). Ненадёжно и по отдельному каналу 1,
@@ -595,6 +741,9 @@ func is_timekeeper() -> bool:
 func _refresh_authority() -> void:
 	var a := authority_id()
 	if a != _authority:
+		if _authority != 0:
+			_fail_replicated_pending("authority_changed")
+		_replicated_snapshot_rx.clear()
 		_nlog("AUTHORITY %d -> %d (my_id=%d my_seq=%d, connected=%s, seqs=%s, я_авторитет=%s)" % [
 			_authority, a, _my_id, _my_seq, str(_connected_peers.keys()), str(_peer_seqs),
 			str(a != 0 and a == _my_id)])
@@ -619,8 +768,9 @@ func _refresh_authority() -> void:
 			rpc_id(a, "_request_ranks")
 			_scene_resync = true
 			rpc_id(a, "_request_scene_snapshot")
-			_replicated_resync = true
-			rpc_id(a, "_request_replicated_snapshot")
+			if not _replicated_resync:
+				_replicated_resync = true
+				_request_replicated_snapshot_from_authority()
 
 
 # --- Ранги (таблица user_id -> rank; владелец — авторитет). См. docs/ranks.md. ---
@@ -1053,6 +1203,7 @@ func _can_rpc() -> bool:
 
 func _process(_delta: float) -> void:
 	_poll_net_status(_delta)
+	_replicated_tick()
 	if _ws == null:
 		return
 	_ws.poll()
@@ -1221,6 +1372,9 @@ func _teardown_mesh() -> void:
 	_replicated.reset_session()
 	_replicated_resync = false
 	_replicated_command_rates.clear()
+	_replicated_command_seen.clear()
+	_fail_replicated_pending("authority_changed")
+	_replicated_snapshot_rx.clear()
 	scene_reset.emit()
 	if _mesh != null:
 		if multiplayer.multiplayer_peer == _mesh:
@@ -1435,40 +1589,167 @@ func _request_ranks() -> void:
 
 
 @rpc("any_peer", "reliable", "call_remote")
-func _recv_replicated_command(object_id: String, schema_id: String, version: int,
+func _recv_replicated_command(request_id: int, object_id: String, schema_id: String, version: int,
 		command: String, args: Dictionary) -> void:
-	_commit_replicated_command(object_id, schema_id, version, command, args,
-			multiplayer.get_remote_sender_id())
+	var sender := multiplayer.get_remote_sender_id()
+	var envelope := {"request_id": request_id, "object_id": object_id, "schema_id": schema_id,
+		"version": version, "command": command, "args": args}
+	var bytes := var_to_bytes(envelope).size()
+	_metric("command_received_count")
+	_metric("command_received_bytes", bytes)
+	_metric_max("command_max_bytes", bytes)
+	if bytes > MAX_REPLICATED_COMMAND_BYTES:
+		_send_replicated_ack(sender, request_id, false, "too_large", -1)
+		return
+	_commit_replicated_command(request_id, object_id, schema_id, version, command, args, sender)
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_replicated_ack(request_id: int, accepted: bool, code: String, revision: int) -> void:
+	if not sender_is_authority() or not _replicated_pending_commands.has(request_id):
+		return
+	_emit_replicated_command_result(request_id, accepted, code, revision)
 
 
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_replicated_delta(delta: Dictionary) -> void:
 	if not sender_is_authority():
 		return
+	var bytes := var_to_bytes(delta).size()
+	_metric("delta_received_count")
+	_metric("delta_received_bytes", bytes)
+	_metric_max("delta_max_bytes", bytes)
+	if bytes > MAX_REPLICATED_DELTA_BYTES:
+		_metric("delta_invalid_count")
+		return
 	var status := _replicated.apply_delta(delta)
+	_metric("delta_" + status + "_count")
 	if status == "gap" and not _replicated_resync and _can_rpc() and authority_id() != 0:
 		_replicated_resync = true
-		rpc_id(authority_id(), "_request_replicated_snapshot")
+		_request_replicated_snapshot_from_authority()
 
 
 @rpc("any_peer", "reliable", "call_remote")
-func _recv_replicated_snapshot(snapshot: Dictionary) -> void:
-	if not sender_is_authority():
+func _recv_replicated_snapshot_begin(transfer_id: int, total_bytes: int, chunks: int,
+		hash: PackedByteArray) -> void:
+	if not sender_is_authority() or transfer_id <= 0 or total_bytes <= 0 \
+			or total_bytes > MAX_REPLICATED_SNAPSHOT_BYTES or chunks <= 0 \
+			or chunks != ceili(float(total_bytes) / REPLICATED_SNAPSHOT_CHUNK_BYTES) \
+			or hash.size() != 32:
+		_metric("snapshot_begin_invalid_count")
 		return
-	if _replicated.apply_snapshot(snapshot):
-		_replicated_resync = false
+	var parts: Array[PackedByteArray] = []
+	parts.resize(chunks)
+	_replicated_snapshot_rx = {"id": transfer_id, "sender": multiplayer.get_remote_sender_id(),
+		"total": total_bytes, "count": chunks, "hash": hash, "parts": parts, "received": 0,
+		"deadline": Time.get_ticks_msec() + REPLICATED_SNAPSHOT_TIMEOUT_MS,
+		"started": Time.get_ticks_msec()}
+	_metric("snapshot_begin_count")
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_replicated_snapshot_chunk(transfer_id: int, index: int, bytes: PackedByteArray) -> void:
+	if not sender_is_authority() or _replicated_snapshot_rx.is_empty() \
+			or transfer_id != int(_replicated_snapshot_rx.get("id", 0)) \
+			or index < 0 or index >= int(_replicated_snapshot_rx["count"]) \
+			or bytes.is_empty() or bytes.size() > REPLICATED_SNAPSHOT_CHUNK_BYTES:
+		_metric("snapshot_chunk_invalid_count")
+		return
+	var parts: Array = _replicated_snapshot_rx["parts"]
+	if (parts[index] as PackedByteArray).is_empty():
+		parts[index] = bytes
+		_replicated_snapshot_rx["received"] = int(_replicated_snapshot_rx["received"]) + 1
+		_replicated_snapshot_rx["deadline"] = Time.get_ticks_msec() + REPLICATED_SNAPSHOT_TIMEOUT_MS
+		_metric("snapshot_chunk_received_count")
+		_metric("snapshot_chunk_received_bytes", bytes.size())
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_replicated_snapshot_end(transfer_id: int) -> void:
+	if not sender_is_authority() or _replicated_snapshot_rx.is_empty() \
+			or transfer_id != int(_replicated_snapshot_rx.get("id", 0)):
+		return
+	var rx := _replicated_snapshot_rx
+	_replicated_snapshot_rx = {}
+	if int(rx["received"]) != int(rx["count"]):
+		_metric("snapshot_incomplete_count")
+		_request_replicated_snapshot_from_authority()
+		return
+	var bytes := PackedByteArray()
+	for part in rx["parts"]:
+		bytes.append_array(part)
+	if bytes.size() != int(rx["total"]) or _replicated_sha256(bytes) != rx["hash"]:
+		_metric("snapshot_hash_failed_count")
+		_request_replicated_snapshot_from_authority()
+		return
+	var decoded = bytes_to_var(bytes)
+	if typeof(decoded) != TYPE_DICTIONARY or not _replicated.apply_snapshot(decoded):
+		_metric("snapshot_format_failed_count")
+		_request_replicated_snapshot_from_authority()
+		return
+	_replicated_resync = false
+	_metric("snapshot_applied_count")
+	_metric("snapshot_applied_bytes", bytes.size())
+	_replicated_metrics["snapshot_last_bytes"] = bytes.size()
+	_replicated_metrics["snapshot_last_chunks"] = int(rx["count"])
+	_replicated_metrics["snapshot_last_apply_msec"] = Time.get_ticks_msec() - int(rx["started"])
 
 
 @rpc("any_peer", "reliable", "call_remote")
 func _request_replicated_snapshot() -> void:
 	if has_authority() and _can_rpc():
-		rpc_id(multiplayer.get_remote_sender_id(), "_recv_replicated_snapshot", _replicated.snapshot())
+		_queue_replicated_snapshot(multiplayer.get_remote_sender_id())
+
+
+func _queue_replicated_snapshot(to: int) -> void:
+	if has_authority() and _can_rpc() and _connected_peers.has(to):
+		_send_replicated_snapshot(to)
+
+
+func _send_replicated_snapshot(to: int) -> void:
+	var bytes := var_to_bytes(_replicated.snapshot())
+	if bytes.is_empty() or bytes.size() > MAX_REPLICATED_SNAPSHOT_BYTES:
+		_metric("snapshot_rejected_too_large_count")
+		return
+	_replicated_snapshot_seq += 1
+	var transfer_id := _replicated_snapshot_seq
+	var chunks := ceili(float(bytes.size()) / REPLICATED_SNAPSHOT_CHUNK_BYTES)
+	_metric("snapshot_sent_count")
+	_metric("snapshot_sent_bytes", bytes.size())
+	_metric_max("snapshot_max_bytes", bytes.size())
+	rpc_id(to, "_recv_replicated_snapshot_begin", transfer_id, bytes.size(), chunks, _replicated_sha256(bytes))
+	for index in range(chunks):
+		if not has_authority() or not _can_rpc() or not _connected_peers.has(to):
+			_metric("snapshot_send_cancelled_count")
+			return
+		var begin := index * REPLICATED_SNAPSHOT_CHUNK_BYTES
+		rpc_id(to, "_recv_replicated_snapshot_chunk", transfer_id, index,
+				bytes.slice(begin, mini(begin + REPLICATED_SNAPSHOT_CHUNK_BYTES, bytes.size())))
+		_metric("snapshot_chunk_sent_count")
+		if (index + 1) % REPLICATED_SNAPSHOT_CHUNKS_PER_FRAME == 0:
+			await get_tree().process_frame
+	if has_authority() and _can_rpc() and _connected_peers.has(to):
+		rpc_id(to, "_recv_replicated_snapshot_end", transfer_id)
+
+
+func _replicated_sha256(bytes: PackedByteArray) -> PackedByteArray:
+	var hashing := HashingContext.new()
+	if hashing.start(HashingContext.HASH_SHA256) != OK:
+		return PackedByteArray()
+	hashing.update(bytes)
+	return hashing.finish()
 
 
 @rpc("any_peer", "unreliable_ordered", "call_remote")
 func _recv_replicated_sample(object_id: String, schema_id: String, version: int, sample: Dictionary) -> void:
-	if not sender_is_authority() or not _replicated.validate_sample(object_id, schema_id, version, sample):
+	var bytes := var_to_bytes(sample).size()
+	if not sender_is_authority() or bytes > MAX_REPLICATED_SAMPLE_BYTES \
+			or not _replicated.validate_sample(object_id, schema_id, version, sample):
+		_metric("sample_rejected_count")
 		return
+	_metric("sample_received_count")
+	_metric("sample_received_bytes", bytes)
+	_metric_max("sample_max_bytes", bytes)
 	replicated_sample_received.emit(multiplayer.get_remote_sender_id(), object_id, schema_id, sample)
 
 

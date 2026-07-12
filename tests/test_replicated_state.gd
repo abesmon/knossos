@@ -10,6 +10,8 @@ func _initialize() -> void:
 	_test_access_rules()
 	_test_command_delta_and_snapshot()
 	_test_validation_and_gap()
+	_test_size_budgets()
+	_test_state_switch_consumer()
 	quit(1 if _failed else 0)
 
 
@@ -35,6 +37,55 @@ func _reduce_set(_state: Dictionary, args: Dictionary, _context: Dictionary) -> 
 	if typeof(args.get("value")) not in [TYPE_FLOAT, TYPE_INT]:
 		return {}
 	return {"value": float(args["value"]), "enabled": true}
+
+
+func _reduce_payload(_state: Dictionary, args: Dictionary, _context: Dictionary) -> Dictionary:
+	return args.duplicate()
+
+
+func _test_size_budgets() -> void:
+	var store := ReplicatedStateStore.new()
+	var schema := {
+		"version": 1,
+		"fields": {
+			"p0": {"type": "string", "default": "", "max_bytes": 4096},
+			"p1": {"type": "string", "default": "", "max_bytes": 4096},
+			"p2": {"type": "string", "default": "", "max_bytes": 4096},
+			"p3": {"type": "string", "default": "", "max_bytes": 4096},
+			"p4": {"type": "string", "default": "", "max_bytes": 4096},
+		},
+		"default_write_rule": "authority",
+		"commands": {"set": {"reducer": Callable(self, "_reduce_payload")}},
+	}
+	_eq(store.register_schema("large", schema), true, "large schema registered")
+	var large_patch := {}
+	for i in range(5): large_patch["p%d" % i] = "x".repeat(3500)
+	_eq(store.ensure_object("oversized", "large", large_patch), false,
+			"oversized initial object rejected")
+	_eq(store.ensure_object("normal", "large"), true, "normal object accepted")
+	store.begin_authority()
+	var result := store.commit_command("normal", "large", 1, "set",
+			large_patch, {"is_authority": true})
+	_eq(result.get("error"), "too_large", "oversized resulting object rejected atomically")
+	_eq(str(store.state_of("normal", "large")["p0"]), "", "oversized patch did not mutate state")
+
+
+func _test_state_switch_consumer() -> void:
+	var store := ReplicatedStateStore.new()
+	_eq(store.register_schema(StateSwitchSchema.ID, StateSwitchSchema.definition(100)), true,
+			"state switch schema registered")
+	_eq(store.ensure_object("lamp", StateSwitchSchema.ID), true, "state switch object registered")
+	store.begin_authority()
+	var context := {"rank": 100, "is_authority": false}
+	var on := store.commit_command("lamp", StateSwitchSchema.ID, StateSwitchSchema.VERSION,
+			"toggle", {}, context)
+	_eq(on.get("ok"), true, "state switch toggled on")
+	_eq(store.state_of("lamp", StateSwitchSchema.ID)["enabled"], true, "enabled=true")
+	var off := store.commit_command("lamp", StateSwitchSchema.ID, StateSwitchSchema.VERSION,
+			"toggle", {}, context)
+	_eq(off.get("ok"), true, "state switch toggled off")
+	_eq(store.state_of("lamp", StateSwitchSchema.ID)["enabled"], false, "enabled=false")
+	_eq(int(off["delta"]["revision"]), 2, "second consumer uses generic revision")
 
 
 func _test_access_rules() -> void:

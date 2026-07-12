@@ -10,6 +10,7 @@ const HB_INTERVAL := 0.66
 
 var _players: Dictionary = {} # id -> VrwebVideoPlayer
 var _revisions: Dictionary = {} # id -> canonical revision
+var _pending_commands: Dictionary = {} # request_id -> player id (для rollback по ACK)
 var _hb_accum := 0.0
 
 
@@ -18,6 +19,7 @@ func _ready() -> void:
 			VideoStateSchema.definition(NetworkManager.DEFAULT_RANK))
 	NetworkManager.replicated_state_received.connect(_on_replicated_state)
 	NetworkManager.replicated_sample_received.connect(_on_replicated_sample)
+	NetworkManager.replicated_command_result.connect(_on_command_result)
 	NetworkManager.authority_changed.connect(_on_authority_changed)
 
 
@@ -80,11 +82,29 @@ func _bind_screen(screen: VrwebVideoScreen) -> void:
 func _on_local_transport(action: String, position: float, id: String) -> void:
 	match action:
 		"play", "pause":
-			NetworkManager.request_replicated_command(id, SCHEMA_ID, SCHEMA_VERSION,
+			var request_id := NetworkManager.request_replicated_command(id, SCHEMA_ID, SCHEMA_VERSION,
 					"set_playing", {"playing": action == "play", "position": position})
+			if NetworkManager.in_room(): _pending_commands[request_id] = id
 		"seek":
-			NetworkManager.request_replicated_command(id, SCHEMA_ID, SCHEMA_VERSION,
+			var request_id := NetworkManager.request_replicated_command(id, SCHEMA_ID, SCHEMA_VERSION,
 					"seek", {"position": position})
+			if NetworkManager.in_room(): _pending_commands[request_id] = id
+
+
+func _on_command_result(request_id: int, accepted: bool, code: String, _revision: int) -> void:
+	if not _pending_commands.has(request_id):
+		return
+	var id: String = _pending_commands[request_id]
+	_pending_commands.erase(request_id)
+	if accepted:
+		return
+	Log.warn("video", "команда транспорта %s отклонена: %s" % [id, code])
+	# UI применяет действие optimistic. При отказе возвращаем плеер к canonical Store.
+	var state := NetworkManager.replicated_state(id, SCHEMA_ID)
+	var player: VrwebVideoPlayer = _players.get(id)
+	if player != null and not state.is_empty():
+		player.apply_remote("play" if bool(state.get("playing", false)) else "pause",
+				float(state.get("anchor_position", 0.0)))
 
 
 func _on_replicated_state(object_id: String, schema_id: String, state: Dictionary,

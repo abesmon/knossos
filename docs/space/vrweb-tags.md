@@ -226,6 +226,18 @@ autoplay не сработал бы сам. Клиент это учитывае
 
 ---
 
+### `<VRWebStateSwitch>` — общий переключатель
+
+```html
+<VRWebStateSwitch id="demo-light" transform="..."/>
+```
+
+Кликабельная кнопка с красной/зелёной лампой и минимальный пример Replicated State. `id`
+обязан быть детерминированным и одинаковым у клиентов страницы. Состояние — один `bool`,
+команда — `toggle`; late join получает цвет snapshot’ом. Демонстрация:
+`vrwebresource://state_switch.html`, подробности — в
+[state-switch-demo.md](../client/state-switch-demo.md).
+
 ### `<VRWebImage>` — картинка, размещённая в мире
 
 Квад с текстурой, якорь **центром** в своей точке (в отличие от `<img>` HTML-слоя, который
@@ -278,7 +290,7 @@ HTML-картинка ([actors/image_panel/image_panel.gd](../../actors/image_pa
 | Файл | Роль |
 |---|---|
 | [scripts/html_parser.gd](../../scripts/html_parser.gd) | сохраняет исходный регистр имени тега в `HtmlNode.raw_tag` (классы Godot — PascalCase) |
-| [scripts/vrweb_builder.gd](../../scripts/vrweb_builder.gd) | `VrwebBuilder.build(doc, base_url)` — находит блок, строит ресурсы, дерево узлов и спавн через `ClassDB`; собирает заявки на внешние ресурсы; особые теги `<ExtScene>`/`<VRWebMirror>`/`<VRWebVideoPlayer>`/`<VRWebVideoScreen>` |
+| [scripts/vrweb_builder.gd](../../scripts/vrweb_builder.gd) | `VrwebBuilder.build(doc, base_url)` — находит блок, строит ресурсы, дерево узлов и спавн через `ClassDB`; собирает заявки на внешние ресурсы; особые теги `<ExtScene>`/`<VRWebMirror>`/`<VRWebVideoPlayer>`/`<VRWebVideoScreen>`/`<VRWebStateSwitch>` |
 | [scripts/vrweb_mirror.gd](../../scripts/vrweb_mirror.gd) + [resources/mirror_reflection.gdshader](../../resources/mirror_reflection.gdshader) | `VrwebMirror` — узел зеркала: планарное отражение через `SubViewport` + отражённую камеру, кадр на плоскость шейдером по `SCREEN_UV` |
 | [scripts/image_loader.gd](../../scripts/image_loader.gd) | пул HTTP + кэш + декод текстур; переиспользуется для `<ExtResource>`-текстур |
 | [scripts/vrweb_resource_loader.gd](../../scripts/vrweb_resource_loader.gd) | докачка сырых байтов (пул HTTP, кэш, лимит размера) + статические декодеры аудио/GLTF |

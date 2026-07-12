@@ -43,6 +43,7 @@ const EXT_SCENE_TAG := "ExtScene"
 const MIRROR_TAG := "VRWebMirror"
 const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
 const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
+const STATE_SWITCH_TAG := "VRWebStateSwitch"
 const IMAGE_TAG := "VRWebImage"
 const BLOB_TAG := "VRWebBlob"
 const SUBRESOURCE_PREFIX := "SubResource:::"
@@ -53,6 +54,7 @@ const MODE_EXCLUSIVE := "exclusive"
 const MIRROR_SCENE := preload("res://scenes/vrweb_mirror.tscn")
 const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
 const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
+const STATE_SWITCH_SCENE := preload("res://scenes/vrweb_state_switch.tscn")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -240,6 +242,8 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_video_player(elem)
 	if elem.raw_tag == VIDEO_SCREEN_TAG:
 		return _build_video_screen(elem)
+	if elem.raw_tag == STATE_SWITCH_TAG:
+		return _build_state_switch(elem)
 	if elem.raw_tag == IMAGE_TAG:
 		return _build_image(elem)
 	if elem.raw_tag == BLOB_TAG:
@@ -368,6 +372,21 @@ func _build_video_screen(elem: HtmlNode) -> Node:
 	node.volume = _attr_float(elem, "volume", 1.0)
 	for key in elem.attributes:
 		if VIDEO_SCREEN_RESERVED.has(key):
+			continue
+		node.set(key, _resolve_value(elem.attributes[key]))
+	return node
+
+
+## <VRWebStateSwitch id="..."> — синхронизируемая bool-кнопка/лампа, демонстрация
+## Replicated State без video SAMPLE.
+func _build_state_switch(elem: HtmlNode) -> Node:
+	if elem.get_attr("id").is_empty():
+		Log.warn("builder", "<VRWebStateSwitch> без id пропущен: replicated object требует стабильный адрес")
+		return null
+	var node := STATE_SWITCH_SCENE.instantiate() as VrwebStateSwitch
+	node.setup(elem.get_attr("id"))
+	for key in elem.attributes:
+		if key == "id":
 			continue
 		node.set(key, _resolve_value(elem.attributes[key]))
 	return node

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — Replicated State switch</title>
+</head>
+<body>
+  <vrweb mode="exclusive">
+    <MeshInstance3D mesh="SubResource:::FloorMesh"
+                    transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0.05,0)">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::FloorShape"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+
+    <WorldEnvironment environment="SubResource:::Environment"/>
+    <DirectionalLight3D rotation_degrees="Vector3(-55,-25,0)" light_energy="0.7"/>
+
+    <!-- Один и тот же id на всех клиентах адресует один replicated object. -->
+    <VRWebStateSwitch id="demo-light"
+        transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1.25,-4)"/>
+
+    <Label3D text="REPlicated State: общий переключатель"
+             position="Vector3(0,3.6,-4)" font_size="52" pixel_size="0.006"/>
+    <Label3D text="Нажмите кнопку в любом экземпляре — цвет сменится у всех"
+             position="Vector3(0,3.1,-4)" font_size="32" pixel_size="0.005"/>
+
+    <VRWebSpawner mode="first">
+      <SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1.6,2)"/>
+    </VRWebSpawner>
+
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(14,0.1,14)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(14,0.1,14)"/>
+    <Resource id="Environment" type="Environment"
+              background_mode="2" background_color="Color(0.025,0.035,0.06,1)"
+              ambient_light_source="3" ambient_light_color="Color(0.18,0.22,0.35,1)"
+              ambient_light_energy="0.55"/>
+  </vrweb>
+</body>
+</html>

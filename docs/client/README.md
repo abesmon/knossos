@@ -15,6 +15,8 @@
   джиттер-буфер, пространственный звук от капсулы.
 - [video-player.md](video-player.md) — видео-плеер (как в VRChat): логический плеер → текстура
   → поверхности, синхронизация воспроизведения по сети.
+- [state-switch-demo.md](state-switch-demo.md) — тестовая страница второго потребителя
+  Replicated State: общая кнопка переключает красный/зелёный свет у всех клиентов.
 - [gif-support.md](gif-support.md) — собственный декодер GIF на GDScript, анимация через
   `AnimatedTexture`.
 - [godot-coreaudio-input-rate-bug.md](godot-coreaudio-input-rate-bug.md) — заметка о баге Godot

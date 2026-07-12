@@ -288,6 +288,9 @@ URL**, синхронизируется только **состояние тра
 - **Анти-дребезг.** После явного действия плеер ~1 c игнорирует heartbeat (`SYNC_GRACE_MS`),
   чтобы устаревший таймкод не откатил свежий play/pause/seek, пока reliable-событие
   распространяется.
+- **Отказ команды.** Локальный play/seek применяется optimistic, но менеджер запоминает
+  `request_id`. Если authority отвечает `access_denied`/`invalid_state` либо наступает timeout,
+  плеер возвращается к последнему canonical состоянию Store; ACK не используется как состояние.
 - **Офлайн** — `NetworkManager.send_*` без mesh это no-op, плеер просто играет локально.
 
 **RPC** ([network_manager.gd](../../scripts/network_manager.gd)) общие для компонентов:

@@ -11,6 +11,8 @@ const MAX_ARRAY_ITEMS := 256
 const MAX_BYTES := 16384
 const MAX_FIELDS := 64
 const MAX_OBJECTS := 256
+const MAX_OBJECT_BYTES := 16 * 1024
+const MAX_DELTA_BYTES := 16 * 1024
 
 var _schemas: Dictionary = {} # schema_id -> definition
 var _objects: Dictionary = {} # "schema\nobject" -> record
@@ -66,7 +68,7 @@ func ensure_object(object_id: String, schema_id: String, initial: Dictionary = {
 		if not _validate_field(schema_id, str(field), initial[field]):
 			return false
 		state[field] = initial[field]
-	_objects[key] = {
+	var record := {
 		"object_id": object_id,
 		"schema_id": schema_id,
 		"version": int((_schemas[schema_id] as Dictionary)["version"]),
@@ -74,6 +76,9 @@ func ensure_object(object_id: String, schema_id: String, initial: Dictionary = {
 		"owner_user_id": owner_user_id,
 		"state": state,
 	}
+	if var_to_bytes(record).size() > MAX_OBJECT_BYTES:
+		return false
+	_objects[key] = record
 	return true
 
 
@@ -138,24 +143,32 @@ func commit_command(object_id: String, schema_id: String, version: int, command:
 	for field in patch:
 		if not _validate_field(schema_id, str(field), patch[field]):
 			return _error("invalid_patch")
-	var state: Dictionary = record["state"]
+	var next_state: Dictionary = (record["state"] as Dictionary).duplicate(true)
 	for field in patch:
-		state[field] = patch[field]
-	record["revision"] = int(record["revision"]) + 1
-	_seq += 1
+		next_state[field] = patch[field]
+	var next_revision := int(record["revision"]) + 1
+	var next_seq := _seq + 1
+	var delta := {
+		"epoch": _epoch, "seq": next_seq, "object_id": object_id, "schema_id": schema_id,
+		"version": version, "revision": next_revision, "changed": (patch as Dictionary).duplicate(true),
+	}
+	var prospective := record.duplicate(true)
+	prospective["state"] = next_state
+	prospective["revision"] = next_revision
+	if var_to_bytes(prospective).size() > MAX_OBJECT_BYTES or var_to_bytes(delta).size() > MAX_DELTA_BYTES:
+		return _error("too_large")
+	record["state"] = next_state
+	record["revision"] = next_revision
+	_seq = next_seq
 	_applied_epoch = _epoch
 	_applied_seq = _seq
-	var delta := {
-		"epoch": _epoch, "seq": _seq, "object_id": object_id, "schema_id": schema_id,
-		"version": version, "revision": record["revision"], "changed": (patch as Dictionary).duplicate(true),
-	}
-	state_changed.emit(object_id, schema_id, state.duplicate(true), (patch as Dictionary).duplicate(true), int(record["revision"]))
+	state_changed.emit(object_id, schema_id, next_state.duplicate(true), (patch as Dictionary).duplicate(true), next_revision)
 	return {"ok": true, "delta": delta}
 
 
 ## ok | duplicate | gap | invalid. Delta принимается только от проверенного authority transport.
 func apply_delta(delta: Dictionary) -> String:
-	if not _valid_envelope(delta):
+	if var_to_bytes(delta).size() > MAX_DELTA_BYTES or not _valid_envelope(delta):
 		return "invalid"
 	var epoch := int(delta["epoch"])
 	var seq := int(delta["seq"])
@@ -221,6 +234,8 @@ func apply_snapshot(data: Dictionary) -> bool:
 			"revision": maxi(0, int(record.get("revision", 0))),
 			"owner_user_id": str(record.get("owner_user_id", "")), "state": (state as Dictionary).duplicate(true),
 		}
+		if var_to_bytes(normalized).size() > MAX_OBJECT_BYTES:
+			return false
 		incoming[_key(object_id, schema_id)] = normalized
 	_objects = incoming
 	_applied_epoch = maxi(0, int(data.get("epoch", 0)))
