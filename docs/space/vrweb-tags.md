@@ -229,8 +229,9 @@ autoplay не сработал бы сам. Клиент это учитывае
 ### `<VRWebImage>` — картинка, размещённая в мире
 
 Квад с текстурой, якорь **центром** в своей точке (в отличие от `<img>` HTML-слоя, который
-мир ставит на пол у стены). Кастомный тег, инстанцируемый как узел (`PlacedImage`,
-[actors/image_panel/placed_image.gd](../../actors/image_panel/placed_image.gd)).
+мир ставит на пол у стены). Кастомный тег использует тот же настраиваемый `ImagePanel`, что и
+HTML-картинка ([actors/image_panel/image_panel.gd](../../actors/image_panel/image_panel.gd));
+происхождение элемента не создаёт отдельный визуальный класс.
 
 ```html
 <VRWebImage src="vrwebblob://sha256/ab12…" alt="кот.png" width="2"

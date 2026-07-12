@@ -10,7 +10,7 @@ extends Node
 ## незавершённые запросы умирают — нет смысла дотягивать картинки старой страницы.
 
 ## Группа для поиска лоадера текущего мира из узлов, которых строит не WorldGenerator
-## (PlacedImage из эфемерного слоя/vrweb-тега). Лоадер один на мир (см. main._rebuild_world).
+## (ImagePanel из эфемерного слоя/vrweb-тега). Лоадер один на мир (см. main._rebuild_world).
 const GROUP := "image_loader"
 
 const MAX_CONCURRENT := 6

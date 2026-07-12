@@ -1,7 +1,7 @@
 class_name VrwebBuilder
 extends RefCounted
 
-const PLACED_IMAGE_SCENE := preload("res://actors/image_panel/placed_image.tscn")
+const IMAGE_PANEL_SCENE := preload("res://actors/image_panel/image_panel.tscn")
 
 ## Парсер собственного синтаксиса VRWeb: блок <vrweb> внутри HTML-документа, который
 ## описывает 3D-сцену напрямую узлами Godot (Слой 1, расширение из docs/vrweb-overview.md).
@@ -373,18 +373,20 @@ func _build_video_screen(elem: HtmlNode) -> Node:
 
 ## <VRWebImage src="<url>" alt="..." width="2" height="1.5" position="Vector3(...)"/> —
 ## картинка, размещённая в мире (кастомный тег, см. docs/network/realtime-resources.md).
-## Строит PlacedImage (квад с текстурой, якорь центром); src — realtime-ресурс
+## Строит общий ImagePanel в режиме якоря по центру; тот же класс отображает HTML `<img>`.
+## src — realtime-ресурс
 ## (vrwebblob://) или обычный URL; width/height — метры (0/нет = натуральный размер).
 ## Прочие атрибуты (position, rotation…) — обычные свойства Node3D. Именно этот тег
 ## создаёт инструмент размещения (клавиша 3) через эфемерный kind="vrweb-node".
 func _build_image(elem: HtmlNode) -> Node:
-	var node := PLACED_IMAGE_SCENE.instantiate() as PlacedImage
+	var node := IMAGE_PANEL_SCENE.instantiate() as ImagePanel
 	var src := elem.get_attr("src")
 	# Блоб-ссылки абсолютны и не принадлежат origin'у страницы — общий резолв их исковеркал бы.
 	if src != "" and not BlobProtocol.is_blob_url(src):
 		src = PageFetcher.resolve_url(src, _base_url)
 	node.setup(elem.get_attr("alt"), null,
-			_attr_float(elem, "width", 0.0), _attr_float(elem, "height", 0.0))
+			_attr_float(elem, "width", 0.0), _attr_float(elem, "height", 0.0),
+			ImagePanel.BASE_WIDTH, 0.0, ImagePanel.Anchor.CENTER)
 	node.src = src
 	for key in elem.attributes:
 		if IMAGE_RESERVED.has(key):
