@@ -69,11 +69,11 @@ static func parse(html: String) -> HtmlNode:
 				var close_marker := "</" + tag_name
 				var close_pos := html.findn(close_marker, i)
 				var content_end := (n if close_pos == -1 else close_pos)
-				# textarea/title несут пользовательский текст; <style> — CSS-правила: их
-				# содержимое сохраняем как #text-ребёнка, чтобы топология могла вытащить
-				# из таблицы стилей фон/цвет документа (см. TopologyBuilder._document_style).
-				# Содержимое <script> по-прежнему выбрасываем — оно не визуально.
-				if tag_name == "textarea" or tag_name == "title" or tag_name == "style":
+				# Raw-text сохраняется без разбора разметки. TopologyBuilder всё равно исключает
+				# script/style/head из визуальной сцены, но module loader сможет отдельно прочитать
+				# opt-in <script type="application/vrweb+gdscript">.
+				if tag_name == "textarea" or tag_name == "title" \
+						or tag_name == "style" or tag_name == "script":
 					var txt := html.substr(i, content_end - i)
 					if txt.strip_edges() != "":
 						var tnode := HtmlNode.new(HtmlNode.TEXT)

@@ -21,6 +21,10 @@ const EXT_PREFIX := VrwebBuilder.EXTRESOURCE_PREFIX
 
 ## Свойства, которые никогда не экспортируем (служебные/неинстанцируемые читателем).
 const SKIP_PROPS := {"owner": true, "name": true, "script": true, "scene_file_path": true}
+const META_SCRIPT_MODE := "vrweb_script_mode"
+const META_SCRIPT_ID := "vrweb_script_id"
+const SCRIPT_MODE_INLINE := "inline"
+const SCRIPT_MODE_PACKAGE := "package"
 
 var _sub_order: Array[String] = []          # id'ы суб-ресурсов в порядке появления
 var _sub_def: Dictionary = {}               # id -> Resource
@@ -33,15 +37,30 @@ var _ext_by_res: Dictionary = {}            # VrwebExtResource -> id (дедуп
 var _ext_seq := 0
 
 var _defaults: Dictionary = {}              # class -> экземпляр-эталон (Node освобождаем в конце)
+var _inline_scripts: Array[Dictionary] = [] # [{id,base,source}] для <head>
+var _inline_seq := 0
+var _package_defs: Array[Dictionary] = []
+var _package_seq := 0
+var _module_head_lines: Array[String] = []
+var _report := {"ok": true, "packages": [], "warnings": [], "errors": []}
 
 
 ## Главный вход: HTML-документ строкой. mode — "combine" (по умолчанию) или "exclusive".
-static func export_scene(root: Node, mode: String = VrwebBuilder.MODE_COMBINE) -> String:
+static func export_scene(root: Node, mode: String = VrwebBuilder.MODE_COMBINE,
+		output_path: String = "") -> String:
 	var e := VrwebExporter.new()
-	return e._export(root, mode)
+	return e._export(root, mode, output_path)
 
 
-func _export(root: Node, mode: String) -> String:
+static func export_scene_report(root: Node, mode: String = VrwebBuilder.MODE_COMBINE,
+		output_path: String = "") -> Dictionary:
+	var e := VrwebExporter.new()
+	var html := e._export(root, mode, output_path)
+	e._report["html"] = html
+	return e._report
+
+
+func _export(root: Node, mode: String, output_path: String) -> String:
 	var safe_mode := mode if mode == VrwebBuilder.MODE_EXCLUSIVE else VrwebBuilder.MODE_COMBINE
 
 	# Сначала строим узлы (попутно наполняются таблицы суб-/внешних ресурсов).
@@ -60,6 +79,7 @@ func _export(root: Node, mode: String) -> String:
 		i += 1
 	for ext_id in _ext_order:
 		_emit_ext(ext_id, _ext_def[ext_id], res_lines)
+	_write_packages(output_path)
 
 	_free_defaults()
 
@@ -68,7 +88,17 @@ func _export(root: Node, mode: String) -> String:
 	var out: Array[String] = []
 	out.append("<!DOCTYPE html>")
 	out.append("<html>")
-	out.append("<head><meta charset=\"utf-8\"><title>VRWeb export</title></head>")
+	out.append("<head>")
+	out.append("  <meta charset=\"utf-8\">")
+	out.append("  <title>VRWeb export</title>")
+	for module_line in _module_head_lines:
+		out.append("  " + module_line)
+	for script_def in _inline_scripts:
+		out.append("  <script type=\"application/vrweb+gdscript\" id=\"%s\" data-base=\"%s\">" \
+				% [_escape_attr(script_def.id), _escape_attr(script_def.base)])
+		out.append(str(script_def.source))
+		out.append("  </script>")
+	out.append("</head>")
 	out.append("<body>")
 	out.append(pad + "<vrweb mode=\"%s\">" % safe_mode)
 	for line in inner:
@@ -93,6 +123,18 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 		_build_ext_scene(node, depth, out)
 		return
 
+	if str(node.get_meta(META_SCRIPT_MODE, "")) == SCRIPT_MODE_INLINE:
+		if _build_inline_component(node, depth, out):
+			return
+	if str(node.get_meta(META_SCRIPT_MODE, "")) == SCRIPT_MODE_PACKAGE:
+		if _build_package_component(node, depth, out):
+			return
+
+	# Page modules ещё не реализованы: молча превратить scripted node в базовый ClassDB-тег
+	# особенно опасно — HTML выглядит рабочим, но всё поведение потеряно.
+	if node.get_script() != null:
+		_report_warning("Script узла %s не экспортирован; выберите inline/package" % node.get_path())
+
 	var cls := node.get_class()
 	var pad := "  ".repeat(depth)
 	var attrs := _node_attrs(node, cls)
@@ -104,6 +146,97 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 	for child in kids:
 		_build_node(child, depth + 1, out)
 	out.append("%s</%s>" % [pad, cls])
+
+
+func _build_inline_component(node: Node, depth: int, out: Array[String]) -> bool:
+	var script = node.get_script()
+	if not (script is GDScript) or str(script.source_code).is_empty():
+		_report_warning("inline Script узла %s не является source GDScript" % node.get_path())
+		return false
+	var source := str(script.source_code)
+	if source.to_lower().contains("</script"):
+		_report_warning("inline Script узла %s содержит </script; используйте package" % node.get_path())
+		return false
+	var id := str(node.get_meta(META_SCRIPT_ID, ""))
+	if id.is_empty():
+		id = "inline_%d" % _inline_seq
+		_inline_seq += 1
+	_inline_scripts.append({"id": id, "base": node.get_class(), "source": source})
+	var pad := "  ".repeat(depth)
+	var parts: Array[String] = ["module=\"#%s\"" % _escape_attr(id), "class=\"default\""]
+	parts.append_array(_diff_attrs(node, node.get_class(), {}))
+	var attrs := " " + " ".join(parts)
+	var kids := node.get_children()
+	if kids.is_empty():
+		out.append("%s<VRWebComponent%s/>" % [pad, attrs])
+		return true
+	out.append("%s<VRWebComponent%s>" % [pad, attrs])
+	for child in kids:
+		_build_node(child, depth + 1, out)
+	out.append("%s</VRWebComponent>" % pad)
+	return true
+
+
+func _build_package_component(node: Node, depth: int, out: Array[String]) -> bool:
+	var script = node.get_script()
+	if not (script is GDScript):
+		_report_error("package Script узла %s не является GDScript" % node.get_path())
+		return false
+	var id := str(node.get_meta(META_SCRIPT_ID, ""))
+	if id.is_empty():
+		id = "package_%d" % _package_seq
+		_package_seq += 1
+	_package_defs.append({"id": id, "script": script, "base": node.get_class()})
+	_emit_component_node(node, id, depth, out)
+	return true
+
+
+func _emit_component_node(node: Node, module_id: String, depth: int, out: Array[String]) -> void:
+	var pad := "  ".repeat(depth)
+	var parts: Array[String] = ["module=\"#%s\"" % _escape_attr(module_id), "class=\"default\""]
+	parts.append_array(_diff_attrs(node, node.get_class(), {}))
+	var attrs := " " + " ".join(parts)
+	if node.get_children().is_empty():
+		out.append("%s<VRWebComponent%s/>" % [pad, attrs])
+		return
+	out.append("%s<VRWebComponent%s>" % [pad, attrs])
+	for child in node.get_children():
+		_build_node(child, depth + 1, out)
+	out.append("%s</VRWebComponent>" % pad)
+
+
+func _write_packages(output_path: String) -> void:
+	var ids := {}
+	for definition in _package_defs:
+		if ids.has(definition.id):
+			_report_error("дублирующийся package id %s" % definition.id)
+			continue
+		ids[definition.id] = true
+		if output_path.is_empty():
+			_report_error("package %s требует output_path" % definition.id)
+			continue
+		var filename := str(definition.id) + ".vrmod"
+		var package_path := output_path.get_base_dir().path_join(filename)
+		var result := VrwebPackageExporter.build(definition.script, definition.id,
+				package_path, definition.base)
+		if not bool(result.ok):
+			_report_error("package %s: %s" % [definition.id, result.error])
+			continue
+		_report.packages.append({"id": definition.id, "file": filename, "hash": result.hash,
+			"integrity": result.integrity, "files": result.files, "assets": result.assets})
+		_module_head_lines.append('<VRWebModule id="%s" src="%s" integrity="%s" mode="trusted-gdscript"/>' \
+				% [_escape_attr(definition.id), _escape_attr(filename), _escape_attr(result.integrity)])
+
+
+func _report_error(message: String) -> void:
+	_report.ok = false
+	_report.errors.append(message)
+	push_warning("VRWeb export: " + message)
+
+
+func _report_warning(message: String) -> void:
+	_report.warnings.append(message)
+	push_warning("VRWeb export: " + message)
 
 
 ## Строка атрибутов узла: ext-привязки (как "ExtResource:::id") + не-дефолтные свойства.
@@ -135,13 +268,20 @@ func _diff_attrs(obj: Object, cls: String, skip_props: Dictionary) -> Array[Stri
 		if SKIP_PROPS.has(name) or skip_props.has(name) or name.begins_with("metadata/"):
 			continue
 		var value = obj.get(name)
-		if def != null and _values_equal(value, def.get(name)):
+		if def != null and _has_property(def, name) and _values_equal(value, def.get(name)):
 			continue
 		var serialized := _serialize_value(value)
 		if serialized == "":
 			continue
 		parts.append("%s=\"%s\"" % [name, _escape_attr(serialized)])
 	return parts
+
+
+func _has_property(obj: Object, property: String) -> bool:
+	for entry in obj.get_property_list():
+		if str(entry.name) == property:
+			return true
+	return false
 
 
 ## <ExtScene src="ExtResource:::<id>" <свойства Node3D>/> — плейсхолдер внешней сцены.

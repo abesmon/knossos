@@ -59,6 +59,11 @@ func _build_dock() -> void:
 	mode_row.add_child(_mode_opt)
 	_dock.add_child(mode_row)
 	_dock.add_child(_button("Экспорт в HTML…", _on_export_pressed))
+	_dock.add_child(_sep())
+	_dock.add_child(_heading("Script выбранного узла"))
+	_dock.add_child(_button("Экспортировать inline", _on_script_inline_pressed))
+	_dock.add_child(_button("Экспортировать package", _on_script_package_pressed))
+	_dock.add_child(_button("Не экспортировать Script", _on_script_off_pressed))
 
 	_dock.add_child(_sep())
 	_dock.add_child(_heading("Внешний ресурс → выбранный узел"))
@@ -125,7 +130,11 @@ func _on_export_path_chosen(path: String) -> void:
 		_say("Нет открытой сцены.")
 		return
 	var mode := _mode_opt.get_item_text(_mode_opt.selected)
-	var html := VrwebExporter.export_scene(root, mode)
+	var report := VrwebExporter.export_scene_report(root, mode, path)
+	if not bool(report.ok):
+		_say("Экспорт остановлен: %s" % "; ".join(report.errors))
+		return
+	var html := str(report.html)
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		_say("Не удалось записать %s (код %d)." % [path, FileAccess.get_open_error()])
@@ -133,7 +142,41 @@ func _on_export_path_chosen(path: String) -> void:
 	f.store_string(html)
 	f.close()
 	EditorInterface.get_resource_filesystem().scan()
-	_say("Экспортировано: %s" % path)
+	_say("Экспортировано: %s; packages: %d" % [path, report.packages.size()])
+
+
+func _on_script_inline_pressed() -> void:
+	var node := _selected_node()
+	if node == null:
+		return
+	if not (node.get_script() is GDScript):
+		_say("У выбранного узла нет GDScript.")
+		return
+	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_INLINE)
+	_mark_dirty()
+	_say("Script «%s» будет экспортирован inline." % node.name)
+
+
+func _on_script_off_pressed() -> void:
+	var node := _selected_node()
+	if node == null:
+		return
+	if node.has_meta(VrwebExporter.META_SCRIPT_MODE):
+		node.remove_meta(VrwebExporter.META_SCRIPT_MODE)
+	_mark_dirty()
+	_say("Script «%s» не будет экспортирован." % node.name)
+
+
+func _on_script_package_pressed() -> void:
+	var node := _selected_node()
+	if node == null:
+		return
+	if not (node.get_script() is GDScript):
+		_say("У выбранного узла нет GDScript.")
+		return
+	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_PACKAGE)
+	_mark_dirty()
+	_say("Script «%s» будет экспортирован в .vrmod." % node.name)
 
 
 func _on_bind_pressed() -> void:

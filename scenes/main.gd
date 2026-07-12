@@ -23,6 +23,7 @@ var _fetcher: PageFetcher
 # Загрузчик внешних CSS (docs/css-cascade.md). Постоянный (не в _world): стили нужны до
 # сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
 var _css_fetcher: CssFetcher
+var _module_fetcher: PageModuleFetcher
 # Максимум ожидания внешних таблиц: дальше строим мир с тем, что успело прийти.
 const CSS_DEADLINE_SEC := 4.0
 # Номер навигации: guard от гонки «продолжение после загрузки CSS против новой навигации».
@@ -67,6 +68,9 @@ var _base_url: String = ""
 # «Паспорт» текущей страницы из <head> (title/description/thumbnail/metas) — заполняется в
 # _on_fetched и отдаётся вкладке «Мир» настроек (см. _extract_page_meta).
 var _page_meta: Dictionary = {}
+# Фактические hashes executable modules текущей страницы. Пока runtime поддерживает inline
+# allow-all; структура уже пригодна для compatibility/trust UI следующих этапов.
+var _page_module_hashes: Dictionary = {}
 # ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
 # консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
 var _current_doc: HtmlNode = null
@@ -120,6 +124,8 @@ func _ready() -> void:
 
 	_css_fetcher = CssFetcher.new()
 	add_child(_css_fetcher)
+	_module_fetcher = PageModuleFetcher.new()
+	add_child(_module_fetcher)
 
 	_player = PLAYER_SCENE.instantiate()
 	_player.aim_target_changed.connect(_on_aim_target_changed)
@@ -299,6 +305,8 @@ func _on_cancel() -> void:
 ## его выставит вызывающий (_on_cancel снимает, _navigate тут же поднимает под новую загрузку).
 func _cancel_load() -> void:
 	_fetcher.cancel()
+	if _module_fetcher != null:
+		_module_fetcher.cancel()
 	_nav_id += 1
 
 
@@ -461,8 +469,7 @@ func _on_fetched(html: String, final_url: String) -> void:
 ## Продолжение сборки страницы после (возможной) загрузки внешних CSS.
 func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		final_url: String, base_url: String, t0: int) -> void:
-	_set_loading(false)
-	_set_status("Сборка пространства…")
+	_set_status("Подготовка страницы…")
 	# Тексты таблиц в порядке документа (<style> и <link> вперемешку) = порядок каскада.
 	var css_texts: Array = []
 	for ref in sheet_refs:
@@ -473,10 +480,50 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		else:
 			css_texts.append(css_by_url.get(PageFetcher.resolve_url(ref["href"], base_url), ""))
 	StyleResolver.resolve(doc, css_texts)
+	var module_collection := PageModuleCollector.collect(doc, base_url)
+	for module_error in module_collection.errors:
+		Log.warn("modules", str(module_error))
+	var nav := _nav_id
+	_set_status("Загрузка модулей (%d)…" % module_collection.modules.size())
+	_module_fetcher.fetch_all(module_collection.modules, final_url, func(module_result: Dictionary):
+		if nav == _nav_id:
+			_materialize_page(doc, final_url, base_url, t0, module_result))
+
+
+func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
+		module_result: Dictionary) -> void:
+	_set_loading(false)
+	_set_status("Сборка пространства…")
 	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
-	var vrweb := VrwebBuilder.build(doc, base_url)
+	# Page scripts: временная prototype-policy ALLOW_ALL. Collector/registry отделены от Builder,
+	# поэтому будущий preflight вставляется здесь до компиляции без изменения materialization.
+	var module_registry := PageModuleRegistry.new()
+	for module_error in module_result.errors:
+		Log.warn("modules", "%s: %s" % [str(module_error.get("module_id", "")),
+				str(module_error.get("code", ""))])
+	var fetched_modules: Array = module_result.modules
+	var runnable_modules: Array = []
+	for module in fetched_modules:
+		if str(module.get("kind", "")) == "package":
+			var unpacked := PageModulePackage.unpack(module)
+			if bool(unpacked.ok):
+				runnable_modules.append(unpacked.module)
+			else:
+				Log.warn("modules", "%s: package %s" % [str(module.get("id", "")),
+						str(unpacked.error)])
+		else:
+			runnable_modules.append(module)
+	var module_prepared := module_registry.prepare(
+			runnable_modules, PageModuleRegistry.ScriptMode.ALLOW_ALL)
+	for module_error in module_prepared.errors:
+		Log.warn("modules", str(module_error))
+	_page_module_hashes.clear()
+	for module in runnable_modules:
+		if not str(module.get("hash", "")).is_empty():
+			_page_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
+	var vrweb := VrwebBuilder.build(doc, base_url, module_registry)
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
 	_vrweb_index = SceneHtml.build_page_index(doc)

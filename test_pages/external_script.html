@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb external GDScript module</title>
+  <script type="application/vrweb+gdscript" id="external.tiny"
+          src="external_tiny.gd" data-base="Node3D"></script>
+</head>
+<body>
+  <vrweb mode="exclusive">
+    <VRWebComponent module="#external.tiny" class="default"
+                    name="ExternalComponent" marker="from-html" position="Vector3(2,1,-3)">
+      <Label3D text="EXTERNAL SCRIPT"/>
+    </VRWebComponent>
+  </vrweb>
+</body>
+</html>

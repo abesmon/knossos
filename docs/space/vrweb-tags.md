@@ -226,15 +226,48 @@ autoplay не сработал бы сам. Клиент это учитывае
 
 ---
 
-### `<VRWebStateSwitch>` — общий переключатель
+### `<VRWebReplicatedState>` и `<VRWebStateAction>` — декларативное поведение страницы
 
 ```html
-<VRWebStateSwitch id="demo-light" transform="..."/>
+<Node3D name="Lamp">
+  <VRWebReplicatedState name="State" id="demo-light" schema="example.light" version="1">
+    <StateField name="enabled" type="bool" default="false"/>
+    <StateCommand name="toggle" operation="toggle" field="enabled"/>
+    <StateBinding field="enabled" target="../GreenLamp" property="visible"
+                  when_true="true" when_false="false"/>
+  </VRWebReplicatedState>
+
+  <MeshInstance3D name="GreenLamp" visible="false" mesh="SubResource:::LampMesh"/>
+  <VRWebStateAction name="Button" state="../State" command="toggle"
+                    hint="Переключить свет" size="2.4:0.9">
+    <CollisionShape3D shape="SubResource:::ButtonShape"/>
+  </VRWebStateAction>
+</Node3D>
 ```
 
-Кликабельная кнопка с красной/зелёной лампой и минимальный пример Replicated State. `id`
-обязан быть детерминированным и одинаковым у клиентов страницы. Состояние — один `bool`,
-команда — `toggle`; late join получает цвет snapshot’ом. Демонстрация:
+Это две независимые общие части, а не готовый предмет и не обязательный контейнер:
+
+- `<VRWebReplicatedState>` — невизуальный `Node` со схемой, командами и bindings. Его можно
+  положить ребёнком предмета, рядом с ним или в отдельной ветке;
+- `<VRWebStateAction>` — самостоятельная `WorldUiSurface`, которая находит state по атрибуту
+  `state="NodePath"` и вызывает `command`. У одного state может быть несколько actions, а
+  визуальные узлы не обязаны быть их детьми.
+
+Страница передаёт обычные визуальные узлы и декларативное поведение:
+
+- `id` — стабильный адрес объекта, одинаковый у всех клиентов страницы;
+- `schema` и `version` — идентификатор wire-контракта;
+- `<StateField>` — типизированное поле и default;
+- `<StateCommand>` — команда ограниченного DSL (`toggle` и `set` в первой версии);
+- `<StateBinding>` — отображение bool-поля в свойство любого узла по относительному `NodePath`;
+- `state`, `command`, `hint`, `size`, `center` у action — связь и геометрия поверхности.
+
+Такой компонент распространяется одной страницей и не требует добавлять доменный GDScript,
+сцену или тег в клиент. Это декларативный уровень, но не запрет на пользовательские классы:
+поставка полноценного кода со страницей отдельно проектируется как namespaced `.vrmod` с
+trusted GDScript и будущим sandbox runtime — см. [page-code.md](page-code.md). Новые безопасные
+операции добавляются в общий versioned DSL, когда их нельзя выразить существующими примитивами.
+Минимальная полная демонстрация:
 `vrwebresource://state_switch.html`, подробности — в
 [state-switch-demo.md](../client/state-switch-demo.md).
 
@@ -290,7 +323,7 @@ HTML-картинка ([actors/image_panel/image_panel.gd](../../actors/image_pa
 | Файл | Роль |
 |---|---|
 | [scripts/html_parser.gd](../../scripts/html_parser.gd) | сохраняет исходный регистр имени тега в `HtmlNode.raw_tag` (классы Godot — PascalCase) |
-| [scripts/vrweb_builder.gd](../../scripts/vrweb_builder.gd) | `VrwebBuilder.build(doc, base_url)` — находит блок, строит ресурсы, дерево узлов и спавн через `ClassDB`; собирает заявки на внешние ресурсы; особые теги `<ExtScene>`/`<VRWebMirror>`/`<VRWebVideoPlayer>`/`<VRWebVideoScreen>`/`<VRWebStateSwitch>` |
+| [scripts/vrweb_builder.gd](../../scripts/vrweb_builder.gd) | `VrwebBuilder.build(doc, base_url)` — находит блок, строит ресурсы, дерево узлов и спавн через `ClassDB`; собирает заявки на внешние ресурсы; особые теги `<ExtScene>`/`<VRWebMirror>`/`<VRWebVideoPlayer>`/`<VRWebVideoScreen>`/`<VRWebReplicatedState>`/`<VRWebStateAction>` |
 | [scripts/vrweb_mirror.gd](../../scripts/vrweb_mirror.gd) + [resources/mirror_reflection.gdshader](../../resources/mirror_reflection.gdshader) | `VrwebMirror` — узел зеркала: планарное отражение через `SubViewport` + отражённую камеру, кадр на плоскость шейдером по `SCREEN_UV` |
 | [scripts/image_loader.gd](../../scripts/image_loader.gd) | пул HTTP + кэш + декод текстур; переиспользуется для `<ExtResource>`-текстур |
 | [scripts/vrweb_resource_loader.gd](../../scripts/vrweb_resource_loader.gd) | докачка сырых байтов (пул HTTP, кэш, лимит размера) + статические декодеры аудио/GLTF |

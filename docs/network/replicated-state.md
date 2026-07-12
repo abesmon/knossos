@@ -442,9 +442,10 @@ authority-state и не late-join snapshot.
 чем удаляется из `NetworkManager`, остановить обобщение на переиспользуемых примитивах
 `epoch/seq/snapshot`.
 
-Критерий подтверждён вторым потребителем: `<VRWebStateSwitch>` использует только bool-state,
-`toggle`, ACK, `DELTA` и snapshot — без `SAMPLE` и без изменений generic Store. Демо и ручной
-сценарий описаны в [state-switch-demo.md](../client/state-switch-demo.md).
+Критерий подтверждён вторым потребителем: self-contained страница на общем
+`<VRWebReplicatedState>` использует только bool-state, `toggle`, ACK, `DELTA` и snapshot —
+без `SAMPLE`, доменного клиентского класса и изменений generic Store. Демо и ручной сценарий
+описаны в [state-switch-demo.md](../client/state-switch-demo.md).
 
 ## Источники VRChat
 

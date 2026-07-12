@@ -1,15 +1,20 @@
 # Демо общего переключателя света
 
 `vrwebresource://state_switch.html` — второй потребитель Replicated State после видео.
-Страница содержит `<VRWebStateSwitch id="demo-light">`: кликабельную кнопку и светящуюся
-сферу. `enabled=false` рисуется красным, `enabled=true` — зелёным. Нажатие в любом клиенте
+Страница содержит отдельные общие `<VRWebReplicatedState>` и `<VRWebStateAction>`, а рядом
+сама объявляет кнопку, две лампы и визуальные bindings. `enabled=false` рисуется
+красным, `enabled=true` — зелёным. Нажатие в любом клиенте
 отправляет команду `toggle` authority; canonical `DELTA` меняет цвет у всех, а late join
 восстанавливается snapshot.
 
 Компонент намеренно не использует `SAMPLE`, временные якоря или другие особенности видео.
-Его схема [state_switch_schema.gd](../../scripts/network/state_switch_schema.gd) содержит один
-`bool` и один reducer. Визуальный адаптер [vrweb_state_switch.gd](../../scripts/vrweb_state_switch.gd)
-применяет действие optimistic и возвращается к canonical state при отрицательном ACK/timeout.
+У него нет клиентского класса, сцены или доменной схемы: вся реализация находится в
+[state_switch.html](../../test_pages/state_switch.html). Клиентский
+[vrweb_replicated_state.gd](../../scripts/vrweb_replicated_state.gd) — общий runtime:
+регистрирует описанную страницей схему, выполняет безопасные операции DSL (`toggle`, `set`),
+отправляет команды и применяет значения к любым доступным по относительному `NodePath` узлам
+через `<StateBinding>`. State не является контейнером представления: в демо он, action и лампы
+лежат соседями внутри обычного `Node3D` предмета.
 
 Проверка:
 
@@ -18,5 +23,5 @@
 3. Открыть третий экземпляр позже: он должен получить текущий цвет snapshot’ом.
 4. Закрыть первоначальный authority и продолжить переключение в оставшемся экземпляре.
 
-Headless-регрессии: `tests/test_state_switch.tscn` проверяет составную сцену custom-тега,
+Headless-регрессии: `tests/test_state_switch.tscn` проверяет автономную страницу и общий тег,
 а `tests/test_replicated_state.gd` — два toggle и generic revision без доменных веток Store.

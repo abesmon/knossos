@@ -72,20 +72,30 @@ func _test_size_budgets() -> void:
 
 func _test_state_switch_consumer() -> void:
 	var store := ReplicatedStateStore.new()
-	_eq(store.register_schema(StateSwitchSchema.ID, StateSwitchSchema.definition(100)), true,
+	var schema := {
+		"version": 1,
+		"fields": {"enabled": {"type": "bool", "default": false}},
+		"default_write_rule": {"rank": {"op": "lte", "value": 100}},
+		"commands": {"toggle": {"reducer": Callable(self, "_reduce_toggle")}},
+	}
+	_eq(store.register_schema("demo.light-switch", schema), true,
 			"state switch schema registered")
-	_eq(store.ensure_object("lamp", StateSwitchSchema.ID), true, "state switch object registered")
+	_eq(store.ensure_object("lamp", "demo.light-switch"), true, "state switch object registered")
 	store.begin_authority()
 	var context := {"rank": 100, "is_authority": false}
-	var on := store.commit_command("lamp", StateSwitchSchema.ID, StateSwitchSchema.VERSION,
+	var on := store.commit_command("lamp", "demo.light-switch", 1,
 			"toggle", {}, context)
 	_eq(on.get("ok"), true, "state switch toggled on")
-	_eq(store.state_of("lamp", StateSwitchSchema.ID)["enabled"], true, "enabled=true")
-	var off := store.commit_command("lamp", StateSwitchSchema.ID, StateSwitchSchema.VERSION,
+	_eq(store.state_of("lamp", "demo.light-switch")["enabled"], true, "enabled=true")
+	var off := store.commit_command("lamp", "demo.light-switch", 1,
 			"toggle", {}, context)
 	_eq(off.get("ok"), true, "state switch toggled off")
-	_eq(store.state_of("lamp", StateSwitchSchema.ID)["enabled"], false, "enabled=false")
+	_eq(store.state_of("lamp", "demo.light-switch")["enabled"], false, "enabled=false")
 	_eq(int(off["delta"]["revision"]), 2, "second consumer uses generic revision")
+
+
+func _reduce_toggle(state: Dictionary, _args: Dictionary, _context: Dictionary) -> Dictionary:
+	return {"enabled": not bool(state.get("enabled", false))}
 
 
 func _test_access_rules() -> void:

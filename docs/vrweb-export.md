@@ -20,6 +20,55 @@
 | **Загрузить превью** | качает все `<ExtResource>` сцены и временно подставляет (без сохранения) |
 | **Очистить превью** | снимает превью (обнуляет свойства, сносит вставленные сцены) |
 
+### Аудит пользовательских скриптов
+
+По умолчанию плагин их не экспортирует: `script` не сериализуется как обычное свойство. Для
+выбранного scripted node теперь есть явная кнопка **«Экспортировать inline»**: exporter пишет
+source в `<script type="application/vrweb+gdscript">`, а узел — как `<VRWebComponent>`.
+Без opt-in геометрия/сохранённые свойства остаются, поведение теряется и выводится warning.
+
+Это нельзя исправлять автоматическим экспортом каждого найденного Script: сцена может содержать
+служебный/editor-код, который автор не собирался публиковать. Нужен явный режим на scripted node:
+
+| Режим | Экспорт |
+|---|---|
+| `off` (по умолчанию) | текущее поведение; плагин показывает предупреждение о потере Script |
+| `inline` | **реализован:** source попадает в `<script type="application/vrweb+gdscript">`, узел — в `<VRWebComponent module="#id" class="default">` |
+| `package` | **первый срез реализован:** GDScript и literal relative file-зависимости собираются в sibling `.vrmod`; HTML ссылается через `<VRWebModule integrity="sha256-…">` |
+
+`inline` допустим только для самодостаточного GDScript без module-local файлов. Если exporter
+видит scene/asset/script dependencies, он предлагает `package`. `@tool`, autoload, GDExtension,
+C# и literal `</script` для inline отклоняются. Полный контракт и план реализации —
+[page-code.md](space/page-code.md).
+
+Inline round-trip (script, `@export`-свойство, базовое свойство и дети) проверяет
+`tests/test_inline_export.tscn`. Первый package round-trip проверяет
+`tests/test_package_export.tscn`: плагин находит literal relative `load()`/`preload()`, создаёт
+manifest и ZIP, вычисляет integrity, а чистый runtime собирает экспортированный HTML. `.gd`
+становятся кодовыми зависимостями; остальные файлы входят в `manifest.assets`. Логическое имя
+строится из basename, а коллизия получает стабильный SHA-256 suffix пути.
+
+Для текстовых `.tscn`/`.tres` граф обходится рекурсивно: `res://`-ссылки переписываются в
+относительные module-local пути, зависимости включаются в пакет, а известный Resource type
+записывается в manifest. Это проверено сценой, которая после распаковки загружает вложенный
+`.tres` уже без исходного проекта.
+
+Для распространённых импортируемых source-форматов (изображения, аудио, glTF/GLB) exporter
+загружает импортированный Godot Resource и сохраняет его как bundled `.res` внутри пакета.
+Ссылка `.tscn/.tres` переписывается на этот `.res`; поэтому runtime не зависит от исходного
+`.godot/imported`. Сквозной тест покрывает цепочку `.tscn → SVG → bundled Texture2D`.
+
+Структурированный export report реализован: `ok/errors/warnings`, package id/file/hash/integrity,
+списки файлов и assets. Editor plugin не записывает HTML при package-ошибке. Повторная сборка
+одинаковых входов проверяется на byte-identical `.vrmod`.
+
+Проверка всех поддерживаемых форматов на каждой целевой платформе и сложные import options ещё
+не реализованы.
+
+Package-срез намеренно отклоняет `@tool`, `class_name`, абсолютные `res://`-ссылки,
+выход пути за каталог проекта и непереносимые ссылки. Это пока проверка переносимости
+пакета, а не sandbox для исполняемого GDScript.
+
 ---
 
 ## Как собирать сцену
