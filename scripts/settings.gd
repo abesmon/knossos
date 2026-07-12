@@ -80,6 +80,16 @@ var avatar_uri: String = DEFAULT_AVATAR_URI
 ## проверка идентичности появится позже через центры авторизации. Подробно — в docs/ranks.md.
 var user_id: String = ""
 
+## Политика исполнения page scripts. ask — безопасный default: неизвестный exact hash требует
+## preflight; allow_all/block_all — явные глобальные режимы. Постоянные решения привязаны к
+## origin страницы + id модуля + hash, поэтому обновившийся код не наследует старое доверие.
+const SCRIPT_POLICY_ASK := "ask"
+const SCRIPT_POLICY_ALLOW_ALL := "allow_all"
+const SCRIPT_POLICY_BLOCK_ALL := "block_all"
+var page_script_policy: String = SCRIPT_POLICY_ASK
+## key -> {decision, origin, module_id, resource_url, hash, updated_at}; decision allow|block.
+var page_script_rules: Dictionary = {}
+
 ## Фактические пути с учётом dev-песочницы (Sandbox): без --sandbox равны константам, с ним —
 ## уходят под user://<id>/. Резолвим один раз в _ready.
 var _path := PATH
@@ -223,6 +233,11 @@ func load_settings() -> void:
 	nick = cfg.get_value("net", "nick", nick)
 	user_id = cfg.get_value("identity", "user_id", user_id)
 	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
+	page_script_policy = str(cfg.get_value("security", "page_script_policy", page_script_policy))
+	if page_script_policy not in [SCRIPT_POLICY_ASK, SCRIPT_POLICY_ALLOW_ALL, SCRIPT_POLICY_BLOCK_ALL]:
+		page_script_policy = SCRIPT_POLICY_ASK
+	var stored_rules = cfg.get_value("security", "page_script_rules", {})
+	page_script_rules = stored_rules if typeof(stored_rules) == TYPE_DICTIONARY else {}
 	if avatar_uri.strip_edges() == "":
 		avatar_uri = DEFAULT_AVATAR_URI
 
@@ -246,6 +261,46 @@ func save() -> void:
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("identity", "user_id", user_id)
 	cfg.set_value("avatar", "uri", avatar_uri)
+	cfg.set_value("security", "page_script_policy", page_script_policy)
+	cfg.set_value("security", "page_script_rules", page_script_rules)
 	cfg.save(_path)
 	apply_audio()
 	changed.emit()
+
+
+## Стабильный ключ exact-code правила. URL ресурса намеренно не входит: redirect/CDN может
+## меняться, но доверие всё равно ограничено origin страницы, module id и проверенным hash.
+func page_script_rule_key(origin: String, module_id: String, hash: String) -> String:
+	return (origin + "\n" + module_id + "\n" + hash).sha256_text()
+
+
+func page_script_decision(origin: String, module_id: String, hash: String) -> String:
+	if page_script_policy == SCRIPT_POLICY_ALLOW_ALL:
+		return "allow"
+	if page_script_policy == SCRIPT_POLICY_BLOCK_ALL:
+		return "block"
+	var rule = page_script_rules.get(page_script_rule_key(origin, module_id, hash), {})
+	return str(rule.get("decision", "")) if typeof(rule) == TYPE_DICTIONARY else ""
+
+
+func remember_page_script_decision(origin: String, module: Dictionary, decision: String) -> void:
+	if decision not in ["allow", "block"]:
+		return
+	var hash := str(module.get("hash", ""))
+	var id := str(module.get("id", ""))
+	page_script_rules[page_script_rule_key(origin, id, hash)] = {
+		"decision": decision, "origin": origin, "module_id": id,
+		"resource_url": str(module.get("resolved_url", "inline")), "hash": hash,
+		"updated_at": int(Time.get_unix_time_from_system()),
+	}
+	save()
+
+
+func forget_page_script_rule(key: String) -> void:
+	page_script_rules.erase(key)
+	save()
+
+
+func clear_page_script_rules() -> void:
+	page_script_rules.clear()
+	save()

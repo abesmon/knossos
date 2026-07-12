@@ -162,7 +162,42 @@ func avatar_snapshot() -> Dictionary:
 	return _avatar_source.snapshot()
 
 
+var _mouse_capture_requested := false
+var _mouse_focus_claims: Dictionary = {} # token -> reason; любой token удерживает UI-режим
+var _next_mouse_focus_token := 1
+
+
+## Базовое желание мира захватить мышь. Активные UI focus leases имеют приоритет: запрос
+## запоминается, но применяется только после освобождения последнего token.
 func capture_mouse(on: bool) -> void:
+	_mouse_capture_requested = on
+	_apply_mouse_capture(on and _mouse_focus_claims.is_empty())
+
+
+## Компонент UI входит в стек требований свободной мыши. Возвращённый token обязан быть
+## освобождён release_mouse_focus; порядок освобождения не важен, вложенные окна безопасны.
+func claim_mouse_focus(reason: String) -> int:
+	var token := _next_mouse_focus_token
+	_next_mouse_focus_token += 1
+	_mouse_focus_claims[token] = reason
+	_apply_mouse_capture(false)
+	return token
+
+
+func release_mouse_focus(token: int) -> void:
+	if token <= 0 or not _mouse_focus_claims.has(token):
+		return
+	_mouse_focus_claims.erase(token)
+	_apply_mouse_capture(_mouse_capture_requested and _mouse_focus_claims.is_empty())
+
+
+func mouse_is_captured() -> bool:
+	return _looking
+
+
+func _apply_mouse_capture(on: bool) -> void:
+	if _looking == on and Input.mouse_mode == (Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE):
+		return
 	_looking = on
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
 	if on:

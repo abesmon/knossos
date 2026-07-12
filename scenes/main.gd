@@ -7,6 +7,7 @@ extends Node
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
+const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/page_modules/page_script_permission_dialog.gd")
 
 @onready var _world: Node3D = $world
 @onready var _ui: MainUI = $UI
@@ -24,6 +25,13 @@ var _fetcher: PageFetcher
 # сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
 var _css_fetcher: CssFetcher
 var _module_fetcher: PageModuleFetcher
+var _script_permission_dialog: PageScriptPermissionDialog
+var _script_permission_focus_token := 0
+var _address_focus_token := 0
+var _settings_focus_token := 0
+var _chat_focus_token := 0
+var _console_focus_token := 0
+var _image_dialog_focus_token := 0
 # Максимум ожидания внешних таблиц: дальше строим мир с тем, что успело прийти.
 const CSS_DEADLINE_SEC := 4.0
 # Номер навигации: guard от гонки «продолжение после загрузки CSS против новой навигации».
@@ -156,7 +164,8 @@ func _ready() -> void:
 	_set_loading(false)
 	_address.text_submitted.connect(func(_t): _on_go())
 	# При клике в адресную строку отпускаем мышь, чтобы можно было печатать.
-	_address.focus_entered.connect(func(): _player.capture_mouse(false))
+	_address.focus_entered.connect(_claim_address_focus)
+	_address.focus_exited.connect(_release_address_focus)
 
 	_setup_net()
 
@@ -208,10 +217,11 @@ func _toggle_console() -> void:
 		return
 	if _console.visible:
 		_console.close()
+		_release_focus_token("_console_focus_token")
 	else:
 		# Консоль — UI-режим: отпускаем мышь (обратно в браузинг вернёт клик по 3D,
 		# который заодно закроет консоль — см. _on_mouse_capture_changed).
-		_player.capture_mouse(false)
+		_console_focus_token = _player.claim_mouse_focus("space_console")
 		_console.open()
 	_sync_chat_with_console()
 
@@ -287,6 +297,7 @@ func _on_go() -> void:
 	# Поэтому base пустой: иначе домен «abesmon.syrupmg.ru» приклеится к текущему пути.
 	# Относительный резолв нужен только для внутристраничных ссылок (см. _activate_transition).
 	_navigate(url, "", true)
+	_release_address_focus()
 	_player.capture_mouse(true)
 
 
@@ -307,6 +318,10 @@ func _cancel_load() -> void:
 	_fetcher.cancel()
 	if _module_fetcher != null:
 		_module_fetcher.cancel()
+	if is_instance_valid(_script_permission_dialog):
+		_script_permission_dialog.queue_free()
+		_script_permission_dialog = null
+	_restore_mouse_after_script_permission()
 	_nav_id += 1
 
 
@@ -353,8 +368,25 @@ func _on_mouse_capture_changed(captured: bool) -> void:
 func _on_chat_requested() -> void:
 	if _chat_input == null or _chat_root == null or not _chat_root.visible:
 		return
-	_player.capture_mouse(false)
+	if _chat_focus_token == 0:
+		_chat_focus_token = _player.claim_mouse_focus("chat_input")
 	_chat_input.grab_focus()
+
+
+func _claim_address_focus() -> void:
+	if _address_focus_token == 0:
+		_address_focus_token = _player.claim_mouse_focus("address_bar")
+
+
+func _release_address_focus() -> void:
+	_player.release_mouse_focus(_address_focus_token)
+	_address_focus_token = 0
+
+
+func _release_focus_token(property: StringName) -> void:
+	var token := int(get(property))
+	_player.release_mouse_focus(token)
+	set(property, 0)
 
 
 ## Разрешает/запрещает фокусировку интерактивных элементов навбара и чата. FOCUS_NONE убирает
@@ -492,14 +524,9 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 
 func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
 		module_result: Dictionary) -> void:
-	_set_loading(false)
-	_set_status("Сборка пространства…")
 	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
-	# Page scripts: временная prototype-policy ALLOW_ALL. Collector/registry отделены от Builder,
-	# поэтому будущий preflight вставляется здесь до компиляции без изменения materialization.
-	var module_registry := PageModuleRegistry.new()
 	for module_error in module_result.errors:
 		Log.warn("modules", "%s: %s" % [str(module_error.get("module_id", "")),
 				str(module_error.get("code", ""))])
@@ -515,6 +542,59 @@ func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: i
 						str(unpacked.error)])
 		else:
 			runnable_modules.append(module)
+	_authorize_page_modules(runnable_modules, final_url, func(allowed_modules: Array):
+		if not is_inside_tree() or final_url != _current_url:
+			return
+		_finish_materialize_page(doc, final_url, base_url, t0, allowed_modules))
+
+
+## Разделяет уже integrity-проверенные модули на известные allow/block и неизвестные. В ask
+## неизвестные показываются одним preflight; до ответа registry.prepare (компиляция) не зовётся.
+func _authorize_page_modules(modules: Array, page_url: String, done: Callable) -> void:
+	var origin := PageModuleIntegrity.origin_of(page_url)
+	if origin.is_empty():
+		origin = page_url.get_base_dir()
+	var allowed: Array = []
+	var pending: Array = []
+	for module in modules:
+		var decision := Settings.page_script_decision(origin, str(module.get("id", "")),
+				str(module.get("hash", "")))
+		if decision == "allow":
+			allowed.append(module)
+		elif decision != "block":
+			pending.append(module)
+	if pending.is_empty():
+		done.call(allowed)
+		return
+	_set_status("Ожидание разрешения для %d скриптов…" % pending.size())
+	_script_permission_focus_token = _player.claim_mouse_focus("page_script_permission")
+	_script_permission_dialog = SCRIPT_PERMISSION_DIALOG.new()
+	add_child(_script_permission_dialog)
+	_script_permission_dialog.decisions_submitted.connect(func(decisions: Dictionary):
+		_script_permission_dialog = null
+		_restore_mouse_after_script_permission()
+		for module in pending:
+			var choice: Dictionary = decisions.get(str(module.get("id", "")), {})
+			var allow := bool(choice.get("allow", false))
+			if bool(choice.get("remember", false)):
+				Settings.remember_page_script_decision(origin, module, "allow" if allow else "block")
+			if allow:
+				allowed.append(module)
+		done.call(allowed), CONNECT_ONE_SHOT)
+	_script_permission_dialog.present(pending, page_url)
+
+
+func _restore_mouse_after_script_permission() -> void:
+	if is_instance_valid(_player):
+		_player.release_mouse_focus(_script_permission_focus_token)
+	_script_permission_focus_token = 0
+
+
+func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
+		runnable_modules: Array) -> void:
+	_set_loading(false)
+	_set_status("Сборка пространства…")
+	var module_registry := PageModuleRegistry.new()
 	var module_prepared := module_registry.prepare(
 			runnable_modules, PageModuleRegistry.ScriptMode.ALLOW_ALL)
 	for module_error in module_prepared.errors:
@@ -848,9 +928,9 @@ func _setup_net() -> void:
 	_settings_overlay.space_requested.connect(_on_space_requested)
 	# Клик по странице в «Кто где сейчас» (presence.v1, docs/presence.md) — обычная навигация.
 	_settings_overlay.presence_url_requested.connect(_on_presence_url_requested)
+	_settings_overlay.closed.connect(_on_settings_closed)
 
 	_settings_btn.pressed.connect(_open_settings)
-	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
 
 	_build_chat_ui(_ui)
 
@@ -875,8 +955,13 @@ func _setup_net() -> void:
 
 
 func _open_settings() -> void:
-	_player.capture_mouse(false)
+	if _settings_focus_token == 0:
+		_settings_focus_token = _player.claim_mouse_focus("settings")
 	_settings_overlay.open(_current_url, _page_meta)
+
+
+func _on_settings_closed() -> void:
+	_release_focus_token(&"_settings_focus_token")
 
 
 ## «Вернуться домой» из настроек: грузим ДОМАШНЮЮ СТРАНИЦУ (произвольная закладка старта —
@@ -966,7 +1051,10 @@ func _build_chat_ui(ui: Control) -> void:
 	_chat_log.meta_clicked.connect(_on_chat_meta_clicked)
 	_chat_input.max_length = NetworkManager.MAX_CHAT_CHARS   # не ввести больше лимита
 	_chat_input.text_submitted.connect(_on_chat_submitted)
-	_chat_input.focus_entered.connect(func(): _player.capture_mouse(false))
+	_chat_input.focus_entered.connect(func():
+		if _chat_focus_token == 0:
+			_chat_focus_token = _player.claim_mouse_focus("chat_input"))
+	_chat_input.focus_exited.connect(func(): _release_focus_token(&"_chat_focus_token"))
 
 	# Таймер бездействия: в режиме перемещения через 30с после последнего сообщения лог
 	# плавно угасает до 10% непрозрачности, чтобы не мешать обзору (см. _on_chat_idle_timeout).
@@ -980,6 +1068,7 @@ func _on_chat_submitted(text: String) -> void:
 		NetworkManager.send_chat(text)
 		_append_chat(Settings.nick, text)   # локальное эхо
 	# Enter всегда возвращает в браузинг — даже на пустом сообщении (round-trip с chat_requested).
+	_release_focus_token(&"_chat_focus_token")
 	_player.capture_mouse(true)
 
 
@@ -1191,7 +1280,7 @@ func _on_image_pick_requested(filters: PackedStringArray) -> void:
 	if _image_dialog_open:
 		return   # диалог уже открыт; его колбэк и завершит ожидание инструмента (provide_file)
 	_image_dialog_open = true
-	_player.capture_mouse(false)
+	_image_dialog_focus_token = _player.claim_mouse_focus("image_file_dialog")
 	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
 		DisplayServer.file_dialog_show("Разместить изображение", "", "", false,
 			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters,
@@ -1205,6 +1294,7 @@ func _on_image_pick_requested(filters: PackedStringArray) -> void:
 ## Файл выбран (или диалог отменён): вернуть захват мыши и отдать результат инструменту.
 func _image_file_chosen(ok: bool, path: String) -> void:
 	_image_dialog_open = false
+	_release_focus_token(&"_image_dialog_focus_token")
 	_player.capture_mouse(true)
 	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
 	image_tool.provide_file(ok, path)
