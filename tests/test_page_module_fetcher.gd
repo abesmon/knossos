@@ -33,6 +33,10 @@ func _ready() -> void:
 			if component != null:
 				_eq(component.call("answer"), 73, "external component behavior executes")
 				_eq(component.get("marker"), "from-html", "external component attributes applied")
+				_eq(component.call("presentation_text"), "EXTERNAL SCRIPT: from-html = 73",
+						"scene presentation uses external page-defined behavior")
+			_eq(root.get_node_or_null("Ground/StaticBody3D/CollisionShape3D") != null, true,
+					"external demo has collidable ground")
 			if root != null:
 				root.free()
 		finish.call_deferred())

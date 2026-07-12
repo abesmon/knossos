@@ -23,8 +23,12 @@ func _ready() -> void:
 	if component != null:
 		_eq(component.call("answer"), 42, "page-defined method executes")
 		_eq(component.get("marker"), "from-html", "HTML attributes initialize script property")
-		_eq(component.position, Vector3(1, 2, 3), "base Node3D property applied")
+		_eq(component.call("presentation_text"), "INLINE SCRIPT: from-html = 42",
+				"scene presentation uses page-defined behavior")
+		_eq(component.position, Vector3(0, 1.7, -3), "base Node3D property applied")
 		_eq(component.has_node("ChildLabel"), true, "declarative child attached to page class")
+	_eq(root.get_node_or_null("Ground/StaticBody3D/CollisionShape3D") != null, true,
+			"demo has collidable ground")
 	root.free()
 	get_tree().quit(1 if _failed else 0)
 

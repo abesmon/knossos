@@ -9,9 +9,20 @@
 <body>
   <vrweb mode="exclusive">
     <VRWebComponent module="#external.tiny" class="default"
-                    name="ExternalComponent" marker="from-html" position="Vector3(2,1,-3)">
-      <Label3D text="EXTERNAL SCRIPT"/>
+                    name="ExternalComponent" marker="from-html" position="Vector3(0,1.7,-3)">
+      <Label3D name="ChildLabel" text="Loading external script..." font_size="48"/>
     </VRWebComponent>
+
+    <Node3D name="Ground" position="Vector3(0,-0.1,0)">
+      <MeshInstance3D mesh="SubResource:::GroundMesh" material_override="SubResource:::GroundMaterial"/>
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::GroundShape"/>
+      </StaticBody3D>
+    </Node3D>
+
+    <Resource id="GroundMesh" type="BoxMesh" size="Vector3(14,0.2,14)"/>
+    <Resource id="GroundShape" type="BoxShape3D" size="Vector3(14,0.2,14)"/>
+    <Resource id="GroundMaterial" type="StandardMaterial3D" albedo_color="Color(0.20,0.14,0.10,1)"/>
   </vrweb>
 </body>
 </html>
