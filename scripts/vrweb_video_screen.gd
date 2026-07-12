@@ -39,19 +39,19 @@ var _want_w := 0.0   # размеры из тега (size="ш:в"), 0 = авто
 var _want_h := 0.0
 
 var _player: VrwebVideoPlayer = null
-var _mesh: MeshInstance3D
-var _quad: QuadMesh
-var _mat: StandardMaterial3D
-var _label: Label3D
-var _shape: BoxShape3D
+@onready var _mesh: MeshInstance3D = $Mesh
+@onready var _quad: QuadMesh = _mesh.mesh
+@onready var _mat: StandardMaterial3D = _mesh.material_override
+@onready var _label: Label3D = $Placeholder
+@onready var _shape: BoxShape3D = $Collision.shape
 var _auto_sized := false   # уже подогнали пропорции под кадр
 
 # Наэкранный UI: контейнер + дорожка/буфер/прогресс (3D-квады) + подпись времени.
-var _ui: Node3D
-var _ui_track: MeshInstance3D
-var _ui_buffer: MeshInstance3D
-var _ui_progress: MeshInstance3D
-var _ui_time: Label3D
+@onready var _ui: Node3D = $PlaybackUI
+@onready var _ui_track: MeshInstance3D = $PlaybackUI/Track
+@onready var _ui_buffer: MeshInstance3D = $PlaybackUI/Buffer
+@onready var _ui_progress: MeshInstance3D = $PlaybackUI/Progress
+@onready var _ui_time: Label3D = $PlaybackUI/Time
 var _ui_alpha := 0.0           # текущая прозрачность UI (0 спрятан, 1 показан)
 var _track_w := 0.0            # ширина дорожки прогресса, м (из размера квада)
 var _bar_h := 0.0             # толщина бара, м
@@ -72,34 +72,8 @@ func setup(p_player_id: String, p_src: String, size: Vector2) -> void:
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	# Слой 2 — только для клик-луча; игрок проходит сквозь экран (его маска — слой 1).
-	collision_layer = 2
-	collision_mask = 0
-
-	_quad = QuadMesh.new()
 	_quad.size = _initial_size()
-	_mesh = MeshInstance3D.new()
-	_mesh.mesh = _quad
-	_mat = StandardMaterial3D.new()
-	_mat.albedo_color = Color(0.05, 0.05, 0.07)
-	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_mesh.material_override = _mat
-	add_child(_mesh)
-
-	_label = Label3D.new()
 	_label.text = "▶ video" if VrwebVideoPlayer.is_available() else "▶ video unavailable"
-	_label.font_size = 48
-	_label.outline_size = 12
-	_label.pixel_size = 0.006
-	_label.modulate = Color(0.8, 0.85, 1.0)
-	add_child(_label)
-
-	var collision := CollisionShape3D.new()
-	_shape = BoxShape3D.new()
-	collision.shape = _shape
-	add_child(collision)
-	_build_ui()
 	_update_collision()
 	_layout_ui()
 
@@ -195,39 +169,6 @@ func hover_at(point: Vector3) -> void:
 		_idle_accum = 0.0
 	_last_hover = point
 	_have_hover = true
-
-
-func _build_ui() -> void:
-	_ui = Node3D.new()
-	_ui.visible = false
-	add_child(_ui)
-	_ui_track = _make_bar(COL_TRACK)
-	_ui_buffer = _make_bar(COL_BUFFER)
-	_ui_progress = _make_bar(COL_PROGRESS)
-	_ui_time = Label3D.new()
-	_ui_time.font_size = 28
-	_ui_time.outline_size = 8
-	_ui_time.pixel_size = 0.0016
-	_ui_time.modulate = Color(0.9, 0.93, 1.0)
-	_ui.add_child(_ui_time)
-
-
-## Цветной квад-бар для дорожки/буфера/прогресса. Базовый цвет — в meta (альфа домножается
-## на _ui_alpha при затухании). Размер/позиция выставляются в _layout_ui и _refresh_bars.
-func _make_bar(col: Color) -> MeshInstance3D:
-	var m := MeshInstance3D.new()
-	var q := QuadMesh.new()
-	q.size = Vector2(0.001, 0.001)
-	m.mesh = q
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = col
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.material_override = mat
-	m.set_meta("base_color", col)
-	_ui.add_child(m)
-	return m
 
 
 ## Раскладка UI под текущий размер квада: бар внизу экрана на ширину 92% и подпись над ним.

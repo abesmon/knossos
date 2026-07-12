@@ -11,12 +11,11 @@ extends Node3D
 # иконкой статуса. См. actors/nameplate/, docs/home-server.md.
 @onready var _nameplate: Nameplate = $Nameplate
 # Иконка над неймплейтом: законность аватара не подтверждена (warning) или отклонена (err) —
-# нет манифеста прав / личность пира пока невозможно верифицировать. Создаём кодом, чтобы не
-# править .tscn. См. docs/avatars.md.
-var _warn: Sprite3D = null
+# нет манифеста прав / личность пира пока невозможно верифицировать. См. docs/avatars.md.
+@onready var _warn: Sprite3D = $AvatarWarning
 # Иконка «нет связи» над неймплейтом (оранжевый no-connection): p2p-канал оборвался или пир
 # в grace-периоде «призрака» — ждём переподключения. См. docs/multiplayer.md.
-var _conn: Sprite3D = null
+@onready var _conn: Sprite3D = $ConnectionLost
 # Бабл — это UI-плашка (PanelContainer + Label со скруглённым фоном), отрендеренная через
 # SubViewport на billboard-Sprite3D. Так получаем настоящий «пузырь», а не голый текст.
 @onready var _bubble: Sprite3D = $Bubble
@@ -54,25 +53,7 @@ func _ready() -> void:
 	_nameplate.set_display_name(_nick)
 	_nameplate.set_verified_identity(_verified_address, StatusIcons.Status.VERIFIED)
 	_host.apply_identity(_nick, _face_tex)
-	_warn = Sprite3D.new()
-	_warn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_warn.shaded = false
-	_warn.no_depth_test = true
-	_warn.pixel_size = 0.006   # иконка ~20px → ~0.12 м
-	_warn.visible = false
-	add_child(_warn)
-	_conn = Sprite3D.new()
-	_conn.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_conn.shaded = false
-	_conn.no_depth_test = true
-	_conn.pixel_size = 0.006
-	# offset в пикселях спрайта — сдвиг в плоскости билборда: иконка связи живёт левее места
-	# warn-иконки, чтобы они не накладывались, когда видны обе.
-	_conn.offset = Vector2(-28, 0)
-	_conn.texture = StatusIcons.texture(StatusIcons.Status.OFFLINE)
-	_conn.modulate = StatusIcons.color(StatusIcons.Status.OFFLINE)
 	_conn.visible = _conn_lost
-	add_child(_conn)
 	_bubble.texture = _bubble_viewport.get_texture()
 	_bubble_timer.timeout.connect(_hide_bubble)
 	_refresh_name_color()

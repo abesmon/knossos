@@ -1,6 +1,8 @@
 class_name VrwebBuilder
 extends RefCounted
 
+const PLACED_IMAGE_SCENE := preload("res://actors/image_panel/placed_image.tscn")
+
 ## Парсер собственного синтаксиса VRWeb: блок <vrweb> внутри HTML-документа, который
 ## описывает 3D-сцену напрямую узлами Godot (Слой 1, расширение из docs/vrweb-overview.md).
 ##
@@ -48,7 +50,7 @@ const EXTRESOURCE_PREFIX := "ExtResource:::"
 const MODE_COMBINE := "combine"
 const MODE_EXCLUSIVE := "exclusive"
 
-const MIRROR_SCRIPT := preload("res://scripts/vrweb_mirror.gd")
+const MIRROR_SCENE := preload("res://scenes/vrweb_mirror.tscn")
 const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
 const VIDEO_SCREEN_SCRIPT := preload("res://scripts/vrweb_video_screen.gd")
 
@@ -321,7 +323,7 @@ func _build_ext_scene(elem: HtmlNode) -> Node:
 ## "1.5" → квадрат). resolution_scale (0.1..1) — качество текстуры отражения. Прочие атрибуты
 ## (transform и т.п.) применяются как обычные свойства Node3D.
 func _build_mirror(elem: HtmlNode) -> Node:
-	var mirror := MIRROR_SCRIPT.new()
+	var mirror := MIRROR_SCENE.instantiate() as VrwebMirror
 	var size := _parse_size(elem.get_attr("size", "1:2"))
 	var res_scale := _attr_float(elem, "resolution_scale", 1.0)
 	var srgb_decode := _attr_float(elem, "srgb_decode", 0.5)
@@ -376,7 +378,7 @@ func _build_video_screen(elem: HtmlNode) -> Node:
 ## Прочие атрибуты (position, rotation…) — обычные свойства Node3D. Именно этот тег
 ## создаёт инструмент размещения (клавиша 3) через эфемерный kind="vrweb-node".
 func _build_image(elem: HtmlNode) -> Node:
-	var node := PlacedImage.new()
+	var node := PLACED_IMAGE_SCENE.instantiate() as PlacedImage
 	var src := elem.get_attr("src")
 	# Блоб-ссылки абсолютны и не принадлежат origin'у страницы — общий резолв их исковеркал бы.
 	if src != "" and not BlobProtocol.is_blob_url(src):

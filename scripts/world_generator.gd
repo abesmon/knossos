@@ -23,6 +23,9 @@ signal build_finished
 
 const PORTAL_SCENE := preload("res://actors/portal/portal.tscn")
 const RICH_PANEL_SCENE := preload("res://actors/rich_panel/rich_panel.tscn")
+const IMAGE_PANEL_SCENE := preload("res://actors/image_panel/image_panel.tscn")
+const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
+const WORLD_LABEL_SCENE := preload("res://actors/world_label/world_label.tscn")
 
 ## Ключ метаданных с провенансом узла (тип топологии + исходный HTML) — его читает
 ## отладочный пробник прицела (Player._debug_probe). Заполняется только если в артефакте
@@ -1118,7 +1121,7 @@ func _build_room_title(holder: Node3D, id: int, title_obj: Dictionary) -> bool:
 ## Текст вывески как Label3D, повёрнутый на yaw и сдвинутый на свою грань ленты (offset).
 func _add_title_label(node: Node3D, text: String, font_css_px: float, width_m: float,
 		yaw: float, offset: Vector3) -> void:
-	var label := Label3D.new()
+	var label := WORLD_LABEL_SCENE.instantiate() as Label3D
 	label.text = text
 	label.font_size = _godot_font(font_css_px)
 	label.outline_size = max(8, int(label.font_size * 0.25))
@@ -1336,7 +1339,7 @@ func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, 
 	# лицом, высокие приподняты так, чтобы низ не вжимался в пол (PANEL_FLOOR_GAP).
 	var center_y := maxf(EYE_LEVEL, height * 0.5 + PANEL_FLOOR_GAP)
 	_add_box(node, Vector3(width, height, 0.15), Vector3(0, center_y, 0), color, false)
-	var label := Label3D.new()
+	var label := WORLD_LABEL_SCENE.instantiate() as Label3D
 	label.text = clipped
 	label.font_size = font
 	label.outline_size = max(8, int(font * 0.25))
@@ -1412,7 +1415,7 @@ func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw
 	var want_w := _img_px_to_m(float(content.get("width_px", 0.0)))
 	var want_h := _img_px_to_m(float(content.get("height_px", 0.0)))
 	var fallback_w := ImagePanel.BASE_WIDTH
-	var panel := ImagePanel.new()
+	var panel := IMAGE_PANEL_SCENE.instantiate() as ImagePanel
 	# max_w — доступная ширина стены (за вычетом safe-area): картинка не вылезет за её края даже
 	# после позднего уточнения размера по натуральной текстуре (ImagePanel ужмёт себя под этот кап).
 	panel.setup(alt, transition, want_w, want_h, fallback_w, max_w)
@@ -1439,7 +1442,7 @@ func _build_video_screen(obj: Dictionary, holder: Node3D, local_pos: Vector3, ya
 	if src == "" or not VrwebVideoPlayer.is_available():
 		return null
 	var url := PageFetcher.resolve_url(src, _base_url)
-	var screen := VrwebVideoScreen.new()
+	var screen := VIDEO_SCREEN_SCENE.instantiate() as VrwebVideoScreen
 	# Ширину фиксируем под раскладку комнаты, высоту 0 — экран сам подгонит её под пропорции
 	# кадра (как ImagePanel под текстуру). Неявный плеер ключуется по url в менеджере.
 	screen.setup("", url, Vector2(size.x, 0.0))

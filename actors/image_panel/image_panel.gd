@@ -39,13 +39,13 @@ var _fallback_w := BASE_WIDTH
 # даже если натуральная текстура/HTML-размер шире. Задаёт мир из раскладки комнаты.
 var _max_w := 0.0
 
-var _mesh: MeshInstance3D
-var _mesh_back: MeshInstance3D   # изнанка: тот же квад, развёрнутый на 180° вокруг Y
-var _quad: QuadMesh
-var _mat: StandardMaterial3D
-var _label: Label3D
-var _collision: CollisionShape3D
-var _shape: BoxShape3D
+@onready var _mesh: MeshInstance3D = $Front
+@onready var _mesh_back: MeshInstance3D = $Back
+@onready var _quad: QuadMesh = _mesh.mesh
+@onready var _mat: StandardMaterial3D = _mesh.material_override
+@onready var _label: Label3D = $Placeholder
+@onready var _collision: CollisionShape3D = $Collision
+@onready var _shape: BoxShape3D = _collision.shape
 var _height_m := BASE_WIDTH * DEFAULT_RATIO
 
 
@@ -68,16 +68,7 @@ func get_height_m() -> float:
 func _ready() -> void:
 	add_to_group(GROUP)
 
-	# Слой 2 — только для клика-луча; игрок сквозь панель проходит (его маска — слой 1).
-	collision_layer = 2
-	collision_mask = 0
-
-	_quad = QuadMesh.new()
 	_quad.size = _initial_size()
-	_mesh = MeshInstance3D.new()
-	_mesh.mesh = _quad
-	_mat = StandardMaterial3D.new()
-	_mat.albedo_color = Color(0.18, 0.21, 0.28)   # тон заглушки
 	# Каждая грань рисуется только со своей стороны (CULL_BACK), а изнанку даёт
 	# второй квад, развёрнутый на 180° вокруг Y (_mesh_back). Так картинка читается
 	# одинаково с обеих сторон, без зеркала, которое давала единая двусторонняя грань.
@@ -85,33 +76,7 @@ func _ready() -> void:
 	# Unlit: текстура показывается как есть, без зависимости от освещения сцены —
 	# иначе обратная грань (и грань без света) уходила бы в темноту.
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_mesh.material_override = _mat
-	add_child(_mesh)
-
-	# Изнанка: тот же меш и материал, развёрнут на 180° вокруг Y — обращён назад и
-	# показывает картинку в нормальной (не зеркальной) ориентации.
-	_mesh_back = MeshInstance3D.new()
-	_mesh_back.mesh = _quad
-	_mesh_back.material_override = _mat
-	_mesh_back.rotation = Vector3(0, PI, 0)
-	add_child(_mesh_back)
-
-	_label = Label3D.new()
 	_label.text = _placeholder_text()
-	_label.font_size = 40
-	_label.outline_size = 10
-	_label.pixel_size = 0.006
-	_label.width = 360
-	_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_label.modulate = Color(0.7, 0.8, 1.0)
-	add_child(_label)
-
-	_collision = CollisionShape3D.new()
-	_shape = BoxShape3D.new()
-	_collision.shape = _shape
-	add_child(_collision)
-
 	_update_layout()
 
 
