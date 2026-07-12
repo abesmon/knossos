@@ -126,14 +126,14 @@
 определяется через `multiplayer.get_remote_sender_id()`, поэтому отдельный
 `MultiplayerSpawner`/авторитет на капсулу не нужен.
 
-**Видео.** Транспорт видео-плееров синхронизируется тем же приёмом:
-`@rpc("any_peer","reliable") _recv_video_event(player_id, action, position)` (play/pause/seek,
-last-writer-wins) и `@rpc("any_peer","unreliable_ordered") _recv_video_sync(player_id, position,
-playing)` (heartbeat: позиция + состояние). Heartbeat шлёт **таймкипер** —
-пир с наименьшим id (`NetworkManager.is_timekeeper()`), так что late-join и autoplay
-синхронизируются автоматически. Таймкипер — частный случай **авторитета комнаты**
+**Видео и Replicated State.** Play/pause/seek идут как generic `COMMAND` к authority, результат —
+упорядоченный `DELTA`, а late join получает `SNAPSHOT`. Heartbeat стал generic `SAMPLE`
+(unreliable ordered: позиция + состояние + revision). Его шлёт **таймкипер** —
+авторитет комнаты (раньше всех вошедший подключённый пир, минимальный `join_seq`;
+`NetworkManager.is_timekeeper()` — алиас `has_authority()`). Таймкипер — частный случай **авторитета комнаты**
 (детерминированный «первому», без переговоров; полностью — в [authority.md](authority.md)). Привязка по `player_id` (страница одна = id одни), применяет
-`VrwebVideoManager`. Подробно — в [video-player.md](../client/video-player.md).
+`VrwebVideoManager`; сетевой слой не содержит видео-специфичных RPC. Подробно — в
+[video-player.md](../client/video-player.md) и [replicated-state.md](replicated-state.md).
 
 **Голос.** Идёт отдельным RPC `@rpc("any_peer","unreliable_ordered","call_remote", 1)`
 `_recv_voice(payload)` по **каналу 1** — чтобы голос не делал head-of-line blocking с
@@ -373,3 +373,10 @@ Headless-тесты сетевого слоя (сигналинг на `:8090`):
 `peer_ghosted` → `peer_reclaimed`, и [tests/face_update_test.gd](../../tests/face_update_test.gd) —
 смена лица доходит до чужих капсул (без переподключения, только карточкой). Рецепт запуска — в
 шапках файлов.
+
+Replicated State имеет самостоятельный orchestration-тест с тремя Godot-процессами: команда
+`python3 tests/run_net_replicated_state_test.py` сама поднимает standalone signaling на `:8090`,
+запускает роли leader/actor/late и проверяет late join, команды обоих авторов, конфликт,
+сходимость и передачу authority. Затем runner перезапускает один и тот же sandbox/user и
+проверяет snapshot состояния, изменившегося во время отключения, и команду после reconnect.
+Порт перед запуском должен быть свободен.

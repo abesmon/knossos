@@ -41,7 +41,8 @@ signal identity_verified(id: int, address: String)
 ## Состояние видео-плеера от пира (см. VrwebVideoManager): player_id — id из тега
 ## <VRWebVideoPlayer>, action — "play"/"pause"/"seek"/"sync", position — позиция в секундах.
 ## Транспорт и heartbeat-таймкод идут одним сигналом; различаются по action.
-signal video_state_received(id: int, player_id: String, action: String, position: float)
+signal replicated_state_received(object_id: String, schema_id: String, state: Dictionary, changed: Dictionary, revision: int)
+signal replicated_sample_received(sender_id: int, object_id: String, schema_id: String, sample: Dictionary)
 ## online — есть ли активное подключение к сигнальному серверу.
 signal connection_changed(online: bool)
 ## Сменилось агрегированное состояние связи (см. ConnStatus / connection_status()). Эмитится
@@ -55,7 +56,7 @@ signal voice_received(id: int, payload: PackedByteArray)
 signal room_denied(room: String, reason: String)
 ## Сменился авторитет комнаты (см. authority_id). new_authority — id нового авторитета
 ## (0, если мы вне комнаты), is_me — стали ли авторитетом мы. Эмитится при входе/выходе
-## пиров, когда меняется результат min(id). Консьюмеры привилегированных действий слушают
+## пиров, когда меняется старейший join_seq. Консьюмеры привилегированных действий слушают
 ## это, чтобы начать/прекратить их выполнять. Подробно — в docs/authority.md.
 signal authority_changed(new_authority: int, is_me: bool)
 ## Изменилась таблица рангов (user_id -> rank): авторитет её правит и рассылает, остальные
@@ -80,6 +81,7 @@ signal scene_action_acked(token: int, accepted: bool)
 ## Жёсткий лимит длины сообщения чата — режем и на отправке, и на приёме, чтобы нигде
 ## (лог, бабл) не отрисовывалось больше.
 const MAX_CHAT_CHARS := 280
+const MAX_REPLICATED_COMMANDS_PER_SECOND := 30
 
 ## Ранг по умолчанию для тех, кого нет в таблице. Чем МЕНЬШЕ ранг — тем больше прав (0 ≈ админ),
 ## поэтому дефолт берём заведомо «далеко от нуля» — практически без прав. См. docs/ranks.md.
@@ -169,6 +171,9 @@ var _last_status_state := -1
 var _status_accum := 0.0
 var _rng := Crypto.new()   # генератор nonce для челленджей
 var _scene := SceneChanges.new()  # машина состояний эфемерного слоя (чистая, см. scene_changes.gd)
+var _replicated := ReplicatedStateStore.new()
+var _replicated_resync := false
+var _replicated_command_rates := {} # peer_id -> {second, count}
 # Зарезервированные id (узлы vrweb-слоя ТЕКУЩЕЙ страницы): add с таким id отклоняется —
 # анти-коллизия дедупликации персистенции (см. docs/page-persistence.md). Ставит main
 # после индексации страницы; переживает пересоздание _scene при смене комнаты.
@@ -214,6 +219,8 @@ func _ready() -> void:
 	multiplayer.peer_disconnected.connect(_on_mp_peer_disconnected)
 	# Сертификат появился/обновился (логин, продление) — предъявляем его уже подключённым пирам.
 	HomeServer.certificate_changed.connect(broadcast_certificate)
+	_replicated.state_changed.connect(func(object_id, schema_id, state, changed, revision):
+		replicated_state_received.emit(object_id, schema_id, state, changed, revision))
 
 
 func is_online() -> bool:
@@ -408,6 +415,7 @@ func _on_mp_peer_connected(id: int) -> void:
 		_nlog("я АВТОРИТЕТ -> push snapshot новичку peer=%d (objects=%d)" % [id, _scene.objects().size()])
 		rpc_id(id, "_recv_ranks", _ranks)
 		rpc_id(id, "_recv_scene_snapshot", _scene.snapshot())
+		rpc_id(id, "_recv_replicated_snapshot", _replicated.snapshot())
 	# Недокачанные блобы спрашиваем у новичка адресно: он мог принести байты, которых нет
 	# ни у кого из старожилов (например, автор переподключился). См. docs/network/realtime-resources.md.
 	if _can_rpc():
@@ -434,20 +442,77 @@ func send_chat(text: String) -> void:
 	rpc("_recv_chat", text.left(MAX_CHAT_CHARS))
 
 
-## Разослать транспортное событие видео (play/pause/seek) — надёжно (reliable), чтобы не
-## потерялось. player_id привязывает к плееру с тем же id у всех (страница одна = id одни).
-func send_video_event(player_id: String, action: String, position: float) -> void:
-	if _can_rpc():
-		rpc("_recv_video_event", player_id, action, position)
+func register_replicated_schema(schema_id: String, definition: Dictionary) -> bool:
+	return _replicated.register_schema(schema_id, definition)
 
 
-## Разослать heartbeat видео (~1.5 Гц от таймкипера): позиция + состояние play/pause.
-## Ненадёжно, но упорядоченно — отставшие/зашедшие подтянутся следующим пакетом. Несёт
-## playing, чтобы поздно зашедший синхронизировал и позицию, И состояние воспроизведения
-## (а не только при следующем явном play/pause).
-func send_video_sync(player_id: String, position: float, playing: bool) -> void:
+func unregister_replicated_schema(schema_id: String) -> void:
+	_replicated.unregister_schema(schema_id)
+
+
+func register_replicated_object(object_id: String, schema_id: String, initial: Dictionary = {},
+		owner_user_id: String = "") -> bool:
+	var ok := _replicated.ensure_object(object_id, schema_id, initial, owner_user_id)
+	if ok and not has_authority() and authority_id() != 0 and _can_rpc():
+		_replicated_resync = true
+		rpc_id(authority_id(), "_request_replicated_snapshot")
+	return ok
+
+
+func unregister_replicated_object(object_id: String, schema_id: String) -> void:
+	_replicated.remove_object(object_id, schema_id)
+
+
+## Read-only диагностика/адаптеры: локальная каноническая копия и её revision.
+func replicated_state(object_id: String, schema_id: String) -> Dictionary:
+	return _replicated.state_of(object_id, schema_id)
+
+
+func replicated_revision(object_id: String, schema_id: String) -> int:
+	return _replicated.revision_of(object_id, schema_id)
+
+
+func request_replicated_command(object_id: String, schema_id: String, version: int,
+		command: String, args: Dictionary) -> void:
+	if has_authority():
+		_commit_replicated_command(object_id, schema_id, version, command, args, _my_id)
+	elif _can_rpc() and authority_id() != 0:
+		rpc_id(authority_id(), "_recv_replicated_command", object_id, schema_id, version, command, args)
+
+
+func send_replicated_sample(object_id: String, schema_id: String, version: int, sample: Dictionary) -> void:
+	if not has_authority() or not _replicated.validate_sample(object_id, schema_id, version, sample):
+		return
+	replicated_sample_received.emit(_my_id, object_id, schema_id, sample.duplicate(true))
 	if _can_rpc():
-		rpc("_recv_video_sync", player_id, position, playing)
+		rpc("_recv_replicated_sample", object_id, schema_id, version, sample)
+
+
+func _commit_replicated_command(object_id: String, schema_id: String, version: int,
+		command: String, args: Dictionary, sender: int) -> void:
+	if not has_authority() or not _allow_replicated_command(sender):
+		return
+	var context := {
+		"peer_id": sender,
+		"user_id": Settings.user_id if sender == _my_id else str(_user_ids.get(sender, "")),
+		"rank": my_rank() if sender == _my_id else rank_of_peer(sender),
+		"verified": HomeServer.is_logged_in() if sender == _my_id else _verified.has(sender),
+		"is_authority": sender == authority_id(),
+		"authority_msec": Time.get_ticks_msec(),
+	}
+	var result := _replicated.commit_command(object_id, schema_id, version, command, args, context)
+	if bool(result.get("ok", false)) and _can_rpc():
+		rpc("_recv_replicated_delta", result["delta"])
+
+
+func _allow_replicated_command(sender: int) -> bool:
+	var second := int(Time.get_ticks_msec() / 1000)
+	var rate: Dictionary = _replicated_command_rates.get(sender, {"second": second, "count": 0})
+	if int(rate["second"]) != second:
+		rate = {"second": second, "count": 0}
+	rate["count"] = int(rate["count"]) + 1
+	_replicated_command_rates[sender] = rate
+	return int(rate["count"]) <= MAX_REPLICATED_COMMANDS_PER_SECOND
 
 
 ## Разослать голосовой кадр (закодированный VoiceCodec). Ненадёжно и по отдельному каналу 1,
@@ -544,6 +609,7 @@ func _refresh_authority() -> void:
 			# Эфемерный слой: поднимаем эпоху строго выше виденного, чтобы наши события были
 			# заведомо новее экс-авторитетских (см. docs/ephemeral-changes.md). Состояние — тёплая копия.
 			_scene.begin_authority()
+			_replicated.begin_authority()
 		elif a != 0 and _can_rpc():
 			# Авторитет сменился на другого пира — подтягиваем у него таблицу рангов и снимок
 			# эфемерной сцены (pull). Закрывает гонку: его push мог прийти по мешу раньше, чем мы
@@ -553,6 +619,8 @@ func _refresh_authority() -> void:
 			rpc_id(a, "_request_ranks")
 			_scene_resync = true
 			rpc_id(a, "_request_scene_snapshot")
+			_replicated_resync = true
+			rpc_id(a, "_request_replicated_snapshot")
 
 
 # --- Ранги (таблица user_id -> rank; владелец — авторитет). См. docs/ranks.md. ---
@@ -1150,6 +1218,9 @@ func _teardown_mesh() -> void:
 	_scene = SceneChanges.new()
 	_scene.reserved_ids = _scene_reserved
 	_scene_resync = false
+	_replicated.reset_session()
+	_replicated_resync = false
+	_replicated_command_rates.clear()
 	scene_reset.emit()
 	if _mesh != null:
 		if multiplayer.multiplayer_peer == _mesh:
@@ -1364,14 +1435,41 @@ func _request_ranks() -> void:
 
 
 @rpc("any_peer", "reliable", "call_remote")
-func _recv_video_event(player_id: String, action: String, position: float) -> void:
-	video_state_received.emit(multiplayer.get_remote_sender_id(), player_id, action, position)
+func _recv_replicated_command(object_id: String, schema_id: String, version: int,
+		command: String, args: Dictionary) -> void:
+	_commit_replicated_command(object_id, schema_id, version, command, args,
+			multiplayer.get_remote_sender_id())
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_replicated_delta(delta: Dictionary) -> void:
+	if not sender_is_authority():
+		return
+	var status := _replicated.apply_delta(delta)
+	if status == "gap" and not _replicated_resync and _can_rpc() and authority_id() != 0:
+		_replicated_resync = true
+		rpc_id(authority_id(), "_request_replicated_snapshot")
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_replicated_snapshot(snapshot: Dictionary) -> void:
+	if not sender_is_authority():
+		return
+	if _replicated.apply_snapshot(snapshot):
+		_replicated_resync = false
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _request_replicated_snapshot() -> void:
+	if has_authority() and _can_rpc():
+		rpc_id(multiplayer.get_remote_sender_id(), "_recv_replicated_snapshot", _replicated.snapshot())
 
 
 @rpc("any_peer", "unreliable_ordered", "call_remote")
-func _recv_video_sync(player_id: String, position: float, playing: bool) -> void:
-	var action := "sync_play" if playing else "sync_pause"
-	video_state_received.emit(multiplayer.get_remote_sender_id(), player_id, action, position)
+func _recv_replicated_sample(object_id: String, schema_id: String, version: int, sample: Dictionary) -> void:
+	if not sender_is_authority() or not _replicated.validate_sample(object_id, schema_id, version, sample):
+		return
+	replicated_sample_received.emit(multiplayer.get_remote_sender_id(), object_id, schema_id, sample)
 
 
 ## Голосовой кадр от пира. Канал 1 — отдельный от состояния/чата (см. send_voice).

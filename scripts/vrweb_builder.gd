@@ -52,7 +52,7 @@ const MODE_EXCLUSIVE := "exclusive"
 
 const MIRROR_SCENE := preload("res://scenes/vrweb_mirror.tscn")
 const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
-const VIDEO_SCREEN_SCRIPT := preload("res://scripts/vrweb_video_screen.gd")
+const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -353,7 +353,9 @@ func _build_video_player(elem: HtmlNode) -> Node:
 ## ИЛИ src="<url>" (свой неявный плеер). size — метры (как у зеркала); прочие атрибуты
 ## (transform и т.п.) — обычные свойства Node3D.
 func _build_video_screen(elem: HtmlNode) -> Node:
-	var node = VIDEO_SCREEN_SCRIPT.new()
+	# Экран — составная сцена (Mesh/Collision/Placeholder/PlaybackUI), а не голый экземпляр
+	# скрипта. Script.new() создаёт только StaticBody3D и ломает все @onready-пути.
+	var node := VIDEO_SCREEN_SCENE.instantiate() as VrwebVideoScreen
 	var src := ""
 	if elem.has_attr("src"):
 		src = PageFetcher.resolve_url(elem.get_attr("src"), _base_url)
