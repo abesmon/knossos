@@ -2,6 +2,7 @@ class_name VrwebBuilder
 extends RefCounted
 
 const IMAGE_PANEL_SCENE := preload("res://actors/image_panel/image_panel.tscn")
+const PUBLIC_CLASSES := preload("res://scripts/vrwml_class_registry.gd")
 
 ## Парсер собственного синтаксиса VRWeb: блок <vrweb> внутри HTML-документа, который
 ## описывает 3D-сцену напрямую узлами Godot (Слой 1, расширение из docs/vrweb-overview.md).
@@ -225,10 +226,13 @@ func _build_resources(block: HtmlNode) -> void:
 		if id == "":
 			Log.warn("builder", "<Resource> без id — пропущен")
 			continue
-		if not _can_instantiate(type):
+		var resource := PUBLIC_CLASSES.instantiate_resource(type)
+		if resource == null and _can_instantiate(type):
+			resource = ClassDB.instantiate(type) as Resource
+		if resource == null:
 			Log.warn("builder", "неизвестный тип ресурса «%s» (id=%s)" % [type, id])
 			continue
-		_resources[id] = ClassDB.instantiate(type)
+		_resources[id] = resource
 
 	for def in defs:
 		var id := def.get_attr("id")
@@ -282,10 +286,12 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		_ingest_blob(elem)
 		return null
 	var cls := elem.raw_tag
-	if not _can_instantiate(cls):
+	var obj: Object = PUBLIC_CLASSES.instantiate_node(cls)
+	if obj == null and _can_instantiate(cls):
+		obj = ClassDB.instantiate(cls)
+	if obj == null:
 		Log.warn("builder", "неизвестный класс узла «%s» — пропущен" % cls)
 		return null
-	var obj: Object = ClassDB.instantiate(cls)
 	if not (obj is Node):
 		Log.warn("builder", "«%s» — не Node, пропущен" % cls)
 		if obj is Object and not (obj is RefCounted):
@@ -330,7 +336,13 @@ func _apply_attributes(obj: Object, elem: HtmlNode) -> void:
 			else:
 				Log.warn("builder", "ссылка на неизвестный ExtResource «%s»" % id)
 			continue
-		obj.set(key, _resolve_value(raw))
+		var value: Variant = _resolve_value(raw)
+		var current = obj.get(key)
+		if current is Array and current.is_typed() and value is Array:
+			var typed: Array = current.duplicate()
+			typed.assign(value)
+			value = typed
+		obj.set(key, value)
 
 
 func _property_allowed(obj: Object, property: String, raw: String) -> bool:
@@ -598,7 +610,27 @@ func _resolve_value(raw: String) -> Variant:
 	var parsed: Variant = str_to_var(raw)
 	if parsed == null:
 		return raw   # не литерал Godot (обычная строка без кавычек)
-	return parsed
+	return _resolve_nested_resource_refs(parsed)
+
+
+func _resolve_nested_resource_refs(value: Variant) -> Variant:
+	if value is String and value.begins_with(SUBRESOURCE_PREFIX):
+		var id: String = str(value).substr(SUBRESOURCE_PREFIX.length())
+		if not _resources.has(id):
+			Log.warn("builder", "ссылка на неизвестный SubResource «%s»" % id)
+			return null
+		return _resources[id]
+	if value is Array:
+		var resolved: Array = []
+		for item in value:
+			resolved.append(_resolve_nested_resource_refs(item))
+		return resolved
+	if value is Dictionary:
+		var resolved := {}
+		for key in value:
+			resolved[key] = _resolve_nested_resource_refs(value[key])
+		return resolved
+	return value
 
 
 # --- Правила спавна (<VRWebSpawner>) ---

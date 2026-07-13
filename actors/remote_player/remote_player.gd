@@ -200,8 +200,9 @@ func set_state(pos: Vector3, yaw: float, params: Dictionary) -> void:
 		rotation.y = yaw
 		_has_target = true
 	if _host != null:
-		_host.apply_params(params)
-		# Снимок пришёл от владельца, где он локален — на нашей стороне аватар не локальный.
+		# Local-context параметры принадлежат этому клиенту: игнорируем их даже от старого или
+		# недоверенного отправителя, который всё ещё положил их в snapshot.
+		_host.apply_params(AvatarParams.network_snapshot(params))
 		_host.set_param(AvatarParams.IS_LOCAL, false)
 
 

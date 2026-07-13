@@ -2,8 +2,8 @@
 
 > **Суть:** обратное к [vrweb-tags.md](space/vrweb-tags.md) направление. Сцену собирают в
 > редакторе Godot обычными узлами, жмут **Экспорт** — и плагин генерирует HTML-документ
-> с блоком `<vrweb>`. Плюс авторинг внешних ресурсов по URL и дебаг-превью, чтобы увидеть
-> их прямо в редакторе без записи в файлы.
+> с блоком `<vrweb>` либо standalone `.vrwml`. Плюс авторинг внешних ресурсов по URL,
+> импорт avatar VRWML в редактируемую `.tscn` и дебаг-превью ресурсов.
 
 Плагин: `addons/vrweb_tools/` (включается в Project → Plugins, уже включён в `project.godot`).
 Док-панель «VRWeb» появляется справа-снизу.
@@ -12,9 +12,13 @@
 
 ## Что делает плагин
 
-| Действие (кнопка дока) | Результат |
+| Действие | Результат |
 |---|---|
-| **Экспорт в HTML…** | сериализует открытую сцену в standalone `.html` с блоком `<vrweb>` |
+| Scene → Export As… → **VRWeb Scene…** → `VRWML scene` | сериализует открытую сцену в standalone `.vrwml`, включая корень сцены |
+| Scene → Export As… → **VRWeb Scene…** → `HTML with VRWeb wrapper` | сериализует открытую сцену в `.html` с блоком `<vrweb>`; dialog option выбирает `combine`/`exclusive` |
+| **Preview Avatar VRWML…** | временно добавляет проверенный Avatar только в 3D viewport без `owner`; SceneTree dock не меняется и `.tscn` не загрязняется |
+| **Очистить Avatar preview** | удаляет временный Avatar и его незавершённые resource loaders |
+| **Avatar VRWML → редактируемая TSCN…** | fallback для документа с `ExtResource`: дожидается ресурсов и сохраняет materialized editable `.tscn` |
 | **Привязать к узлу** | вешает внешний ресурс (URL+тип) на выбранный узел — в его метадату |
 | **Убрать привязку** | снимает привязку свойства/`<ExtScene>` |
 | **Загрузить превью** | качает все `<ExtResource>` сцены и временно подставляет (без сохранения) |
@@ -83,6 +87,20 @@ Package-срез намеренно отклоняет `@tool`, `class_name`, а
 4. **Спавн:** узел `VrwebSpawner` (`@export mode: first|random`) + дети `Marker3D` —
    экспортятся как `<VRWebSpawner>`/`<SpawnerPoint>`. Сам спавнер в сцену клиента не идёт.
 
+Для standalone VRWML корень не является служебным holder-ом и тоже сериализуется. Scripted
+avatar-классы получают публичные теги через `VrwmlClassRegistry`; Script/source code в этот
+режим не экспортируются. Поддерживаемое avatar-подмножество и ограничения описаны в
+[vrwml-format-and-pipeline.md](space/vrwml-format-and-pipeline.md).
+
+`AvatarAnimationTreeApplier.animation_tree` экспортируется как относительный
+`animation_tree_path: NodePath`. Массив `bindings` использует обычные ссылки
+`SubResource:::id` на публичные ресурсы `AvatarParamBinding`, включая восстановление typed
+array при импорте.
+
+Avatar preview/import работают fail-closed: запрещённый класс, resource type, Script/property
+или превышенный budget попадает в structured diagnostics `AvatarVrwmlPolicy`, после чего
+частично собранное дерево не показывается и не сохраняется.
+
 ### Внешние ресурсы (URL) — `VrwebExtResource` в метадате
 
 Типы вроде `Sprite3D.texture` не примут произвольный ресурс, поэтому ext-ресурс хранится
@@ -121,6 +139,9 @@ Package-срез намеренно отклоняет `@tool`, `class_name`, а
 | `addons/vrweb_tools/vrweb_spawner.gd` | `VrwebSpawner` — узел-маркер правил спавна |
 | `addons/vrweb_tools/vrweb_ext_preview.gd` | `VrwebExtPreview` — сбор меты + превью + очистка |
 | `addons/vrweb_tools/vrweb_tools_plugin.gd` | `EditorPlugin` — док и обработчики кнопок |
+| `addons/vrweb_tools/vrwml_avatar_scene_importer.gd` | Нативный `EditorSceneFormatImporter`: `.vrwml` появляется в Import/FileSystem dock как Godot scene |
+| [scripts/vrwml_class_registry.gd](../scripts/vrwml_class_registry.gd) | Симметричное отображение public VRWML tag ↔ Godot implementation |
+| [actors/avatar/avatar_vrwml_policy.gd](../actors/avatar/avatar_vrwml_policy.gd) | Контекстная allowlist/budgets для avatar VRWML |
 | [scripts/vrweb_ext_injector.gd](../scripts/vrweb_ext_injector.gd) | `VrwebExtInjector.inject(ext, image_loader, host)` — общая докачка/вставка ext-ресурсов (рантайм + превью) |
 
 Сериализация значений — `var_to_str` (даёт `Transform3D(...)`/`Vector3(...)`/числа/`"строки"`),
@@ -128,14 +149,50 @@ Package-срез намеренно отклоняет `@tool`, `class_name`, а
 (`& < > "` → сущности), а `HtmlParser._decode_entities` декодирует обратно — round-trip строк
 с кавычками сохраняется.
 
+### Нативный импорт `.vrwml`
+
+Плагин регистрирует `.vrwml` через `EditorSceneFormatImporter`. После filesystem scan файл
+получает обычный Godot Import lifecycle и открывается из FileSystem dock как импортированная
+сцена. Для редактирования используется стандартный workflow Godot — inherited/local scene.
+
+Scene importer синхронный, поэтому документ с `<ExtResource>` он отклоняет вместо создания
+частичной сцены. Для такого документа остаётся явная команда editable copy: она использует
+асинхронные loaders, дожидается ресурсов и только затем сохраняет `.tscn`.
+
+Содержимое док-панели находится в `ScrollContainer`: при недостаточной высоте прокручивается
+сама панель, а не раздувается весь нижний dock.
+
+### Нативный экспорт `.vrwml`
+
+Плагин добавляет `VRWeb Scene…` в штатное меню Godot `Scene → Export As…` через
+`EditorPlugin.get_export_as_menu()`. Команда экспортирует текущую открытую сцену тем же
+`VrwebExporter`, что используется остальным pipeline, и показывает обычный resource file dialog.
+
+Тип файла в Save As определяет envelope: `*.vrwml` сохраняет чистый VRWML, `*.html` — HTML с
+вложенным `<vrweb>`. Штатная option `HTML scene mode` выбирает `combine` или `exclusive` и для
+`.vrwml` игнорируется. Формат намеренно определяется расширением, а не отдельным dropdown:
+так filename, file filter и стандартное предупреждение о перезаписи всегда относятся к одному
+реальному output path.
+
+Это именно **export**, а не `Save Scene As`: исходная `.tscn` остаётся редактируемым source of
+truth, её путь не меняется, а `.vrwml` создаётся как производный переносимый документ. Поэтому
+регистрировать `ResourceFormatSaver<PackedScene>` для `.vrwml` не нужно: такой saver смешал бы
+authoring и distribution lifecycle и мог бы переключить открытую сцену на импортируемый файл.
+
+Кнопки scene export из dock удалены как дубликаты; dock остаётся для preview/import, scripts и
+external-resource tooling.
+
 ---
 
 ## Проверка
 
 - Headless round-trip: `godot --headless --path . --script res://tests/test_export.gd`
   (собирает сцену → экспорт → `HtmlParser` → `VrwebBuilder` → сверка узлов/ресурсов/ext/спавна).
-- В редакторе: собрать мини-сцену, привязать ext к `Sprite3D.texture`, «Загрузить превью»,
-  «Экспорт в HTML…» в `res://test_pages/`, затем открыть `vrwebresource://<файл>.html` в клиенте.
+- Avatar VRWML round-trip и generated drift: `godot --headless --path . res://tests/test_avatar_vrwml.tscn`.
+  Для регенерации `avatars/avatar_N.vrwml`: добавить `-- --write-vrwml`.
+- В редакторе: собрать мини-сцену, выбрать `Scene → Export As… → VRWeb Scene…`, затем выбрать
+  `VRWML scene` или `HTML with VRWeb wrapper` в file type selector. Для HTML дополнительно
+  проверить оба значения `HTML scene mode`.
 
 ---
 

@@ -4,23 +4,22 @@ extends Node
 ## Резолвит идентификатор аватара (строку из identity-карточки игрока) в PackedScene.
 ## Две схемы:
 ##
-##   vrwebavatar://N  — аватар №N из бандл-пака приложения (res://avatars/avatar_N.tscn).
+##   vrwebavatar://N  — аватар №N из бандл-пака приложения (avatar_N.vrwml; локальный .tscn
+##                      остаётся только dev fallback authoring-проекта).
 ##                      N — 1,2,3…; если N больше числа аватаров в паке, список
 ##                      ЗАКОЛЬЦОВЫВАЕТСЯ (по модулю). Грузится синхронно из res://.
-##   http(s)://…tscn  — внешний аватар: качаем байты, кладём в кэш user:// и грузим как
-##                      PackedScene. Самодостаточные сцены/ресурсы (или ссылающиеся только на
-##                      ресурсы приложения) — ок; свои внешние ассеты не подтянутся.
-##
-## ВНИМАНИЕ (безопасность): внешний .tscn может нести скрипты/произвольные классы — его
-## инстанцирование = выполнение чужого кода. Это тот же принятый риск, что и у VRWeb-страниц;
-## до выхода на реальные URL источник аватаров должен быть доверенным. См. docs/avatars.md.
+##   http(s)://…vrwml — внешний data-only аватар: существующие HtmlParser/VrwebBuilder,
+##                      контекстная allowlist, затем упаковка результата в PackedScene.
+## Другие HTTP-форматы, включая `.tscn`, отклоняются и не обходят data-only policy через
+## движковый PackedScene loader.
 
 const PACK_DIR := "res://avatars/"
 const SCHEME_BUNDLED := "vrwebavatar://"
 const DEFAULT_URI := "vrwebavatar://1"
-const CACHE_DIR := "user://avatar_cache/"
 const MAX_BYTES := 32 * 1024 * 1024   # потолок размера внешнего аватара, байт
 const USER_AGENT := "VRWeb/0.1 (Godot; +knossos)"
+
+var _image_loader: ImageLoader
 
 # --- Манифест прав (см. docs/avatars.md → «Защита владения аватаром») ---
 const MANIFEST_SUFFIX := ".manifest.json"
@@ -37,37 +36,47 @@ var _manifest_cache := {}
 func resolve(uri: String, on_ready: Callable) -> void:
 	uri = uri.strip_edges()
 	if uri.begins_with(SCHEME_BUNDLED):
-		on_ready.call(_resolve_bundled(uri))
+		_resolve_bundled(uri, on_ready)
 	elif uri.begins_with("http://") or uri.begins_with("https://"):
 		_resolve_remote(uri, on_ready)
 	else:
 		# Неизвестная/пустая схема — дефолтный аватар из пака.
-		on_ready.call(_resolve_bundled(DEFAULT_URI))
+		_resolve_bundled(DEFAULT_URI, on_ready)
 
 
 # --- vrwebavatar://N ---
 
-func _resolve_bundled(uri: String) -> PackedScene:
+func _resolve_bundled(uri: String, on_ready: Callable) -> void:
 	var n := int(uri.substr(SCHEME_BUNDLED.length()))
 	var count := _pack_count()
 	if count <= 0:
-		return null
+		on_ready.call(null)
+		return
 	# Закольцовка: 1-based индекс по модулю числа аватаров в паке.
 	var idx := ((n - 1) % count + count) % count + 1
-	return load(PACK_DIR + "avatar_%d.tscn" % idx) as PackedScene
+	var vrwml_path := PACK_DIR + "avatar_%d.vrwml" % idx
+	if FileAccess.file_exists(vrwml_path):
+		_resolve_vrwml_text(FileAccess.get_file_as_string(vrwml_path), vrwml_path, on_ready)
+		return
+	on_ready.call(load(PACK_DIR + "avatar_%d.tscn" % idx) as PackedScene)
 
 
 ## Сколько аватаров в паке: считаем подряд avatar_1, avatar_2, … пока существуют.
 func _pack_count() -> int:
 	var c := 0
-	while ResourceLoader.exists(PACK_DIR + "avatar_%d.tscn" % (c + 1)):
+	while FileAccess.file_exists(PACK_DIR + "avatar_%d.vrwml" % (c + 1)) \
+			or ResourceLoader.exists(PACK_DIR + "avatar_%d.tscn" % (c + 1)):
 		c += 1
 	return c
 
 
-# --- http(s)://…tscn ---
+# --- http(s)://…vrwml ---
 
 func _resolve_remote(uri: String, on_ready: Callable) -> void:
+	if _uri_extension(uri) != "vrwml":
+		Log.warn("avatar", "внешний аватар должен иметь расширение .vrwml: %s" % uri)
+		on_ready.call(null)
+		return
 	var http := HTTPRequest.new()
 	http.use_threads = true
 	http.accept_gzip = true
@@ -76,29 +85,79 @@ func _resolve_remote(uri: String, on_ready: Callable) -> void:
 	http.request_completed.connect(
 		func(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 			http.queue_free()
-			on_ready.call(_scene_from_bytes(uri, result, code, body))
+			if result != HTTPRequest.RESULT_SUCCESS or code >= 400 or body.is_empty():
+				Log.warn("avatar", "не удалось скачать VRWML-аватар: %s (result %d, code %d)" \
+						% [uri, result, code])
+				on_ready.call(null)
+			else:
+				_resolve_vrwml_text(body.get_string_from_utf8(), uri, on_ready)
 	)
 	if http.request(uri, ["User-Agent: " + USER_AGENT]) != OK:
 		http.queue_free()
 		on_ready.call(null)
 
 
-func _scene_from_bytes(uri: String, result: int, code: int, body: PackedByteArray) -> PackedScene:
-	if result != HTTPRequest.RESULT_SUCCESS or code >= 400 or body.is_empty():
-		Log.warn("avatar", "не удалось скачать аватар: %s (result %d, code %d)" % [uri, result, code])
+# --- VRWML -> Avatar -> PackedScene ---
+
+func _resolve_vrwml_text(text: String, base_url: String, on_ready: Callable) -> void:
+	var doc := HtmlParser.parse(text)
+	var policy := AvatarVrwmlPolicy.new()
+	var built := VrwebBuilder.build(doc, base_url, null, policy)
+	var holder := built.get("root") as Node3D
+	if policy.has_errors() or not bool(built.get("found", false)) or holder == null \
+			or holder.get_child_count() != 1:
+		var detail := " (%s)" % policy.summary() if policy.has_errors() else ""
+		Log.warn("avatar", "VRWML-аватар отклонён%s: %s" % [detail, base_url])
+		if holder != null:
+			holder.free()
+		on_ready.call(null)
+		return
+	var avatar := holder.get_child(0) as Avatar
+	if avatar == null:
+		Log.warn("avatar", "корень VRWML-документа не является Avatar: %s" % base_url)
+		holder.free()
+		on_ready.call(null)
+		return
+	holder.remove_child(avatar)
+	holder.free()
+
+	var finish := func() -> void:
+		on_ready.call(_pack_avatar(avatar, base_url))
+	var ext: Dictionary = built.get("ext", {})
+	if ext.get("targets", []).is_empty():
+		finish.call()
+		return
+	_ensure_image_loader()
+	VrwebExtInjector.inject(ext, _image_loader, self, finish)
+
+
+func _pack_avatar(avatar: Avatar, source: String) -> PackedScene:
+	_set_owner_recursive(avatar, avatar)
+	var packed := PackedScene.new()
+	var err := packed.pack(avatar)
+	avatar.free()
+	if err != OK:
+		Log.warn("avatar", "не удалось упаковать VRWML-аватар %s (код %d)" % [source, err])
 		return null
-	var cache_dir := Sandbox.resolve(CACHE_DIR)
-	DirAccess.make_dir_recursive_absolute(cache_dir)
-	var ext := uri.get_slice("?", 0).get_file().get_extension()
-	if ext == "":
-		ext = "tscn"
-	var path := cache_dir + str(hash(uri)) + "." + ext
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	if f == null:
-		return null
-	f.store_buffer(body)
-	f.close()
-	return ResourceLoader.load(path, "PackedScene") as PackedScene
+	return packed
+
+
+func _set_owner_recursive(node: Node, root: Node) -> void:
+	for child in node.get_children():
+		child.owner = root
+		_set_owner_recursive(child, root)
+
+
+func _ensure_image_loader() -> void:
+	if _image_loader != null:
+		return
+	_image_loader = ImageLoader.new()
+	_image_loader.name = "AvatarImageLoader"
+	add_child(_image_loader)
+
+
+func _uri_extension(uri: String) -> String:
+	return uri.get_slice("?", 0).get_extension().to_lower()
 
 
 # --- Манифест прав ---

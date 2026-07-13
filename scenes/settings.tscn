@@ -198,7 +198,7 @@ text = "Сбросить"
 
 [node name="AvatarLabel" type="Label" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=156735911]
 layout_mode = 2
-text = "Адрес аватара (vrwebavatar://N или https://…tscn)"
+text = "Адрес аватара (vrwebavatar://N или https://…vrwml)"
 
 [node name="AvatarRow" type="HBoxContainer" parent="Panel/Margin/VBoxContainer/TabContainer/NetSettings/Content" unique_id=2130071836]
 layout_mode = 2

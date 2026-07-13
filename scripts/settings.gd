@@ -15,7 +15,8 @@ const DEFAULT_FACE := "res://resources/default_face.png"
 const FACE_SIZE := 256
 ## Идентификатор аватара по умолчанию — первый из бандл-пака. Передаётся другим игрокам в
 ## карточке идентичности; они резолвят его через AvatarResolver. Схемы: vrwebavatar://N
-## (пак приложения) или http(s)://…tscn (внешний). См. actors/avatar/avatar_resolver.gd.
+## (пак приложения) или http(s)://…vrwml (data-only).
+## См. actors/avatar/avatar_resolver.gd.
 const DEFAULT_AVATAR_URI := "vrwebavatar://1"
 
 ## Звуковые шины с отдельными ползунками громкости (см. default_bus_layout.tres, docs/audio.md).

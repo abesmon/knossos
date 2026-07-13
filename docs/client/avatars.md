@@ -6,6 +6,12 @@
 > знают друг о друге — связаны только контрактом параметров. Один сигнал разные аватары
 > трактуют по-разному.
 
+> **Формат:** built-in аватары поставляются как data-only `.vrwml`; их `.tscn` остаются
+> authoring-файлами Godot и исключены из runtime export. Внешний `.vrwml` проходит
+> контекстную avatar-policy; внешний `.tscn` отклоняется.
+> Публичные VRWML-классы и границы round-trip описаны в
+> [vrwml-format-and-pipeline.md](../space/vrwml-format-and-pipeline.md).
+
 ## Граница сети и клиента
 
 Аватар живёт **на стыке двух слоёв**, и это легко перепутать. Разводим явно:
@@ -94,8 +100,8 @@
 | `AvatarHost` | [actors/avatar/avatar_host.gd](../../actors/avatar/avatar_host.gd) | Крепление: владеет шиной, монтирует/меняет аватар, кормит параметрами |
 | `AvatarResolver` | [actors/avatar/avatar_resolver.gd](../../actors/avatar/avatar_resolver.gd) | Резолвит `avatar_uri` (`vrwebavatar://N` / внешний URL) в `PackedScene`; и манифест прав (`resolve_manifest`) |
 | `AvatarManifest` | [actors/avatar/avatar_manifest.gd](../../actors/avatar/avatar_manifest.gd) | Манифест прав на аватар: `allow`-паттерны + `evaluate` → вердикт легитимности (см. ниже) |
-| Бандл-пак `avatar_1` | [avatars/avatar_1.tscn](../../avatars/avatar_1.tscn) | Дефолт: капсула + квад лица; `LookPitchApplier` (factor 0.35) + `UserTextureApplier` + `VoiceScaleApplier` (рот `Face/MouthObject`) |
-| Бандл-пак `avatar_2` | [avatars/avatar_2.tscn](../../avatars/avatar_2.tscn) | Тот же `LookPitchApplier`, но factor −1.0: полный поворот головы-узла; + `VoiceScaleApplier` (рот `Head/MouthObject`) |
+| Бандл-пак `avatar_1` | [runtime VRWML](../../avatars/avatar_1.vrwml), [authoring TSCN](../../avatars/avatar_1.tscn) | Дефолт: капсула + квад лица; `LookPitchApplier` (factor 0.35) + `UserTextureApplier` + `VoiceScaleApplier` (рот `Face/MouthObject`) |
+| Бандл-пак `avatar_2` | [runtime VRWML](../../avatars/avatar_2.vrwml), [authoring TSCN](../../avatars/avatar_2.tscn) | Тот же `LookPitchApplier`, но factor −1.0: полный поворот головы-узла; + `VoiceScaleApplier` (рот `Head/MouthObject`) |
 
 `RemotePlayer` — носитель аватара: тело делегировано `AvatarHost`, а неймплейт и речевой бабл
 (UI поверх любого аватара) остались на корне.
@@ -110,7 +116,57 @@
 Имена и типы выровнены по [встроенным параметрам аниматора VRChat](https://creators.vrchat.com/avatars/animator-parameters/).
 Все имена — константы в `AvatarParams`, чтобы источники и аватары не расходились.
 
-### A. Вычисляются и передаются сейчас
+### Нормативный контракт v1
+
+Статус определяет обещание совместимости:
+
+- `current/network` — значение производится сейчас и входит в state snapshot;
+- `current/context` — производится сейчас самим принимающим клиентом;
+- `optional/default` — имя, тип и default стабильны, но источник может отсутствовать;
+- `reserved-name` — зарезервировано только имя; тип/default пока не стандартизированы.
+
+| Имя | Статус | Тип / единицы | Default | Диапазон / смысл |
+|---|---|---|---|---|
+| `LookPitch` | current/network | Float, рад | `0.0` | `[-1.4, 1.4]`; положительное значение — взгляд вверх |
+| `Grounded` | current/network | Bool | `true` | тело касается земли |
+| `VelocityX/Y/Z` | current/network | Float, м/с | `0.0` | локальные оси тела; Z: вперёд отрицательно |
+| `VelocityMagnitude` | current/network | Float, м/с | `0.0` | `>= 0` |
+| `AngularY` | current/network | Float, рад/с | `0.0` | угловая скорость корпуса |
+| `Moving` | current/network | Bool | `false` | `VelocityMagnitude > 0.1` |
+| `IsLocal` | current/context | Bool | `false` | `true` только на аватаре самого пользователя |
+| `Voice` | current/context | Float | `0.0` | `[0, 1]`, локально измеренная громкость |
+| `Upright` | optional/default | Float | `1.0` | `[0, 1]`: лёжа → стоя |
+| `VRMode` | optional/default | Int | `0` | `0` desktop, `1` VR |
+| `MuteSelf` | optional/default | Bool | `false` | пользователь замьютил себя |
+| `AFK` | optional/default | Bool | `false` | пользователь отошёл |
+| `Seated` | optional/default | Bool | `false` | сидит в station |
+| `InStation` | optional/default | Bool | `false` | находится в station |
+| `AvatarVersion` | optional/default | Int | `1` | версия parameter contract, сейчас `AvatarParams.VERSION` |
+
+При неизвестном параметре клиент может сохранить/передать его как extension, но стандартный
+аппликатор не обязан его интерпретировать. При неизвестном optional input используется default.
+
+#### Владение параметром и миграция в local-context
+
+`AvatarParams.LOCAL_CONTEXT_PARAMS` — единая таблица параметров, источником истины для которых
+является принимающий клиент. `AvatarParameterSource.snapshot()` удаляет их перед отправкой, а
+`RemotePlayer` повторяет фильтрацию на входе: старый или недоверенный пир не может навязать
+локальное значение. Неизвестные extension-параметры при этом не удаляются.
+
+Параметр разрешено переводить из network-owned в local-context. Например, если позже клиент
+научится надёжно определять `Grounded` удалённого тела по своей физике:
+
+1. новый получатель начинает локально вычислять `Grounded`, добавляет его в
+   `LOCAL_CONTEXT_PARAMS` и игнорирует сетевое значение;
+2. отправители некоторое время могут продолжать слать `Grounded` для старых клиентов;
+3. после окна совместимости новые отправители перестают его слать автоматически через тот же
+   registry.
+
+Таким образом, authority определяется возможностями наблюдающего клиента, а не заявлением
+аватара или отправителя. Сейчас `Grounded` остаётся network-owned; local-context — только
+`IsLocal` и `Voice`.
+
+### Текущие источники
 
 | Имя | Тип | Источник | Описание |
 |---|---|---|---|
@@ -135,7 +191,7 @@
 > Так же, как подсветка неймплейта, это локальное вычисление по факту звука. Завязка на параметр —
 > `VoiceScaleApplier` («рот» бандл-аватаров). См. [voice-chat.md](voice-chat.md).
 
-### B. Заложены в контракт с дефолтами (пока статичны)
+### Optional-параметры с дефолтами
 
 `Upright` (1.0), `VRMode` (0 — десктоп), `MuteSelf`, `AFK`, `Seated`, `InStation`,
 `AvatarVersion` (= `AvatarParams.VERSION` — версия нашего контракта; аватар может проверить и
@@ -144,12 +200,12 @@
 Оживают, когда появится их источник (приседания → `Upright`, VR → `VRMode`/`TrackingType`).
 Аватар уже сейчас может на них завязываться — будет читать дефолт.
 
-### C. Резерв имён (forward-compat, не производятся)
+### Reserved names (forward-compat, не производятся)
 
 `Viseme`, `GestureLeft/Right(+Weight)`, `TrackingType`, `Earmuffs`, `IsOnFriendsList`,
 `PreviewMode`, `IsAnimatorEnabled`, `Scale*`, `EyeHeight*` — нет соответствующих инпутов/
-систем (VR-контроллеры, lip-sync, скейл аватара). Имена объявлены, чтобы при появлении
-функций не плодить расхождений.
+систем (VR-контроллеры, lip-sync, скейл аватара). Зарезервировано только написание имени:
+типы, диапазоны и defaults будут зафиксированы при переводе параметра в optional/current.
 
 ## Как добавить параметр
 
@@ -231,15 +287,14 @@ emission… — в любом месте дерева), задав ему `defau
 
 | URI | Что значит |
 |---|---|
-| `vrwebavatar://N` | Аватар №N из **бандл-пака** `res://avatars/avatar_N.tscn` (грузится синхронно). N — 1,2,3…; если N больше числа аватаров в паке — список **закольцовывается** по модулю. |
-| `http(s)://…tscn` | **Внешний** аватар: качаем байты, кладём в `user://avatar_cache/`, грузим как `PackedScene`. Самодостаточные сцены/ресурсы (или ссылающиеся только на ресурсы приложения) — ок. |
+| `vrwebavatar://N` | Аватар №N из **бандл-пака** `res://avatars/avatar_N.vrwml` (грузится синхронно и собирается в `PackedScene`). N — 1,2,3…; если N больше числа аватаров в паке — список **закольцовывается** по модулю. Legacy `.tscn` используется только если generated VRWML отсутствует. |
+| `http(s)://…vrwml` | **Внешний data-only аватар:** документ разбирается общим parser/builder под `AvatarVrwmlPolicy`, затем внешние ресурсы подставляются и корень упаковывается в `PackedScene`. |
+| Другой `http(s)` формат | Отклоняется; в частности, `.tscn` не может обойти data-only policy. |
 
-> Дисковый кэш внешних аватаров (`user://avatar_cache/`) можно очистить в настройках:
-> вкладка **«Прочее» → Очистить кэш** (вместе с кэшем видео). Размер и очистку считает
-> `scripts/cache.gd` (`Cache.total_size()` / `Cache.clear()`), пути — через `Sandbox.resolve()`.
-
-**Бандл-пак** `res://avatars/` — это аватары, идущие с приложением; их можно добавлять,
-называя `avatar_1.tscn`, `avatar_2.tscn`, … подряд (число считается пробами `ResourceLoader`).
+**Бандл-пак** `res://avatars/` — это аватары, идущие с приложением. Канонические исходники
+называются `avatar_1.tscn`, `avatar_2.tscn`, …; generated-файлы рядом имеют расширение
+`.vrwml`. Runtime считает последовательность по наличию `.vrwml`; локальный `.tscn` учитывается
+только как dev fallback внутри authoring-проекта.
 Дефолт — `vrwebavatar://1` (он же дефолт `AvatarHost`). Резолвер асинхронный (внешний URL
 качается), в колбэке капсула перепроверяется (жива и аватар не сменился), повторный монтаж
 того же аватара пропускается.
@@ -314,7 +369,7 @@ emission… — в любом месте дерева), задав ему `defau
 | `avatar_uri` | адрес манифеста |
 |---|---|
 | `vrwebavatar://N` | `res://avatars/avatar_N.manifest.json` (тот же N после закольцовки) |
-| `http(s)://…/avatar.tscn` | `http(s)://…/avatar.manifest.json` (тот же путь, расширение → `.manifest.json`) |
+| `http(s)://…/avatar.vrwml` | `http(s)://…/avatar.manifest.json` (тот же путь, расширение → `.manifest.json`) |
 
 Это закрывает **подмену манифеста**. Перезалив (Боб скопировал байты на свой хост и там свой
 манифест) этим НЕ закрывается — см. выше, это неустранимо.
@@ -336,10 +391,9 @@ emission… — в любом месте дерева), задав ему `defau
 Встроенные аватары (`res://avatars/`) идут с манифестом `["*"]` — они часть клиента, носить их
 можно всем, предупреждения нет.
 
-> **Экспорт:** `*.manifest.json` — не импортируемый ресурс, поэтому при `export_filter=
-> all_resources` он НЕ попадёт в `.pck` сам по себе. В `export_presets.cfg` он добавлен в
-> `include_filter` (`avatars/*.manifest.json`); новые бандл-манифесты подпадают под тот же глоб.
-> Без этого встроенные аватары в собранном клиенте показывали бы «⚠».
+> **Экспорт:** `*.manifest.json` и `*.vrwml` — не импортируемые ресурсы, поэтому при
+> `export_filter=all_resources` они не попадут в `.pck` сами. В `export_presets.cfg` добавлены
+> `avatars/*.manifest.json,avatars/*.vrwml`, а authoring `avatars/*.tscn` исключены.
 
 ### Вердикт и три состояния
 
@@ -382,8 +436,10 @@ emission… — в любом месте дерева), задав ему `defau
 - **Доверие к сети.** `apply_params` принимает словарь от пира как есть. Сейчас параметры
   влияют только на анимацию (визуал), но при росте набора стоит валидировать типы/диапазоны
   на приёме, как уже делается для чата (`MAX_CHAT_CHARS`).
-- **Внешний аватар = выполнение чужого кода.** `vrwebavatar://N` безопасен (только ресурсы
-  приложения), но `http(s)://…tscn` инстанцирует скачанную сцену: она может нести скрипты/
-  произвольные классы — это тот же принятый риск, что и у VRWeb-страниц
-  ([vrweb ClassDB risk]). До выхода на реальные/недоверенные URL источник аватаров должен быть
-  доверенным; sandbox для внешних сцен — отдельная задача.
+- **VRWML — data-only, но не бесплатный.** `AvatarVrwmlPolicy` запрещает Script/source code,
+  применяет allowlist классов и типов ресурсов, denylist исполняемых свойств и бюджеты узлов,
+  ресурсов и свойств. Это уменьшает
+  поверхность исполнения, но тяжёлые разрешённые меши/текстуры всё равно требуют сетевых и
+  размерных лимитов на уровне загрузчика.
+- **Внешний `.tscn` не поддерживается.** Это намеренная граница: сетевой аватар не может
+  инстанцировать скачанный PackedScene со Script и произвольными классами.

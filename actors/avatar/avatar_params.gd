@@ -14,13 +14,16 @@ extends RefCounted
 ## смене контракта — аватар может проверить AVATAR_VERSION и не ломаться на чужой версии.
 const VERSION := 1
 
-# --- Группа A: вычисляем и передаём по сети уже сейчас ---
+# --- Группа A: производятся сейчас (network-owned или local-context) ---
 
 ## Наклон взгляда (рад): >0 вверх, <0 вниз. Наш сигнал — у VRChat голова идёт через
 ## трекинг, отдельного параметра нет.
 const LOOK_PITCH := &"LookPitch"
 ## true на аватаре, который «носит» локальный игрок; false на чужих капсулах.
 const IS_LOCAL := &"IsLocal"
+## Громкость голоса 0..1. Источник истины локален для наблюдателя: свой микрофон либо
+## декодированное аудио удалённого игрока. В state snapshot не передаётся.
+const VOICE := &"Voice"
 ## Касается ли тело земли (CharacterBody3D.is_on_floor()).
 const GROUNDED := &"Grounded"
 ## Скорость в локальных осях тела (м/с). X — вбок, Y — вверх, Z — вперёд(−)/назад(+).
@@ -39,10 +42,6 @@ const MOVING := &"Moving"
 
 ## Поза 0..1 (0 — лёжа, 1 — стоя). Приседаний/полёта-ничком пока нет → дефолт 1.0.
 const UPRIGHT := &"Upright"
-## Громкость голоса 0..1. Сорсится особняком (не из снимка по сети, а локально из аудио):
-## чужие капсулы — RemotePlayer из VoicePlayback; своё тело в зеркале — AvatarParameterSource из
-## VoiceManager (см. docs/avatars.md, voice-chat.md). Дефолт 0. Завязка: VoiceScaleApplier.
-const VOICE := &"Voice"
 ## 1 — VR, 0 — десктоп. Сейчас только десктоп → дефолт 0.
 const VR_MODE := &"VRMode"
 ## Игрок замьютил себя.
@@ -74,6 +73,16 @@ const SCALE_FACTOR_INVERSE := &"ScaleFactorInverse"
 const EYE_HEIGHT_METERS := &"EyeHeightAsMeters"
 const EYE_HEIGHT_PERCENT := &"EyeHeightAsPercent"
 
+# --- Владение значением / транспорт ---
+
+## Эти параметры принадлежат контексту принимающего клиента. Они не отправляются в state
+## snapshot и игнорируются, если старый/недоверенный клиент всё же прислал их. Такой registry
+## позволяет позже перевести сюда Grounded или другой параметр без изменения RPC/VRWML.
+const LOCAL_CONTEXT_PARAMS := {
+	IS_LOCAL: true,
+	VOICE: true,
+}
+
 ## Скорость (м/с), ниже которой считаем игрока стоящим (для MOVING).
 const MOVING_EPSILON := 0.1
 
@@ -92,6 +101,7 @@ static func defaults() -> Dictionary:
 		# Группа A
 		LOOK_PITCH: 0.0,
 		IS_LOCAL: false,
+		VOICE: 0.0,
 		GROUNDED: true,
 		VELOCITY_X: 0.0,
 		VELOCITY_Y: 0.0,
@@ -101,7 +111,6 @@ static func defaults() -> Dictionary:
 		MOVING: false,
 		# Группа B
 		UPRIGHT: 1.0,
-		VOICE: 0.0,
 		VR_MODE: 0,
 		MUTE_SELF: false,
 		AFK: false,
@@ -109,3 +118,16 @@ static func defaults() -> Dictionary:
 		IN_STATION: false,
 		AVATAR_VERSION: VERSION,
 	}
+
+
+## Сетевое представление шины: сохраняет network-owned и неизвестные extension-параметры,
+## но удаляет всё, чьим источником истины является принимающий клиент.
+static func network_snapshot(values: Dictionary) -> Dictionary:
+	var result := values.duplicate()
+	for pname in LOCAL_CONTEXT_PARAMS:
+		result.erase(pname)
+	return result
+
+
+static func is_local_context(pname: StringName) -> bool:
+	return LOCAL_CONTEXT_PARAMS.has(pname)

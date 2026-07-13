@@ -11,54 +11,94 @@ const EXPORT_TYPES := [
 	"AudioStreamMP3", "AudioStreamOggVorbis", "AudioStreamWAV",
 	"Mesh", "ArrayMesh", "PackedScene",
 ]
+const EXPORT_AS_VRWML_ID := 0x5652574D # "VRWM"
 
 var _dock: Control
+var _dock_scroll: ScrollContainer
 var _prop_edit: LineEdit
 var _url_edit: LineEdit
 var _type_opt: OptionButton
-var _mode_opt: OptionButton
 var _status: Label
 var _file_dialog: EditorFileDialog
+var _vrwml_open_dialog: EditorFileDialog
+var _tscn_save_dialog: EditorFileDialog
+var _vrwml_import_path := ""
+var _vrwml_open_mode := "import"
+var _vrwml_preview_avatar: Avatar
+var _vrwml_preview_loaders: Node
 var _preview: VrwebExtPreview
+var _vrwml_scene_importer: EditorSceneFormatImporter
 
 
 func _enter_tree() -> void:
 	_preview = VrwebExtPreview.new(self)
+	_register_export_as_menu()
 	_build_dock()
-	add_control_to_dock(DOCK_SLOT_RIGHT_BL, _dock)
+	add_control_to_dock(DOCK_SLOT_RIGHT_BL, _dock_scroll)
+	_vrwml_scene_importer = preload("res://addons/vrweb_tools/vrwml_avatar_scene_importer.gd").new()
+	add_scene_format_importer_plugin(_vrwml_scene_importer)
 
 	_file_dialog = EditorFileDialog.new()
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
 	_file_dialog.access = EditorFileDialog.ACCESS_RESOURCES
-	_file_dialog.add_filter("*.html", "HTML")
-	_file_dialog.current_dir = "res://test_pages/"
+	_file_dialog.add_filter("*.vrwml", "VRWML scene")
+	_file_dialog.add_filter("*.html", "HTML with VRWeb wrapper")
+	_file_dialog.add_option("HTML scene mode", PackedStringArray([
+		VrwebBuilder.MODE_COMBINE,
+		VrwebBuilder.MODE_EXCLUSIVE,
+	]), 0)
 	_file_dialog.file_selected.connect(_on_export_path_chosen)
 	EditorInterface.get_base_control().add_child(_file_dialog)
 
+	_vrwml_open_dialog = EditorFileDialog.new()
+	_vrwml_open_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
+	_vrwml_open_dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	_vrwml_open_dialog.add_filter("*.vrwml", "VRWML")
+	_vrwml_open_dialog.current_dir = "res://avatars/"
+	_vrwml_open_dialog.file_selected.connect(_on_vrwml_import_chosen)
+	EditorInterface.get_base_control().add_child(_vrwml_open_dialog)
+
+	_tscn_save_dialog = EditorFileDialog.new()
+	_tscn_save_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
+	_tscn_save_dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	_tscn_save_dialog.add_filter("*.tscn", "Godot scene")
+	_tscn_save_dialog.file_selected.connect(_on_vrwml_tscn_chosen)
+	EditorInterface.get_base_control().add_child(_tscn_save_dialog)
+
 
 func _exit_tree() -> void:
-	remove_control_from_docks(_dock)
-	if is_instance_valid(_dock):
-		_dock.queue_free()
+	_clear_vrwml_preview()
+	_unregister_export_as_menu()
+	if _vrwml_scene_importer != null:
+		remove_scene_format_importer_plugin(_vrwml_scene_importer)
+		_vrwml_scene_importer = null
+	remove_control_from_docks(_dock_scroll)
+	if is_instance_valid(_dock_scroll):
+		_dock_scroll.queue_free()
 	if is_instance_valid(_file_dialog):
 		_file_dialog.queue_free()
+	if is_instance_valid(_vrwml_open_dialog):
+		_vrwml_open_dialog.queue_free()
+	if is_instance_valid(_tscn_save_dialog):
+		_tscn_save_dialog.queue_free()
 
 
 # --- Построение дока ---
 
 func _build_dock() -> void:
+	_dock_scroll = ScrollContainer.new()
+	_dock_scroll.name = "VRWeb"
+	_dock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_dock_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_dock = VBoxContainer.new()
-	_dock.name = "VRWeb"
+	_dock.name = "Content"
+	_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_dock_scroll.add_child(_dock)
 
-	_dock.add_child(_heading("Экспорт сцены"))
-	var mode_row := HBoxContainer.new()
-	mode_row.add_child(_label("Режим:"))
-	_mode_opt = OptionButton.new()
-	_mode_opt.add_item("combine")
-	_mode_opt.add_item("exclusive")
-	mode_row.add_child(_mode_opt)
-	_dock.add_child(mode_row)
-	_dock.add_child(_button("Экспорт в HTML…", _on_export_pressed))
+	_dock.add_child(_heading("Avatar VRWML"))
+	_dock.add_child(_button("Preview Avatar VRWML…", _on_preview_vrwml_pressed))
+	_dock.add_child(_button("Очистить Avatar preview", _on_clear_vrwml_preview_pressed))
+	_dock.add_child(_button("Avatar VRWML → редактируемая TSCN…", _on_import_vrwml_pressed))
 	_dock.add_child(_sep())
 	_dock.add_child(_heading("Script выбранного узла"))
 	_dock.add_child(_button("Экспортировать inline", _on_script_inline_pressed))
@@ -115,13 +155,36 @@ func _sep() -> HSeparator:
 	return HSeparator.new()
 
 
+func _register_export_as_menu() -> void:
+	var menu := get_export_as_menu()
+	if menu.get_item_index(EXPORT_AS_VRWML_ID) >= 0:
+		return
+	menu.add_item("VRWeb Scene…", EXPORT_AS_VRWML_ID)
+	var index := menu.get_item_index(EXPORT_AS_VRWML_ID)
+	menu.set_item_metadata(index, _on_export_scene_pressed)
+
+
+func _unregister_export_as_menu() -> void:
+	var menu := get_export_as_menu()
+	var index := menu.get_item_index(EXPORT_AS_VRWML_ID)
+	if index >= 0:
+		menu.remove_item(index)
+
+
 # --- Действия ---
 
-func _on_export_pressed() -> void:
-	if EditorInterface.get_edited_scene_root() == null:
+func _on_export_scene_pressed() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
 		_say("Нет открытой сцены для экспорта.")
 		return
-	_file_dialog.popup_centered_ratio(0.6)
+	var source_path := root.scene_file_path
+	var basename := root.name.to_snake_case()
+	if not source_path.is_empty():
+		_file_dialog.current_dir = source_path.get_base_dir()
+		basename = source_path.get_file().get_basename()
+	_file_dialog.current_file = basename + ".vrwml"
+	_file_dialog.popup_file_dialog()
 
 
 func _on_export_path_chosen(path: String) -> void:
@@ -129,20 +192,154 @@ func _on_export_path_chosen(path: String) -> void:
 	if root == null:
 		_say("Нет открытой сцены.")
 		return
-	var mode := _mode_opt.get_item_text(_mode_opt.selected)
-	var report := VrwebExporter.export_scene_report(root, mode, path)
+	var extension := path.get_extension().to_lower()
+	var report: Dictionary
+	if extension == "vrwml":
+		report = VrwebExporter.export_vrwml_report(root, path)
+	elif extension == "html":
+		var selected_options := _file_dialog.get_selected_options()
+		var mode_index := int(selected_options.get("HTML scene mode", 0))
+		var mode := VrwebBuilder.MODE_EXCLUSIVE if mode_index == 1 else VrwebBuilder.MODE_COMBINE
+		report = VrwebExporter.export_scene_report(root, mode, path)
+	else:
+		_say("Выберите формат .vrwml или .html.")
+		return
 	if not bool(report.ok):
 		_say("Экспорт остановлен: %s" % "; ".join(report.errors))
 		return
-	var html := str(report.html)
+	var output := str(report.vrwml if extension == "vrwml" else report.html)
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		_say("Не удалось записать %s (код %d)." % [path, FileAccess.get_open_error()])
 		return
-	f.store_string(html)
+	f.store_string(output)
 	f.close()
 	EditorInterface.get_resource_filesystem().scan()
 	_say("Экспортировано: %s; packages: %d" % [path, report.packages.size()])
+
+
+func _on_import_vrwml_pressed() -> void:
+	_vrwml_open_mode = "import"
+	_vrwml_open_dialog.popup_centered_ratio(0.6)
+
+
+func _on_vrwml_import_chosen(path: String) -> void:
+	if _vrwml_open_mode == "preview":
+		_load_vrwml_preview(path)
+		return
+	_vrwml_import_path = path
+	_tscn_save_dialog.current_path = path.get_basename() + ".tscn"
+	_tscn_save_dialog.popup_centered_ratio(0.6)
+
+
+func _on_vrwml_tscn_chosen(path: String) -> void:
+	var parsed := _parse_avatar_vrwml(_vrwml_import_path)
+	if not str(parsed.get("error", "")).is_empty():
+		_say(str(parsed.error))
+		return
+	var avatar := parsed.avatar as Avatar
+	var ext: Dictionary = parsed.ext
+	if not ext.get("targets", []).is_empty():
+		var loader_host := Node.new()
+		loader_host.name = "VrwmlImportLoaders"
+		EditorInterface.get_base_control().add_child(loader_host)
+		var image_loader := ImageLoader.new()
+		loader_host.add_child(image_loader)
+		_say("Загружаю внешние ресурсы VRWML…")
+		VrwebExtInjector.inject(ext, image_loader, loader_host, func() -> void:
+			_finish_vrwml_import(avatar, path)
+			loader_host.queue_free())
+		return
+	_finish_vrwml_import(avatar, path)
+
+
+func _on_preview_vrwml_pressed() -> void:
+	if EditorInterface.get_edited_scene_root() == null:
+		_say("Откройте сцену, к которой временно добавить preview.")
+		return
+	_vrwml_open_mode = "preview"
+	_vrwml_open_dialog.popup_centered_ratio(0.6)
+
+
+func _load_vrwml_preview(path: String) -> void:
+	var parsed := _parse_avatar_vrwml(path)
+	if not str(parsed.get("error", "")).is_empty():
+		_say(str(parsed.error))
+		return
+	_clear_vrwml_preview()
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
+		(parsed.avatar as Avatar).free()
+		_say("Открытая сцена исчезла до materialization preview.")
+		return
+	_vrwml_preview_avatar = parsed.avatar as Avatar
+	_vrwml_preview_avatar.name = "VRWMLPreview_" + _vrwml_preview_avatar.name
+	root.add_child(_vrwml_preview_avatar)
+	# owner намеренно не задаётся: preview виден в viewport, но не попадёт в `.tscn`.
+	var ext: Dictionary = parsed.ext
+	if ext.get("targets", []).is_empty():
+		_say("Avatar preview загружен в viewport; SceneTree намеренно не меняется.")
+		return
+	_vrwml_preview_loaders = Node.new()
+	_vrwml_preview_loaders.name = "VrwmlPreviewLoaders"
+	EditorInterface.get_base_control().add_child(_vrwml_preview_loaders)
+	var image_loader := ImageLoader.new()
+	_vrwml_preview_loaders.add_child(image_loader)
+	_say("Viewport preview создан (вне SceneTree); загружаю внешние ресурсы…")
+	VrwebExtInjector.inject(ext, image_loader, _vrwml_preview_loaders, func() -> void:
+		_say("Avatar VRWML preview и внешние ресурсы загружены.")
+		if is_instance_valid(_vrwml_preview_loaders):
+			_vrwml_preview_loaders.queue_free()
+		_vrwml_preview_loaders = null)
+
+
+func _on_clear_vrwml_preview_pressed() -> void:
+	_clear_vrwml_preview()
+	_say("Avatar VRWML preview очищен.")
+
+
+func _clear_vrwml_preview() -> void:
+	if is_instance_valid(_vrwml_preview_avatar):
+		_vrwml_preview_avatar.queue_free()
+	_vrwml_preview_avatar = null
+	if is_instance_valid(_vrwml_preview_loaders):
+		_vrwml_preview_loaders.queue_free()
+	_vrwml_preview_loaders = null
+
+
+func _parse_avatar_vrwml(path: String) -> Dictionary:
+	var text := FileAccess.get_file_as_string(path)
+	if text == "":
+		return {"error": "Не удалось прочитать %s." % path}
+	var base_url := PageFetcher.LOCAL_SCHEME + ProjectSettings.globalize_path(path)
+	var policy := AvatarVrwmlPolicy.new()
+	var built := VrwebBuilder.build(HtmlParser.parse(text), base_url, null, policy)
+	var holder := built.get("root") as Node3D
+	if policy.has_errors() or holder == null or holder.get_child_count() != 1 \
+			or not (holder.get_child(0) is Avatar):
+		if holder != null:
+			holder.free()
+		var detail := ": " + policy.summary() if policy.has_errors() else ""
+		return {"error": "VRWML не прошёл avatar diagnostics%s" % detail}
+	var avatar := holder.get_child(0) as Avatar
+	holder.remove_child(avatar)
+	holder.free()
+	return {"error": "", "avatar": avatar, "ext": built.get("ext", {})}
+
+
+func _finish_vrwml_import(avatar: Avatar, path: String) -> void:
+	_set_scene_owner_recursive(avatar, avatar)
+	var packed := PackedScene.new()
+	var err := packed.pack(avatar)
+	avatar.free()
+	if err == OK:
+		err = ResourceSaver.save(packed, path)
+	if err != OK:
+		_say("Не удалось сохранить %s (код %d)." % [path, err])
+		return
+	EditorInterface.get_resource_filesystem().scan()
+	EditorInterface.open_scene_from_path(path)
+	_say("Создана редактируемая сцена: %s" % path)
 
 
 func _on_script_inline_pressed() -> void:
@@ -260,6 +457,12 @@ func _mark_dirty() -> void:
 	var root := EditorInterface.get_edited_scene_root()
 	if root != null:
 		EditorInterface.mark_scene_as_unsaved()
+
+
+func _set_scene_owner_recursive(node: Node, root: Node) -> void:
+	for child in node.get_children():
+		child.owner = root
+		_set_scene_owner_recursive(child, root)
 
 
 func _say(text: String) -> void:

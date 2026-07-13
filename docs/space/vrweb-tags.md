@@ -388,6 +388,11 @@ Godot и **экспортнуть** её в такой HTML (плюс автор
 Докачка `<ExtResource>` теперь общая для рантайма и редактора:
 [scripts/vrweb_ext_injector.gd](../../scripts/vrweb_ext_injector.gd) (`VrwebExtInjector.inject`).
 
+Целевое развитие этого же class-name/property-синтаксиса в standalone XML-совместимый `.vrwml`,
+стандартные avatar-классы и импорт обратно в редактор описаны в
+[vrwml-format-and-pipeline.md](vrwml-format-and-pipeline.md). Существующий `<vrweb>` остаётся
+embedded-формой того же дерева, а не выбрасывается при появлении standalone-файла.
+
 ---
 
 ## Единый roadmap

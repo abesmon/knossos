@@ -131,6 +131,38 @@ GDScript остаётся явно доверенным режимом с пра
 
 ## Trusted Modules MVP
 
+### P1 — VRWML documents и аватары
+
+Целевая архитектура и критерии по фазам: [vrwml-format-and-pipeline.md](space/vrwml-format-and-pipeline.md).
+
+- [x] Добавить standalone `.vrwml` output/input поверх существующих `VrwebExporter` и
+  `VrwebBuilder`, сохранив ту же class-name/property модель, что у embedded `<vrweb>`.
+- [x] В avatar export включать корень сцены и добавить симметричный public class registry для
+  scripted `Avatar`/аппликаторов/marker resources, не экспортируя GDScript.
+- [x] Добавить deterministic scene → VRWML → scene tests; назначение документа определять
+  контекстом загрузчика, не доверяя самозаявленному `profile`.
+- [x] Специфицировать `Avatar`, `LookPitchApplier`, `VoiceScaleApplier` и
+  `UserTextureApplier` как публичные VRWML-классы, не поставляя их GDScript.
+- [x] Добавить VRWML round-trip ссылок и bindings для `AvatarAnimationTreeApplier`.
+- [x] Зафиксировать avatar parameters, их типы/defaults и current/optional/reserved status.
+- [x] Добавить transport authority registry: local-context параметры фильтруются на отправке и
+  приёме и могут пополняться без изменения RPC/VRWML.
+- [x] Добавить контекстные avatar validator/allowlist до materialization.
+- [x] Экспортировать оба built-in аватара в `.vrwml`; resolver собирает их обратно в
+  `PackedScene`, сохраняя существующий API `AvatarHost`.
+- [x] Добавить базовый import VRWML в editable `.tscn` и обратный export.
+- [x] Зарегистрировать `.vrwml` через нативный `EditorSceneFormatImporter`; документы с
+  асинхронными `ExtResource` оставлять явному editable-copy workflow.
+- [x] Добавить единый экспорт `.vrwml`/HTML wrapper в штатное меню Godot
+  `Scene → Export As…`, сохранив `.tscn` как authoring source of truth.
+- [x] Добавить несохраняемый preview mode и fail-closed diagnostics неподдерживаемого содержимого.
+- [ ] Добавить структурный semantic diff поддерживаемого подмножества после re-export.
+- [x] Удалить внешний `.tscn` compatibility path после миграции pack/settings/fixtures.
+
+Критерий готовности первой поставки: built-in и HTTP-аватары загружаются из data-only VRWML,
+оба текущих аватара сохраняют внешний вид/реакции, а произвольный Script не материализуется
+неявно.
+
 ### P1 — Exporter и внешние ресурсы
 
 - [ ] Поддержать материалы, `.gltf` с внешними buffers/textures и необходимые меши GLB.

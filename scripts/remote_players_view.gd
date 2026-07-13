@@ -11,7 +11,7 @@ extends Node3D
 
 const REMOTE_PLAYER := preload("res://actors/remote_player/remote_player.tscn")
 const SEND_HZ := 15.0
-## Аватар, с которым капсула стартует (дефолт AvatarHost = res://avatars/avatar_1.tscn). Если
+## Аватар, с которым капсула стартует (AvatarHost резолвит vrwebavatar://1 из VRWML). Если
 ## пир прислал тот же идентификатор — не пересобираем аватар зря.
 const HOST_DEFAULT_URI := "vrwebavatar://1"
 

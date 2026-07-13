@@ -30,3 +30,6 @@ Public API внешних scripting modules и capability contract — в [scrip
 
 - [vrweb-tags.md](vrweb-tags.md) — vrweb-теги: собственный синтаксис сцены поверх HTML, режимы
   `combine`/`exclusive`, загрузка внешних GLB-ресурсов.
+- [vrwml-format-and-pipeline.md](vrwml-format-and-pipeline.md) — целевой standalone-формат
+  `.vrwml` поверх существующей class-name/property-модели, стандартные avatar-классы и
+  двусторонний editor/runtime-пайплайн без публичной зависимости от `.tscn`.

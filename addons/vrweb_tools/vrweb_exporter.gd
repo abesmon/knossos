@@ -14,10 +14,13 @@ extends RefCounted
 ##   * meta vrweb_ext / vrweb_ext_scene (см. VrwebExtResource) -> <ExtResource>/<ExtScene>;
 ##   * узел VrwebSpawner с детьми -> мета-тег <VRWebSpawner>/<SpawnerPoint>.
 ##
-## Использование: VrwebExporter.export_scene(get_edited_scene_root(), "combine"|"exclusive").
+## Использование:
+##   VrwebExporter.export_scene(root, "combine"|"exclusive") — HTML, дети root;
+##   VrwebExporter.export_vrwml(root) — standalone <vrweb>, включая сам root.
 
 const SUB_PREFIX := VrwebBuilder.SUBRESOURCE_PREFIX
 const EXT_PREFIX := VrwebBuilder.EXTRESOURCE_PREFIX
+const PUBLIC_CLASSES := preload("res://scripts/vrwml_class_registry.gd")
 
 ## Свойства, которые никогда не экспортируем (служебные/неинстанцируемые читателем).
 const SKIP_PROPS := {"owner": true, "name": true, "script": true, "scene_file_path": true}
@@ -43,6 +46,7 @@ var _package_defs: Array[Dictionary] = []
 var _package_seq := 0
 var _module_head_lines: Array[String] = []
 var _report := {"ok": true, "packages": [], "warnings": [], "errors": []}
+var _standalone := false
 
 
 ## Главный вход: HTML-документ строкой. mode — "combine" (по умолчанию) или "exclusive".
@@ -60,7 +64,22 @@ static func export_scene_report(root: Node, mode: String = VrwebBuilder.MODE_COM
 	return e._report
 
 
+## Standalone VRWML — тот же декларативный синтаксис без HTML envelope. Корень сцены здесь
+## семантичен (например, Avatar), поэтому экспортируется вместе со своими детьми.
+static func export_vrwml(root: Node, output_path: String = "") -> String:
+	var e := VrwebExporter.new()
+	return e._export_vrwml(root, output_path)
+
+
+static func export_vrwml_report(root: Node, output_path: String = "") -> Dictionary:
+	var e := VrwebExporter.new()
+	var vrwml := e._export_vrwml(root, output_path)
+	e._report["vrwml"] = vrwml
+	return e._report
+
+
 func _export(root: Node, mode: String, output_path: String) -> String:
+	_standalone = false
 	var safe_mode := mode if mode == VrwebBuilder.MODE_EXCLUSIVE else VrwebBuilder.MODE_COMBINE
 
 	# Сначала строим узлы (попутно наполняются таблицы суб-/внешних ресурсов).
@@ -110,6 +129,32 @@ func _export(root: Node, mode: String, output_path: String) -> String:
 	return "\n".join(out)
 
 
+func _export_vrwml(root: Node, _output_path: String) -> String:
+	_standalone = true
+	var body_lines: Array[String] = []
+	if root != null:
+		_build_node(root, 1, body_lines)
+
+	var res_lines: Array[String] = []
+	var i := 0
+	while i < _sub_order.size():
+		var id := _sub_order[i]
+		_emit_resource(id, _sub_def[id], res_lines)
+		i += 1
+	for ext_id in _ext_order:
+		_emit_ext(ext_id, _ext_def[ext_id], res_lines)
+	if not _package_defs.is_empty() or not _inline_scripts.is_empty():
+		_report_error("standalone VRWML не включает исполняемые Script/module definitions")
+	_free_defaults()
+
+	var out: Array[String] = ["<vrweb>"]
+	out.append_array(body_lines)
+	out.append_array(res_lines)
+	out.append("</vrweb>")
+	out.append("")
+	return "\n".join(out)
+
+
 # --- Узлы ---
 
 func _build_node(node: Node, depth: int, out: Array[String]) -> void:
@@ -123,19 +168,29 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 		_build_ext_scene(node, depth, out)
 		return
 
-	if str(node.get_meta(META_SCRIPT_MODE, "")) == SCRIPT_MODE_INLINE:
+	var public_class := PUBLIC_CLASSES.public_name(node)
+	var script_mode := str(node.get_meta(META_SCRIPT_MODE, ""))
+	if public_class == "" and _standalone \
+			and script_mode in [SCRIPT_MODE_INLINE, SCRIPT_MODE_PACKAGE]:
+		_report_error("Script узла %s нельзя встроить в data-only VRWML" % _node_label(node))
+		return
+
+	if public_class == "" and script_mode == SCRIPT_MODE_INLINE:
 		if _build_inline_component(node, depth, out):
 			return
-	if str(node.get_meta(META_SCRIPT_MODE, "")) == SCRIPT_MODE_PACKAGE:
+	if public_class == "" and script_mode == SCRIPT_MODE_PACKAGE:
 		if _build_package_component(node, depth, out):
 			return
 
 	# Scripting modules требуют явного opt-in: молча превратить scripted node в базовый ClassDB-тег
 	# особенно опасно — HTML выглядит рабочим, но всё поведение потеряно.
-	if node.get_script() != null:
-		_report_warning("Script узла %s не экспортирован; выберите inline/package" % node.get_path())
+	if public_class == "" and node.get_script() != null:
+		if _standalone:
+			_report_error("Script узла %s не имеет public VRWML-класса" % _node_label(node))
+		else:
+			_report_warning("Script узла %s не экспортирован; выберите inline/package" % _node_label(node))
 
-	var cls := node.get_class()
+	var cls := public_class if public_class != "" else node.get_class()
 	var pad := "  ".repeat(depth)
 	var attrs := _node_attrs(node, cls)
 	var kids := node.get_children()
@@ -151,11 +206,11 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 func _build_inline_component(node: Node, depth: int, out: Array[String]) -> bool:
 	var script = node.get_script()
 	if not (script is GDScript) or str(script.source_code).is_empty():
-		_report_warning("inline Script узла %s не является source GDScript" % node.get_path())
+		_report_warning("inline Script узла %s не является source GDScript" % _node_label(node))
 		return false
 	var source := str(script.source_code)
 	if source.to_lower().contains("</script"):
-		_report_warning("inline Script узла %s содержит </script; используйте package" % node.get_path())
+		_report_warning("inline Script узла %s содержит </script; используйте package" % _node_label(node))
 		return false
 	var id := str(node.get_meta(META_SCRIPT_ID, ""))
 	if id.is_empty():
@@ -180,7 +235,7 @@ func _build_inline_component(node: Node, depth: int, out: Array[String]) -> bool
 func _build_package_component(node: Node, depth: int, out: Array[String]) -> bool:
 	var script = node.get_script()
 	if not (script is GDScript):
-		_report_error("package Script узла %s не является GDScript" % node.get_path())
+		_report_error("package Script узла %s не является GDScript" % _node_label(node))
 		return false
 	var id := str(node.get_meta(META_SCRIPT_ID, ""))
 	if id.is_empty():
@@ -239,10 +294,19 @@ func _report_warning(message: String) -> void:
 	push_warning("VRWeb export: " + message)
 
 
+func _node_label(node: Node) -> String:
+	return str(node.get_path()) if node.is_inside_tree() else str(node.name)
+
+
 ## Строка атрибутов узла: ext-привязки (как "ExtResource:::id") + не-дефолтные свойства.
 func _node_attrs(node: Node, cls: String) -> String:
 	var bindings: Dictionary = node.get_meta(VrwebExtResource.META_BINDINGS, {})
+	var skip_props := bindings.duplicate()
 	var parts: Array[String] = []
+	# В standalone-документе имена участвуют в NodePath аппликаторов и потому семантичны.
+	# HTML world-export исторически их опускал — его output не меняем этой миграцией.
+	if _standalone and str(node.name) != "":
+		parts.append("name=\"%s\"" % _escape_attr(str(node.name)))
 
 	# Ext-привязки идут первыми; их реальные свойства из диффа исключаются.
 	for prop in bindings:
@@ -250,7 +314,16 @@ func _node_attrs(node: Node, cls: String) -> String:
 		if ext_res is VrwebExtResource:
 			parts.append("%s=\"%s%s\"" % [prop, EXT_PREFIX, _ext_id(ext_res)])
 
-	parts.append_array(_diff_attrs(node, cls, bindings))
+	# Node-ссылка — Godot authoring convenience. Публичный формат хранит переносимый путь.
+	if cls == "AvatarAnimationTreeApplier":
+		skip_props["animation_tree"] = true
+		var tree := node.get("animation_tree") as AnimationTree
+		if tree != null:
+			skip_props["animation_tree_path"] = true
+			parts.append("animation_tree_path=\"%s\"" %
+					_escape_attr(var_to_str(node.get_path_to(tree))))
+
+	parts.append_array(_diff_attrs(node, cls, skip_props))
 	if parts.is_empty():
 		return ""
 	return " " + " ".join(parts)
@@ -268,10 +341,14 @@ func _diff_attrs(obj: Object, cls: String, skip_props: Dictionary) -> Array[Stri
 		if SKIP_PROPS.has(name) or skip_props.has(name) or name.begins_with("metadata/"):
 			continue
 		var value = obj.get(name)
+		if value == null:
+			continue
 		if def != null and _has_property(def, name) and _values_equal(value, def.get(name)):
 			continue
 		var serialized := _serialize_value(value)
 		if serialized == "":
+			if _standalone:
+				_report_error("свойство %s.%s не поддерживает VRWML round-trip" % [cls, name])
 			continue
 		parts.append("%s=\"%s\"" % [name, _escape_attr(serialized)])
 	return parts
@@ -314,7 +391,8 @@ func _build_spawner(node: VrwebSpawner, depth: int, out: Array[String]) -> void:
 
 ## Сериализует встроенный суб-ресурс: <Resource id="..." type="<class>" <свойства>/>.
 func _emit_resource(id: String, res: Resource, out: Array[String]) -> void:
-	var cls := res.get_class()
+	var public_class := PUBLIC_CLASSES.public_name(res)
+	var cls := public_class if public_class != "" else res.get_class()
 	var parts: Array[String] = ["id=\"%s\"" % id, "type=\"%s\"" % cls]
 	parts.append_array(_diff_attrs(res, cls, {}))
 	out.append("  %s<%s %s/>" % ["", VrwebBuilder.RESOURCE_TAG, " ".join(parts)])
@@ -334,6 +412,16 @@ func _emit_ext(id: String, ext: VrwebExtResource, out: Array[String]) -> void:
 func _serialize_value(value) -> String:
 	if value is Resource:
 		return SUB_PREFIX + _sub_id(value)
+	if value is Array:
+		var serialized_items: Array = []
+		for item in value:
+			if item is Resource:
+				serialized_items.append(SUB_PREFIX + _sub_id(item))
+			elif item is Object:
+				return ""
+			else:
+				serialized_items.append(item)
+		return var_to_str(serialized_items)
 	if value is Object:
 		return ""   # узлы и прочие не-Resource объекты в атрибуты не пишем
 	return var_to_str(value)
@@ -375,8 +463,8 @@ func _ext_id(ext: VrwebExtResource) -> String:
 func _default_of(cls: String):
 	if _defaults.has(cls):
 		return _defaults[cls]
-	var inst = null
-	if ClassDB.class_exists(cls) and ClassDB.can_instantiate(cls):
+	var inst = PUBLIC_CLASSES.instantiate(cls)
+	if inst == null and ClassDB.class_exists(cls) and ClassDB.can_instantiate(cls):
 		inst = ClassDB.instantiate(cls)
 	_defaults[cls] = inst
 	return inst
