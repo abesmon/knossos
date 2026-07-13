@@ -79,6 +79,7 @@ var _page_meta: Dictionary = {}
 # Фактические hashes executable modules текущей страницы. Пока runtime поддерживает inline
 # allow-all; структура уже пригодна для compatibility/trust UI следующих этапов.
 var _scripting_module_hashes: Dictionary = {}
+var _content_policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 # ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
 # консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
 var _current_doc: HtmlNode = null
@@ -603,7 +604,7 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 	for module in runnable_modules:
 		if not str(module.get("hash", "")).is_empty():
 			_scripting_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
-	var vrweb := VrwebBuilder.build(doc, base_url, module_registry)
+	var vrweb := VrwebBuilder.build(doc, base_url, module_registry, _content_policy)
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
 	_vrweb_index = SceneHtml.build_page_index(doc)
@@ -780,7 +781,8 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 		if not vrweb_targets.has(rid):
 			vrweb_targets[rid] = page_resources[rid]
 	ephemeral_view.setup(_activate_transition,
-		{"targets": vrweb_targets, "resources": page_resources, "base_url": base_url})
+		{"targets": vrweb_targets, "resources": page_resources, "base_url": base_url,
+		"content_policy": _content_policy})
 
 	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
 	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).

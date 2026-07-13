@@ -24,6 +24,8 @@ immutable cache, preflight до компиляции, trust по exact hash, lif
 
 ## P0 — критичные границы безопасности
 
+- [x] Провести document и live peer declarations через единый `VrwebContentPolicy`; первый
+  срез намеренно allow-all и собирает audit-статистику без изменения совместимости.
 - [ ] Ввести allowlist классов и свойств для декларативных `<vrweb>`-узлов: запретить
   `script`, `source_code`, callback-и, пути к ФС и произвольные сетевые классы.
 - [ ] Применять policy к документу, `vrweb-node` от пиров и persistent content. Иначе защита

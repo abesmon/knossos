@@ -6,6 +6,8 @@
 
 Как эти правила воплощены в коде пайплайна — в [implementation.md](../implementation.md).
 Public API внешних scripting modules и capability contract — в [scripting-api.md](scripting-api.md).
+Единая passthrough/audit boundary декларативного контента — в
+[content-policy.md](content-policy.md).
 
 ## От HTML к топологии
 
