@@ -181,8 +181,8 @@ FFmpeg **не трогали** (почему — см. ниже).
 
 **Идея.** `HTTPRequest.download_file` пишет тело во временный `*.part`-файл по мере приёма;
 `FFmpegVideoStream` открывает этот **растущий** файл и декодирует с начала, пока он докачивается.
-Декодер EIRTeam читает файл через `FileAccess` (`_read_packet_callback` →
-[video_decoder.cpp](../../third_party/EIRTeam.FFmpeg/video_decoder.cpp)) и на коротком чтении
+Декодер EIRTeam читает файл через `FileAccess` (`_read_packet_callback` в
+`third_party/EIRTeam.FFmpeg/video_decoder.cpp`) и на коротком чтении
 возвращает `AVERROR_EOF` — для него «конец докачанного куска» неотличим от «конца видео».
 Поэтому **различает их GDScript**.
 
@@ -222,7 +222,7 @@ FFmpeg **не трогали** (почему — см. ниже).
 ### Почему GDScript, а не FFmpeg-стрим напрямую
 
 FFmpeg умеет сам тянуть URL (range-запросы, seek по сети), но наша сборка ffmpeg **decode-only,
-без TLS** (нет gnutls/openssl — см. [Makefile](../../third_party/EIRTeam.FFmpeg/Makefile)
+без TLS** (нет gnutls/openssl — см. `third_party/EIRTeam.FFmpeg/Makefile`
 форка), а реальные видео-URL почти всегда `https`. Дать декодеру открывать URL напрямую
 потребовало бы пересборки ffmpeg с TLS на всех платформах и сломало бы LGPL-чистую decode-only
 сборку. Буферизация на стороне GDScript использует `HTTPRequest` (он умеет `https`) и **не
