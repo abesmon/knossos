@@ -5,6 +5,7 @@
 из обзора ([../README.md](../README.md)).
 
 Как эти правила воплощены в коде пайплайна — в [implementation.md](../implementation.md).
+Public API внешних scripting modules и capability contract — в [scripting-api.md](scripting-api.md).
 
 ## От HTML к топологии
 

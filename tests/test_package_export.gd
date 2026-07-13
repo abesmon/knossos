@@ -46,18 +46,18 @@ func _ready() -> void:
 	_eq(FileAccess.file_exists(package_path), true, "exporter writes sibling .vrmod")
 	_eq(html.contains("<VRWebModule"), true, "exporter writes module declaration")
 	var doc := HtmlParser.parse(html)
-	var collected := PageModuleCollector.collect(doc, "vrweblocal:///tmp/page.html")
+	var collected := ScriptingModuleCollector.collect(doc, "vrweblocal:///tmp/page.html")
 	_eq(collected.modules.size(), 1, "exported package declaration parses")
 	if collected.modules.size() == 1:
 		var bytes := FileAccess.get_file_as_bytes(package_path)
 		var module: Dictionary = collected.modules[0]
-		var checked := PageModuleIntegrity.verify(module, "https://page.test/index.html",
+		var checked := ScriptingModuleIntegrity.verify(module, "https://page.test/index.html",
 				"https://page.test/exported.package.vrmod", bytes)
 		_eq(checked.allowed, true, "generated integrity matches package")
-		var cached := PageModuleCache.store(bytes)
+		var cached := ScriptingModuleCache.store(bytes)
 		module.hash = cached.hash
 		module.cache_path = cached.path
-		var unpacked := PageModulePackage.unpack(module)
+		var unpacked := ScriptingModulePackage.unpack(module)
 		_eq(unpacked.ok, true, "exported package validates and unpacks")
 		if unpacked.ok:
 			_eq(unpacked.module.manifest.assets.has("message"), true,
@@ -72,8 +72,8 @@ func _ready() -> void:
 					"exporter recursively declares imported source asset")
 			_eq(unpacked.module.manifest.assets.switch_icon.type.is_empty(), false,
 					"converted imported asset keeps a runtime type")
-			var registry := PageModuleRegistry.new()
-			var prepared := registry.prepare([unpacked.module], PageModuleRegistry.ScriptMode.ALLOW_ALL)
+			var registry := ScriptingModuleRegistry.new()
+			var prepared := registry.prepare([unpacked.module], ScriptingModuleRegistry.ScriptMode.ALLOW_ALL)
 			_eq(prepared.ok, true, "exported package prepares")
 			var built := VrwebBuilder.build(doc, "vrweblocal:///tmp/page.html", registry)
 			var built_root: Node = built.root
@@ -82,7 +82,7 @@ func _ready() -> void:
 			if component != null:
 				_eq(component.call("answer"), 105, "exported dependency executes")
 				_eq(component.get("marker"), "authored-package", "package property round-trips")
-				var context: PageModuleContext = component.get_meta("vrweb_module_context")
+				var context: ScriptingModuleContext = component.get_meta("vrweb_module_context")
 				_eq(context.assets.text("message").strip_edges(), "hello from exported asset",
 						"exported asset is available through context.assets")
 				var packed := context.assets.load("switch_scene") as PackedScene

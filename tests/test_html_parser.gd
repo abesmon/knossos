@@ -18,7 +18,7 @@ func _initialize() -> void:
 	var script_doc := HtmlParser.parse("<script type=\"application/vrweb+gdscript\">\nextends Node\nvar x = 1 < 2\n</script>")
 	var script := script_doc.find_descendant("script")
 	ok = _check(script != null and script.collect_text().contains("var x = 1 < 2"),
-			"script raw-text сохраняется для inline page modules") and ok
+			"script raw-text сохраняется для inline scripting modules") and ok
 	var a := attr_doc.find_descendant("a")
 	ok = _check(a != null, "a parsed") and ok
 	if a != null:

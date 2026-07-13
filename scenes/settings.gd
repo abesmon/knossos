@@ -404,7 +404,7 @@ func _build_security_tab() -> void:
 	rules_header.add_child(rules_title)
 	var clear := Button.new()
 	clear.text = "Удалить все решения"
-	clear.pressed.connect(func(): Settings.clear_page_script_rules(); _refresh_security_rules())
+	clear.pressed.connect(func(): Settings.clear_scripting_module_rules(); _refresh_security_rules())
 	rules_header.add_child(clear)
 	content.add_child(rules_header)
 	_script_rules = VBoxContainer.new()
@@ -422,16 +422,16 @@ func _refresh_security_rules() -> void:
 		Settings.SCRIPT_POLICY_ASK: 0,
 		Settings.SCRIPT_POLICY_ALLOW_ALL: 1,
 		Settings.SCRIPT_POLICY_BLOCK_ALL: 2,
-	}.get(Settings.page_script_policy, 0)
+	}.get(Settings.scripting_module_policy, 0)
 	_script_policy.select(policy_index)
 	for child in _script_rules.get_children():
 		child.queue_free()
-	_script_rules_empty.visible = Settings.page_script_rules.is_empty()
-	var keys := Settings.page_script_rules.keys()
+	_script_rules_empty.visible = Settings.scripting_module_rules.is_empty()
+	var keys := Settings.scripting_module_rules.keys()
 	keys.sort_custom(func(a, b):
-		return int(Settings.page_script_rules[a].get("updated_at", 0)) > int(Settings.page_script_rules[b].get("updated_at", 0)))
+		return int(Settings.scripting_module_rules[a].get("updated_at", 0)) > int(Settings.scripting_module_rules[b].get("updated_at", 0)))
 	for key in keys:
-		var rule: Dictionary = Settings.page_script_rules[key]
+		var rule: Dictionary = Settings.scripting_module_rules[key]
 		var row := HBoxContainer.new()
 		var info := VBoxContainer.new()
 		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -456,7 +456,7 @@ func _refresh_security_rules() -> void:
 
 
 func _forget_security_rule(key: String) -> void:
-	Settings.forget_page_script_rule(key)
+	Settings.forget_scripting_module_rule(key)
 	_refresh_security_rules()
 
 
@@ -1181,7 +1181,7 @@ func _on_save() -> void:
 	# Пустой адрес аватара → дефолт из пака (vrwebavatar://1).
 	var avatar := _avatar.text.strip_edges()
 	Settings.avatar_uri = avatar if avatar != "" else Settings.DEFAULT_AVATAR_URI
-	Settings.page_script_policy = [Settings.SCRIPT_POLICY_ASK, Settings.SCRIPT_POLICY_ALLOW_ALL,
+	Settings.scripting_module_policy = [Settings.SCRIPT_POLICY_ASK, Settings.SCRIPT_POLICY_ALLOW_ALL,
 			Settings.SCRIPT_POLICY_BLOCK_ALL][_script_policy.selected]
 	Settings.save()
 	_close()

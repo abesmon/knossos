@@ -130,7 +130,7 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 		if _build_package_component(node, depth, out):
 			return
 
-	# Page modules ещё не реализованы: молча превратить scripted node в базовый ClassDB-тег
+	# Scripting modules требуют явного opt-in: молча превратить scripted node в базовый ClassDB-тег
 	# особенно опасно — HTML выглядит рабочим, но всё поведение потеряно.
 	if node.get_script() != null:
 		_report_warning("Script узла %s не экспортирован; выберите inline/package" % node.get_path())

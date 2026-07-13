@@ -26,9 +26,9 @@ func _ready() -> void:
 	_eq(html.contains('<VRWebComponent module="#exported.inline"'), true, "export writes component")
 
 	var doc := HtmlParser.parse(html)
-	var collected := PageModuleCollector.collect(doc, "vrwebresource://exported.html")
-	var registry := PageModuleRegistry.new()
-	var prepared := registry.prepare_inline(collected.modules, PageModuleRegistry.ScriptMode.ALLOW_ALL)
+	var collected := ScriptingModuleCollector.collect(doc, "vrwebresource://exported.html")
+	var registry := ScriptingModuleRegistry.new()
+	var prepared := registry.prepare_inline(collected.modules, ScriptingModuleRegistry.ScriptMode.ALLOW_ALL)
 	_eq(prepared.ok, true, "exported inline source compiles in registry")
 	var built := VrwebBuilder.build(doc, "vrwebresource://exported.html", registry)
 	var root: Node = built.root

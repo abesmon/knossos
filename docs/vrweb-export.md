@@ -39,7 +39,7 @@ source в `<script type="application/vrweb+gdscript">`, а узел — как `
 `inline` допустим только для самодостаточного GDScript без module-local файлов. Если exporter
 видит scene/asset/script dependencies, он предлагает `package`. `@tool`, autoload, GDExtension,
 C# и literal `</script` для inline отклоняются. Полный контракт и план реализации —
-[page-code.md](space/page-code.md).
+[scripting-modules.md](space/scripting-modules.md).
 
 Inline round-trip (script, `@export`-свойство, базовое свойство и дети) проверяет
 `tests/test_inline_export.tscn`. Первый package round-trip проверяет

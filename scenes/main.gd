@@ -7,7 +7,7 @@ extends Node
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
-const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/page_modules/page_script_permission_dialog.gd")
+const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/scripting_modules/scripting_module_permission_dialog.gd")
 
 @onready var _world: Node3D = $world
 @onready var _ui: MainUI = $UI
@@ -24,8 +24,8 @@ var _fetcher: PageFetcher
 # Загрузчик внешних CSS (docs/css-cascade.md). Постоянный (не в _world): стили нужны до
 # сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
 var _css_fetcher: CssFetcher
-var _module_fetcher: PageModuleFetcher
-var _script_permission_dialog: PageScriptPermissionDialog
+var _module_fetcher: ScriptingModuleFetcher
+var _script_permission_dialog: ScriptingModulePermissionDialog
 var _script_permission_focus_token := 0
 var _address_focus_token := 0
 var _settings_focus_token := 0
@@ -78,7 +78,7 @@ var _base_url: String = ""
 var _page_meta: Dictionary = {}
 # Фактические hashes executable modules текущей страницы. Пока runtime поддерживает inline
 # allow-all; структура уже пригодна для compatibility/trust UI следующих этапов.
-var _page_module_hashes: Dictionary = {}
+var _scripting_module_hashes: Dictionary = {}
 # ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
 # консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
 var _current_doc: HtmlNode = null
@@ -132,7 +132,7 @@ func _ready() -> void:
 
 	_css_fetcher = CssFetcher.new()
 	add_child(_css_fetcher)
-	_module_fetcher = PageModuleFetcher.new()
+	_module_fetcher = ScriptingModuleFetcher.new()
 	add_child(_module_fetcher)
 
 	_player = PLAYER_SCENE.instantiate()
@@ -512,7 +512,7 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		else:
 			css_texts.append(css_by_url.get(PageFetcher.resolve_url(ref["href"], base_url), ""))
 	StyleResolver.resolve(doc, css_texts)
-	var module_collection := PageModuleCollector.collect(doc, base_url)
+	var module_collection := ScriptingModuleCollector.collect(doc, base_url)
 	for module_error in module_collection.errors:
 		Log.warn("modules", str(module_error))
 	var nav := _nav_id
@@ -534,7 +534,7 @@ func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: i
 	var runnable_modules: Array = []
 	for module in fetched_modules:
 		if str(module.get("kind", "")) == "package":
-			var unpacked := PageModulePackage.unpack(module)
+			var unpacked := ScriptingModulePackage.unpack(module)
 			if bool(unpacked.ok):
 				runnable_modules.append(unpacked.module)
 			else:
@@ -542,7 +542,7 @@ func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: i
 						str(unpacked.error)])
 		else:
 			runnable_modules.append(module)
-	_authorize_page_modules(runnable_modules, final_url, func(allowed_modules: Array):
+	_authorize_scripting_modules(runnable_modules, final_url, func(allowed_modules: Array):
 		if not is_inside_tree() or final_url != _current_url:
 			return
 		_finish_materialize_page(doc, final_url, base_url, t0, allowed_modules))
@@ -550,14 +550,14 @@ func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: i
 
 ## Разделяет уже integrity-проверенные модули на известные allow/block и неизвестные. В ask
 ## неизвестные показываются одним preflight; до ответа registry.prepare (компиляция) не зовётся.
-func _authorize_page_modules(modules: Array, page_url: String, done: Callable) -> void:
-	var origin := PageModuleIntegrity.origin_of(page_url)
+func _authorize_scripting_modules(modules: Array, page_url: String, done: Callable) -> void:
+	var origin := ScriptingModuleIntegrity.origin_of(page_url)
 	if origin.is_empty():
 		origin = page_url.get_base_dir()
 	var allowed: Array = []
 	var pending: Array = []
 	for module in modules:
-		var decision := Settings.page_script_decision(origin, str(module.get("id", "")),
+		var decision := Settings.scripting_module_decision(origin, str(module.get("id", "")),
 				str(module.get("hash", "")))
 		if decision == "allow":
 			allowed.append(module)
@@ -567,7 +567,7 @@ func _authorize_page_modules(modules: Array, page_url: String, done: Callable) -
 		done.call(allowed)
 		return
 	_set_status("Ожидание разрешения для %d скриптов…" % pending.size())
-	_script_permission_focus_token = _player.claim_mouse_focus("page_script_permission")
+	_script_permission_focus_token = _player.claim_mouse_focus("scripting_module_permission")
 	_script_permission_dialog = SCRIPT_PERMISSION_DIALOG.new()
 	add_child(_script_permission_dialog)
 	_script_permission_dialog.decisions_submitted.connect(func(decisions: Dictionary):
@@ -577,7 +577,7 @@ func _authorize_page_modules(modules: Array, page_url: String, done: Callable) -
 			var choice: Dictionary = decisions.get(str(module.get("id", "")), {})
 			var allow := bool(choice.get("allow", false))
 			if bool(choice.get("remember", false)):
-				Settings.remember_page_script_decision(origin, module, "allow" if allow else "block")
+				Settings.remember_scripting_module_decision(origin, module, "allow" if allow else "block")
 			if allow:
 				allowed.append(module)
 		done.call(allowed), CONNECT_ONE_SHOT)
@@ -594,15 +594,15 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 		runnable_modules: Array) -> void:
 	_set_loading(false)
 	_set_status("Сборка пространства…")
-	var module_registry := PageModuleRegistry.new()
+	var module_registry := ScriptingModuleRegistry.new()
 	var module_prepared := module_registry.prepare(
-			runnable_modules, PageModuleRegistry.ScriptMode.ALLOW_ALL)
+			runnable_modules, ScriptingModuleRegistry.ScriptMode.ALLOW_ALL)
 	for module_error in module_prepared.errors:
 		Log.warn("modules", str(module_error))
-	_page_module_hashes.clear()
+	_scripting_module_hashes.clear()
 	for module in runnable_modules:
 		if not str(module.get("hash", "")).is_empty():
-			_page_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
+			_scripting_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
 	var vrweb := VrwebBuilder.build(doc, base_url, module_registry)
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.

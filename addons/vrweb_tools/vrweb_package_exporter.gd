@@ -6,7 +6,9 @@ extends RefCounted
 
 
 static func build(script: GDScript, module_id: String, output_path: String,
-		base_class: String) -> Dictionary:
+		base_class: String, requires: Array[String] = ["vrweb/core/1", "vrweb/scene/1",
+				"godot/engine/4"], optional: Array[String] = ["vrweb/state/1", "vrweb/input/1",
+				"vrweb/assets/1", "vrweb/timers/1", "vrweb/log/1"]) -> Dictionary:
 	if script.resource_path.is_empty() or not script.resource_path.begins_with("res://"):
 		return _error("package требует сохранённый GDScript из res://")
 	var collected := _collect_scripts(script.resource_path)
@@ -21,6 +23,7 @@ static func build(script: GDScript, module_id: String, output_path: String,
 		"exports": {"default": {"script": main_path, "base": base_class}},
 		"assets": assets,
 		"permissions": [],
+		"requires": requires, "optional": optional,
 	}
 	var packer := ZIPPacker.new()
 	if packer.open(output_path) != OK:
@@ -39,7 +42,7 @@ static func build(script: GDScript, module_id: String, output_path: String,
 	var package_bytes := FileAccess.get_file_as_bytes(output_path)
 	if package_bytes.is_empty():
 		return _error("создан пустой package")
-	return {"ok": true, "error": "", "integrity": PageModuleIntegrity.sri_sha256(package_bytes),
+	return {"ok": true, "error": "", "integrity": ScriptingModuleIntegrity.sri_sha256(package_bytes),
 		"hash": _sha256_hex(package_bytes), "files": files.keys(), "assets": assets}
 
 
@@ -116,7 +119,7 @@ static func _resource_bytes(path: String) -> PackedByteArray:
 	var resource := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REUSE)
 	if resource == null:
 		return PackedByteArray()
-	var temp := "user://page_module_export/%s.res" % path.sha256_text()
+	var temp := "user://scripting_module_export/%s.res" % path.sha256_text()
 	DirAccess.make_dir_recursive_absolute(temp.get_base_dir())
 	if ResourceSaver.save(resource, temp, ResourceSaver.FLAG_BUNDLE_RESOURCES) != OK:
 		return PackedByteArray()

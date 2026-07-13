@@ -95,7 +95,7 @@ var _resources: Dictionary = {}     # id -> Resource (встроенные SubRe
 var _ext_defs: Dictionary = {}      # id -> { type: String, url: String } (внешние ресурсы)
 var _ext_targets: Array = []        # [{ obj: Object, prop: String, id: String }] — куда вставить ext
 var _node_map: Dictionary = {}      # HtmlNode (элемент) -> Node — провенанс для эфемерного оверлея
-var _page_modules = null             # PageModuleRegistry, подготовленный до materialization
+var _scripting_modules = null             # ScriptingModuleRegistry, подготовленный до materialization
 
 
 ## Ищет блок <vrweb> в документе и строит из него сцену.
@@ -108,10 +108,10 @@ var _page_modules = null             # PageModuleRegistry, подготовле�
 ##     По нему эфемерный оверлей (vrweb-patch/vrweb-node, см. docs/space-console.md)
 ##     адресует РЕАЛЬНЫЕ узлы сцены;
 ##   resources — { id -> Resource }: суб-ресурсы страницы (для резолва ссылок из оверлея).
-static func build(doc: HtmlNode, base_url: String = "", page_modules = null) -> Dictionary:
+static func build(doc: HtmlNode, base_url: String = "", scripting_modules = null) -> Dictionary:
 	var b := VrwebBuilder.new()
 	b._base_url = base_url
-	b._page_modules = page_modules
+	b._scripting_modules = scripting_modules
 	return b._build(doc)
 
 
@@ -462,11 +462,11 @@ func _build_state_action(elem: HtmlNode) -> Node:
 func _build_page_component(elem: HtmlNode) -> Node:
 	var module_id := elem.get_attr("module")
 	var export_name := elem.get_attr("class", "default")
-	if _page_modules == null:
+	if _scripting_modules == null:
 		Log.warn("builder", "<VRWebComponent %s:%s> пропущен: modules не подготовлены" \
 				% [module_id, export_name])
 		return null
-	var result: Dictionary = _page_modules.instantiate_export(module_id, export_name)
+	var result: Dictionary = _scripting_modules.instantiate_export(module_id, export_name)
 	if not str(result.get("error", "")).is_empty():
 		Log.warn("builder", str(result.error))
 		return null
