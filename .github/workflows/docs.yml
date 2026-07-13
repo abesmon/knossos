@@ -1,0 +1,31 @@
+name: Documentation
+
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+      - "tests/check_docs.py"
+      - "tests/test_check_docs_validator.py"
+      - ".github/workflows/docs.yml"
+  push:
+    paths:
+      - "**/*.md"
+      - "tests/check_docs.py"
+      - "tests/test_check_docs_validator.py"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate documentation links and roadmap rules
+        run: python3 -B tests/check_docs.py --strict
+      - name: Test documentation validator
+        run: python3 -B -m unittest tests/test_check_docs_validator.py

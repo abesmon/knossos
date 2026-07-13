@@ -40,15 +40,7 @@ sources     document/live_peer
 Сейчас статистика остаётся в памяти и предназначена для тестов и следующего debug UI. Она нужна,
 чтобы сначала увидеть реальные классы и свойства миров, а уже затем формировать safe profile.
 
-## Следующие инкременты
+## Единый roadmap
 
-1. Вывести audit snapshot в debug UI и добавить редкие/неизвестные комбинации.
-2. Вынести class/property/resource rules в data-driven registry.
-3. Добавить в opt-in safe profile hard deny для заведомо опасных properties/classes
-   (`script`, `source_code`, callback-и, пути к ФС и произвольные сетевые классы) и очевидные
-   бюджеты дерева/ресурсов.
-4. Отдельно, только после реальных audit-данных определить поведение неизвестного: allow, warn,
-   ask или deny. Это не откладывает блокировку известных опасных поверхностей.
-
-Scripting modules регулируются отдельно через integrity/trust и
-[VRWeb Scripting API](scripting-api.md). Trusted GDScript остаётся кодом с правами процесса.
+Safe profile, registry правил, audit UI, budgets и политика неизвестного ведутся в
+[едином roadmap](../roadmap.md#p0--content-policy-safe-profile).
