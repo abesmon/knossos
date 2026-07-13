@@ -44,8 +44,11 @@ sources     document/live_peer
 
 1. Вывести audit snapshot в debug UI и добавить редкие/неизвестные комбинации.
 2. Вынести class/property/resource rules в data-driven registry.
-3. Добавить очевидные бюджеты дерева и ресурсов в opt-in safe profile.
-4. Только после реальных данных определить поведение неизвестного: allow, warn, ask или deny.
+3. Добавить в opt-in safe profile hard deny для заведомо опасных properties/classes
+   (`script`, `source_code`, callback-и, пути к ФС и произвольные сетевые классы) и очевидные
+   бюджеты дерева/ресурсов.
+4. Отдельно, только после реальных audit-данных определить поведение неизвестного: allow, warn,
+   ask или deny. Это не откладывает блокировку известных опасных поверхностей.
 
 Scripting modules регулируются отдельно через integrity/trust и
 [VRWeb Scripting API](scripting-api.md). Trusted GDScript остаётся кодом с правами процесса.
