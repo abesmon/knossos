@@ -78,6 +78,17 @@ static func export_vrwml_report(root: Node, output_path: String = "") -> Diction
 	return e._report
 
 
+## Только блок <vrweb> для lossless-сохранения импортированной HTML-сцены. В отличие от
+## export_scene(), HTML envelope не создаётся: вызывающий заменяет этим текстом ровно исходный
+## диапазон блока, сохраняя всё вокруг без нормализации.
+static func export_vrweb_block_report(root: Node, mode: String = VrwebBuilder.MODE_COMBINE,
+		output_path: String = "") -> Dictionary:
+	var e := VrwebExporter.new()
+	var block := e._export_vrweb_block(root, mode, output_path)
+	e._report["vrweb"] = block
+	return e._report
+
+
 func _export(root: Node, mode: String, output_path: String) -> String:
 	_standalone = false
 	var safe_mode := mode if mode == VrwebBuilder.MODE_EXCLUSIVE else VrwebBuilder.MODE_COMBINE
@@ -155,9 +166,43 @@ func _export_vrwml(root: Node, _output_path: String) -> String:
 	return "\n".join(out)
 
 
+func _export_vrweb_block(root: Node, mode: String, output_path: String) -> String:
+	_standalone = false
+	var safe_mode := mode if mode == VrwebBuilder.MODE_EXCLUSIVE else VrwebBuilder.MODE_COMBINE
+	var body_lines: Array[String] = []
+	if root != null:
+		# get_children() excludes internal preview nodes by default. That is the persistence
+		# boundary of imported HTML scenes: only editable children become <vrweb> content.
+		for child in root.get_children():
+			_build_node(child, 1, body_lines)
+
+	var res_lines: Array[String] = []
+	var i := 0
+	while i < _sub_order.size():
+		var id := _sub_order[i]
+		_emit_resource(id, _sub_def[id], res_lines)
+		i += 1
+	for ext_id in _ext_order:
+		_emit_ext(ext_id, _ext_def[ext_id], res_lines)
+	_write_packages(output_path)
+	if not _module_head_lines.is_empty() or not _inline_scripts.is_empty():
+		_report_error("lossless HTML save не может менять Script/module definitions вне <vrweb>")
+	_free_defaults()
+
+	var out: Array[String] = ["<vrweb mode=\"%s\">" % safe_mode]
+	out.append_array(body_lines)
+	out.append_array(res_lines)
+	out.append("</vrweb>")
+	return "\n".join(out)
+
+
 # --- Узлы ---
 
 func _build_node(node: Node, depth: int, out: Array[String]) -> void:
+	# Generated HTML geometry is packed into import cache, then hidden as an internal live
+	# subtree. The explicit marker is the persistence boundary even before internalization.
+	if bool(node.get_meta(VrwebHtmlDocument.META_PREVIEW, false)):
+		return
 	# VrwebSpawner -> мета-тег <VRWebSpawner> (в сцену клиента не инстанцируется).
 	if node is VrwebSpawner:
 		_build_spawner(node, depth, out)

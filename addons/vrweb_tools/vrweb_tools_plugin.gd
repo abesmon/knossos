@@ -28,6 +28,8 @@ var _vrwml_preview_avatar: Avatar
 var _vrwml_preview_loaders: Node
 var _preview: VrwebExtPreview
 var _vrwml_scene_importer: EditorSceneFormatImporter
+var _html_scene_importer: EditorSceneFormatImporter
+var _html_preview_loaders: Node
 
 
 func _enter_tree() -> void:
@@ -37,6 +39,10 @@ func _enter_tree() -> void:
 	add_control_to_dock(DOCK_SLOT_RIGHT_BL, _dock_scroll)
 	_vrwml_scene_importer = preload("res://addons/vrweb_tools/vrwml_avatar_scene_importer.gd").new()
 	add_scene_format_importer_plugin(_vrwml_scene_importer)
+	_html_scene_importer = preload("res://addons/vrweb_tools/vrweb_html_scene_importer.gd").new()
+	add_scene_format_importer_plugin(_html_scene_importer)
+	scene_changed.connect(_on_editor_scene_changed)
+	_on_editor_scene_changed(EditorInterface.get_edited_scene_root())
 
 	_file_dialog = EditorFileDialog.new()
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
@@ -67,11 +73,17 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	_clear_html_preview_loaders()
 	_clear_vrwml_preview()
 	_unregister_export_as_menu()
+	if scene_changed.is_connected(_on_editor_scene_changed):
+		scene_changed.disconnect(_on_editor_scene_changed)
 	if _vrwml_scene_importer != null:
 		remove_scene_format_importer_plugin(_vrwml_scene_importer)
 		_vrwml_scene_importer = null
+	if _html_scene_importer != null:
+		remove_scene_format_importer_plugin(_html_scene_importer)
+		_html_scene_importer = null
 	remove_control_from_docks(_dock_scroll)
 	if is_instance_valid(_dock_scroll):
 		_dock_scroll.queue_free()
@@ -124,6 +136,7 @@ func _build_dock() -> void:
 	_dock.add_child(_heading("Дебаг-превью (без записи в файлы)"))
 	_dock.add_child(_button("Загрузить превью", _on_load_preview))
 	_dock.add_child(_button("Очистить превью", _on_clear_preview))
+	_dock.add_child(_button("Сохранить импортированный HTML", _on_save_html_scene))
 
 	_dock.add_child(_sep())
 	_status = Label.new()
@@ -440,6 +453,85 @@ func _on_clear_preview() -> void:
 		return
 	_preview.clear_preview(root)
 	_say("Превью очищено.")
+
+
+func _on_save_html_scene() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null or not bool(root.get_meta(VrwebHtmlDocument.META_IMPORTED, false)):
+		_say("Открытая сцена не является редактируемым HTML с <vrweb>.")
+		return
+	var result := VrwebHtmlSceneSaver.save_root(root)
+	if bool(result.ok):
+		_say("HTML сохранён: изменён только блок <vrweb>.")
+		EditorInterface.get_resource_filesystem().scan()
+	else:
+		_say("HTML не сохранён: %s" % result.error)
+
+
+func _save_external_data() -> void:
+	# Godot вызывает virtual при явном Save/Save All. Работаем только с live HTML-root;
+	# import pipeline сюда не приходит, поэтому исходник не меняется во время импорта.
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null or not bool(root.get_meta(VrwebHtmlDocument.META_IMPORTED, false)):
+		return
+	var result := VrwebHtmlSceneSaver.save_root(root)
+	if not bool(result.ok):
+		push_error("HTML scene save: %s" % result.error)
+
+
+func _on_editor_scene_changed(root: Node) -> void:
+	_clear_html_preview_loaders()
+	if root == null or not root.has_meta(VrwebHtmlDocument.META_SOURCE_PATH):
+		return
+	VrwebHtmlSceneCodec.make_preview_internal(root)
+	_load_html_preview_images(root)
+	if bool(root.get_meta(VrwebHtmlDocument.META_IMPORTED, false)):
+		_say("HTML scene: <vrweb> редактируемый, procedural geometry — read-only preview.")
+	else:
+		_say("HTML открыт только для preview: %s." %
+			str(root.get_meta(VrwebHtmlDocument.META_READ_ONLY_REASON, "нет editable <vrweb>")))
+
+
+func _load_html_preview_images(root: Node) -> void:
+	var targets: Array[MeshInstance3D] = []
+	_collect_html_preview_images(root, targets)
+	if targets.is_empty():
+		return
+	_html_preview_loaders = Node.new()
+	_html_preview_loaders.name = "HTMLPreviewLoaders"
+	EditorInterface.get_base_control().add_child(_html_preview_loaders)
+	var loader := ImageLoader.new()
+	_html_preview_loaders.add_child(loader)
+	for target in targets:
+		var url := str(target.get_meta(VrwebHtmlDocument.META_PREVIEW_IMAGE_URL, ""))
+		loader.request_image(url, _apply_html_preview_texture.bind(target))
+
+
+func _collect_html_preview_images(node: Node, out: Array[MeshInstance3D]) -> void:
+	if node is MeshInstance3D and node.has_meta(VrwebHtmlDocument.META_PREVIEW_IMAGE_URL):
+		out.append(node)
+	for child in node.get_children(true):
+		_collect_html_preview_images(child, out)
+
+
+func _apply_html_preview_texture(texture: Texture2D, target: MeshInstance3D) -> void:
+	if texture == null or not is_instance_valid(target):
+		return
+	var material := target.material_override as StandardMaterial3D
+	if material == null:
+		material = StandardMaterial3D.new()
+		target.material_override = material
+	material.albedo_texture = texture
+	material.albedo_color = Color.WHITE
+	var alt := target.get_node_or_null("../ImageAlt")
+	if alt != null:
+		alt.visible = false
+
+
+func _clear_html_preview_loaders() -> void:
+	if is_instance_valid(_html_preview_loaders):
+		_html_preview_loaders.queue_free()
+	_html_preview_loaders = null
 
 
 # --- Утилиты ---

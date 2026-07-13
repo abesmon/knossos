@@ -31,6 +31,7 @@ const WORLD_LABEL_SCENE := preload("res://actors/world_label/world_label.tscn")
 ## отладочный пробник прицела (Player._debug_probe). Заполняется только если в артефакте
 ## есть "sources" (т.е. топология собрана с debug=true). См. _attach_debug.
 const DEBUG_META := "vrweb_debug"
+const EDITOR_PREVIEW_IMAGE_META := "vrweb_html_preview_image_url"
 
 # --- Сетка ---
 const GRID := 3.0               # размер клетки сетки SpaceLayout в метрах = ширина коридора/проёма
@@ -78,6 +79,7 @@ var _seed: int
 var _rng := RandomNumberGenerator.new()
 var _base_url: String = ""
 var _image_loader: ImageLoader = null
+var _editor_preview := false
 var _sources: Dictionary = {}     # id -> исходный HTML (есть только при debug-сборке топологии)
 var _debug: bool = false          # привязывать ли провенанс к узлам (есть "sources" в артефакте)
 var _base_px := 16.0
@@ -155,6 +157,31 @@ static func generate(space: Dictionary, parent: Node3D, seed_value: int, on_tran
 	# живой подписка на process_frame. Вложенный await внутри _build ломает возобновление,
 	# поэтому _build синхронный (раскладка + спавн готовы к возврату), а стриминг — здесь.
 	g._stream_remaining()
+	return g
+
+
+## Полная синхронная сборка для import cache редактора. Геометрия и раскладка те же, что в
+## runtime; только scripted interactive actors заменяются встроенными editor-safe нодами.
+static func generate_editor_preview(space: Dictionary, parent: Node3D, seed_value: int,
+		base_url: String = "") -> WorldGenerator:
+	var g := WorldGenerator.new()
+	g._editor_preview = true
+	g._base_url = base_url
+	g._build(space, parent, seed_value, Callable())
+	for id in g._rooms.keys():
+		if g._built.has(id):
+			continue
+		g._build_room(id, g._container, Callable())
+		g._built[id] = true
+	if is_instance_valid(g._container):
+		g._build_corridor_floors(g._container)
+		g.build_complete = true
+		parent.set_meta("vrweb_html_preview_rooms", g._rooms.size())
+		var door_count := 0
+		for doors in g._door_edges.values():
+			door_count += (doors as Dictionary).size()
+		parent.set_meta("vrweb_html_preview_doors", door_count)
+		parent.set_meta("vrweb_html_preview_corridors", g._corr_cells.size())
 	return g
 
 
@@ -1157,6 +1184,7 @@ func _build_corridor_floors(parent: Node3D) -> void:
 	var wall_color := floor_color.lightened(0.1)
 	for cell in _corr_cells.keys():
 		var holder := Node3D.new()
+		holder.name = "CorridorCell"
 		holder.position = _cell_world(cell.x + 0.5, cell.y + 0.5)
 		parent.add_child(holder)
 		_add_box(holder, Vector3(GRID, 0.4, GRID), Vector3(0, -0.2, 0), floor_color, true)
@@ -1251,6 +1279,27 @@ func _object_node_is_centered(obj: Dictionary) -> bool:
 func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, on_transition: Callable, size: Vector2, max_w: float) -> Node3D:
 	var fn = obj.get("function", null)
 	var is_link: bool = fn != null and typeof(fn) == TYPE_DICTIONARY
+	if _editor_preview:
+		if obj.get("type", "") in ["image", "figure"]:
+			return _build_editor_image(obj, holder, local_pos, yaw, size)
+		var preview_text := _obj_text(obj)
+		if obj.get("type", "") == "list":
+			preview_text = _list_text(obj)
+		elif obj.get("type", "") == "table":
+			preview_text = _table_text(obj)
+		elif obj.get("type", "") == "media":
+			preview_text = "▷ " + preview_text
+		elif is_link:
+			preview_text = "↗ " + preview_text
+		var static_panel := _build_panel(holder, local_pos, yaw, preview_text,
+			Color(0.42, 0.55, 0.72) if is_link else Color(0.72, 0.72, 0.75), _base_px)
+		var preview_runs: Array = obj.get("content", {}).get("runs", [])
+		if obj.get("type", "") == "list":
+			preview_runs = _list_runs(obj)
+		elif obj.get("type", "") == "table":
+			preview_runs = _table_runs(obj)
+		_add_editor_run_images(static_panel, preview_runs)
+		return static_panel
 
 	if obj.get("type", "") == "image":
 		return _build_image_panel(obj, holder, local_pos, yaw, fn if is_link else null, on_transition, max_w)
@@ -1322,6 +1371,69 @@ func _spawn_object(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: flo
 		_:
 			return _build_panel(holder, local_pos, yaw, _obj_text(obj),
 				Color(0.85, 0.85, 0.85), _base_px)
+
+
+func _build_editor_image(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float,
+		size: Vector2) -> Node3D:
+	var node := Node3D.new()
+	node.name = "ImagePreview"
+	holder.add_child(node)
+	node.position = local_pos
+	node.rotation.y = yaw
+	var center_y := maxf(EYE_LEVEL, size.y * 0.5 + PANEL_FLOOR_GAP)
+	var mesh_node := MeshInstance3D.new()
+	mesh_node.name = "Image"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(maxf(size.x, 0.2), maxf(size.y, 0.2))
+	mesh_node.mesh = quad
+	mesh_node.position.y = center_y
+	var material := StandardMaterial3D.new()
+	material.resource_local_to_scene = true
+	material.albedo_color = Color(0.18, 0.2, 0.24)
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh_node.material_override = material
+	var src := str(obj.get("content", {}).get("src", ""))
+	if not src.is_empty():
+		mesh_node.set_meta(EDITOR_PREVIEW_IMAGE_META,
+			PageFetcher.resolve_url(src, _base_url))
+	node.add_child(mesh_node)
+	var label := WORLD_LABEL_SCENE.instantiate() as Label3D
+	label.name = "ImageAlt"
+	label.text = _truncate(str(obj.get("content", {}).get("alt", "image")), 80)
+	label.font_size = _godot_font(_base_px)
+	label.pixel_size = LABEL_PIXEL_SIZE
+	label.width = int(maxf(size.x, 0.2) / LABEL_PIXEL_SIZE)
+	label.position = Vector3(0, center_y, 0.02)
+	node.add_child(label)
+	return node
+
+
+func _add_editor_run_images(panel: Node3D, runs: Array) -> void:
+	var image_runs: Array = []
+	for run in runs:
+		if str(run.get("type", "")) == "image" and not str(run.get("src", "")).is_empty():
+			image_runs.append(run)
+	if image_runs.is_empty():
+		return
+	for i in image_runs.size():
+		var run: Dictionary = image_runs[i]
+		var mesh_node := MeshInstance3D.new()
+		mesh_node.name = "InlineImage"
+		var quad := QuadMesh.new()
+		quad.size = Vector2(0.8, 0.5)
+		mesh_node.mesh = quad
+		mesh_node.position = Vector3((float(i) - float(image_runs.size() - 1) * 0.5) * 0.85,
+			EYE_LEVEL, 0.11)
+		var material := StandardMaterial3D.new()
+		material.resource_local_to_scene = true
+		material.albedo_color = Color(0.18, 0.2, 0.24)
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mesh_node.material_override = material
+		mesh_node.set_meta(EDITOR_PREVIEW_IMAGE_META,
+			PageFetcher.resolve_url(str(run.get("src", "")), _base_url))
+		panel.add_child(mesh_node)
 
 
 func _build_panel(holder: Node3D, local_pos: Vector3, yaw: float, text: String, color: Color, font_css_px: float) -> Node3D:
