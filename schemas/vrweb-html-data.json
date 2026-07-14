@@ -1,0 +1,4229 @@
+{
+  "version": 1.1,
+  "tags": [
+    {
+      "name": "vrweb",
+      "description": "VRWeb scene embedded in an HTML document.",
+      "attributes": [
+        {
+          "name": "mode",
+          "description": "World composition mode.",
+          "values": [
+            {
+              "name": "exclusive"
+            },
+            {
+              "name": "combine"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Resource",
+      "description": "Inline Godot Resource definition. Property values use Godot Variant syntax.",
+      "attributes": [
+        {
+          "name": "id",
+          "description": "Resource identifier used by SubResource::: references."
+        },
+        {
+          "name": "type",
+          "description": "Strict resource class.",
+          "values": [
+            {
+              "name": "ArrayMesh"
+            },
+            {
+              "name": "BoxMesh"
+            },
+            {
+              "name": "BoxShape3D"
+            },
+            {
+              "name": "CapsuleMesh"
+            },
+            {
+              "name": "CapsuleShape3D"
+            },
+            {
+              "name": "ConcavePolygonShape3D"
+            },
+            {
+              "name": "ConvexPolygonShape3D"
+            },
+            {
+              "name": "CylinderMesh"
+            },
+            {
+              "name": "CylinderShape3D"
+            },
+            {
+              "name": "PlaneMesh"
+            },
+            {
+              "name": "QuadMesh"
+            },
+            {
+              "name": "SphereMesh"
+            },
+            {
+              "name": "SphereShape3D"
+            },
+            {
+              "name": "StandardMaterial3D"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ExtResource",
+      "description": "External resource definition loaded from path.",
+      "attributes": [
+        {
+          "name": "id",
+          "description": "Resource identifier used by ExtResource::: references."
+        },
+        {
+          "name": "type",
+          "description": "External resource class.",
+          "values": [
+            {
+              "name": "ArrayMesh"
+            },
+            {
+              "name": "AudioStreamMP3"
+            },
+            {
+              "name": "AudioStreamOggVorbis"
+            },
+            {
+              "name": "AudioStreamWAV"
+            },
+            {
+              "name": "CompressedTexture2D"
+            },
+            {
+              "name": "ImageTexture"
+            },
+            {
+              "name": "Mesh"
+            },
+            {
+              "name": "PackedScene"
+            },
+            {
+              "name": "Texture2D"
+            }
+          ]
+        },
+        {
+          "name": "path",
+          "description": "Absolute HTTP(S)/VRWeb URL or a relative bundled asset path."
+        }
+      ]
+    },
+    {
+      "name": "ExtScene",
+      "description": "External PackedScene placeholder with Node3D transform properties.",
+      "attributes": [
+        {
+          "name": "src",
+          "description": "ExtResource::: identifier of a PackedScene."
+        },
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VRWebSpawner",
+      "description": "World spawn policy.",
+      "attributes": [
+        {
+          "name": "mode",
+          "description": "Choose the first point or a random point.",
+          "values": [
+            {
+              "name": "first"
+            },
+            {
+              "name": "random"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SpawnerPoint",
+      "description": "A spawn pose inside VRWebSpawner.",
+      "attributes": [
+        {
+          "name": "transform",
+          "description": "Godot Transform3D Variant literal."
+        }
+      ]
+    },
+    {
+      "name": "VRWebModule",
+      "description": "Trusted GDScript package declaration.",
+      "attributes": [
+        {
+          "name": "id",
+          "description": "Stable module id."
+        },
+        {
+          "name": "src",
+          "description": "Relative or absolute .vrmod URL."
+        },
+        {
+          "name": "integrity",
+          "description": "sha256-BASE64 integrity value."
+        },
+        {
+          "name": "mode",
+          "description": "Runtime trust mode.",
+          "values": [
+            {
+              "name": "trusted-gdscript"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VRWebComponent",
+      "description": "Node implemented by an inline or packaged module.",
+      "attributes": [
+        {
+          "name": "module",
+          "description": "Module id, or #id for an inline script."
+        },
+        {
+          "name": "class",
+          "description": "Exported module class; inline modules use default."
+        },
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Area3D",
+      "description": "Godot Area3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "angular_damp",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "angular_damp_space_override",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Combine"
+            },
+            {
+              "name": "Combine-Replace"
+            },
+            {
+              "name": "Replace"
+            },
+            {
+              "name": "Replace-Combine"
+            }
+          ]
+        },
+        {
+          "name": "audio_bus_name",
+          "description": "Godot StringName property; use a Godot Variant literal."
+        },
+        {
+          "name": "audio_bus_override",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "collision_layer",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "collision_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "collision_priority",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "disable_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Remove"
+            },
+            {
+              "name": "Make Static"
+            },
+            {
+              "name": "Keep Active"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "gravity",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "gravity_direction",
+          "description": "Godot Vector3 property; use a Godot Variant literal."
+        },
+        {
+          "name": "gravity_point",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "gravity_point_center",
+          "description": "Godot Vector3 property; use a Godot Variant literal."
+        },
+        {
+          "name": "gravity_point_unit_distance",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "gravity_space_override",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Combine"
+            },
+            {
+              "name": "Combine-Replace"
+            },
+            {
+              "name": "Replace"
+            },
+            {
+              "name": "Replace-Combine"
+            }
+          ]
+        },
+        {
+          "name": "input_capture_on_drag",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "input_ray_pickable",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "linear_damp",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "linear_damp_space_override",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Combine"
+            },
+            {
+              "name": "Combine-Replace"
+            },
+            {
+              "name": "Replace"
+            },
+            {
+              "name": "Replace-Combine"
+            }
+          ]
+        },
+        {
+          "name": "monitorable",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "monitoring",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "reverb_bus_amount",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "reverb_bus_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "reverb_bus_name",
+          "description": "Godot StringName property; use a Godot Variant literal."
+        },
+        {
+          "name": "reverb_bus_uniformity",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "wind_attenuation_factor",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "wind_force_magnitude",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "wind_source_path",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        }
+      ]
+    },
+    {
+      "name": "AudioStreamPlayer3D",
+      "description": "Godot AudioStreamPlayer3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "area_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "attenuation_filter_cutoff_hz",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "attenuation_filter_db",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "attenuation_model",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inverse"
+            },
+            {
+              "name": "Inverse Square"
+            },
+            {
+              "name": "Logarithmic"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "autoplay",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "bus",
+          "description": "Godot StringName property; use a Godot Variant literal."
+        },
+        {
+          "name": "doppler_tracking",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Idle"
+            },
+            {
+              "name": "Physics"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "emission_angle_degrees",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "emission_angle_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "emission_angle_filter_attenuation_db",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "max_db",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "max_distance",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "max_polyphony",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "panning_strength",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "pitch_scale",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "playback_type",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Default"
+            },
+            {
+              "name": "Stream"
+            },
+            {
+              "name": "Sample"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "stream",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "stream_paused",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "unit_size",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "volume_db",
+          "description": "Godot float property; use a Godot Variant literal."
+        }
+      ]
+    },
+    {
+      "name": "CollisionShape3D",
+      "description": "Godot CollisionShape3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "debug_color",
+          "description": "Godot Color property; use a Godot Variant literal."
+        },
+        {
+          "name": "debug_fill",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "disabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "shape",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DirectionalLight3D",
+      "description": "Godot DirectionalLight3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "directional_shadow_blend_splits",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "directional_shadow_fade_start",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "directional_shadow_max_distance",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "directional_shadow_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Orthogonal (Fast)"
+            },
+            {
+              "name": "PSSM 2 Splits (Average)"
+            },
+            {
+              "name": "PSSM 4 Splits (Slow)"
+            }
+          ]
+        },
+        {
+          "name": "directional_shadow_pancake_size",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "directional_shadow_split_1",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "directional_shadow_split_2",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "directional_shadow_split_3",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "distance_fade_begin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "distance_fade_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "distance_fade_length",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "distance_fade_shadow",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "editor_only",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "layers",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_angular_distance",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_bake_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Static"
+            },
+            {
+              "name": "Dynamic"
+            }
+          ]
+        },
+        {
+          "name": "light_color",
+          "description": "Godot Color property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_cull_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_indirect_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_intensity_lumens",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_intensity_lux",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_negative",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "light_projector",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_size",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_specular",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_temperature",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_volumetric_fog_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "shadow_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_blur",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_caster_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "shadow_normal_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_opacity",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_reverse_cull_face",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "shadow_transmittance_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "sky_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Light and Sky"
+            },
+            {
+              "name": "Light Only"
+            },
+            {
+              "name": "Sky Only"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Marker3D",
+      "description": "Godot Marker3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "gizmo_extents",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "MeshInstance3D",
+      "description": "Godot MeshInstance3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "cast_shadow",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Off"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Double-Sided"
+            },
+            {
+              "name": "Shadows Only"
+            }
+          ]
+        },
+        {
+          "name": "custom_aabb",
+          "description": "Godot AABB property; use a Godot Variant literal."
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "extra_cull_margin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "gi_lightmap_texel_scale",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "gi_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Static"
+            },
+            {
+              "name": "Dynamic"
+            }
+          ]
+        },
+        {
+          "name": "ignore_occlusion_culling",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "layers",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "lod_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "material_overlay",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "material_override",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "mesh",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "skeleton",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "skin",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "transparency",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_begin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_begin_margin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_end",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_end_margin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_fade_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Self"
+            },
+            {
+              "name": "Dependencies"
+            }
+          ]
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Node",
+      "description": "Godot Node node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Node3D",
+      "description": "Godot Node3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "OmniLight3D",
+      "description": "Godot OmniLight3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "distance_fade_begin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "distance_fade_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "distance_fade_length",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "distance_fade_shadow",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "editor_only",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "layers",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_angular_distance",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_bake_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Static"
+            },
+            {
+              "name": "Dynamic"
+            }
+          ]
+        },
+        {
+          "name": "light_color",
+          "description": "Godot Color property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_cull_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_indirect_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_intensity_lumens",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_intensity_lux",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_negative",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "light_projector",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_size",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_specular",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_temperature",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_volumetric_fog_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "omni_attenuation",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "omni_range",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "omni_shadow_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Dual Paraboloid"
+            },
+            {
+              "name": "Cube"
+            }
+          ]
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "shadow_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_blur",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_caster_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "shadow_normal_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_opacity",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_reverse_cull_face",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "shadow_transmittance_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SpotLight3D",
+      "description": "Godot SpotLight3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "distance_fade_begin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "distance_fade_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "distance_fade_length",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "distance_fade_shadow",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "editor_only",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "layers",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_angular_distance",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_bake_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Static"
+            },
+            {
+              "name": "Dynamic"
+            }
+          ]
+        },
+        {
+          "name": "light_color",
+          "description": "Godot Color property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_cull_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_indirect_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_intensity_lumens",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_intensity_lux",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_negative",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "light_projector",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_size",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_specular",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_temperature",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "light_volumetric_fog_energy",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "shadow_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_blur",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_caster_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "shadow_normal_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_opacity",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "shadow_reverse_cull_face",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "shadow_transmittance_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "spot_angle",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "spot_angle_attenuation",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "spot_attenuation",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "spot_range",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sprite3D",
+      "description": "Godot Sprite3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "alpha_antialiasing_edge",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "alpha_antialiasing_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Alpha Edge Blend"
+            },
+            {
+              "name": "Alpha Edge Clip"
+            }
+          ]
+        },
+        {
+          "name": "alpha_cut",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Discard"
+            },
+            {
+              "name": "Opaque Pre-Pass"
+            },
+            {
+              "name": "Alpha Hash"
+            }
+          ]
+        },
+        {
+          "name": "alpha_hash_scale",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "alpha_scissor_threshold",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "axis",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "X-Axis"
+            },
+            {
+              "name": "Y-Axis"
+            },
+            {
+              "name": "Z-Axis"
+            }
+          ]
+        },
+        {
+          "name": "billboard",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Enabled"
+            },
+            {
+              "name": "Y-Billboard"
+            }
+          ]
+        },
+        {
+          "name": "cast_shadow",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Off"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Double-Sided"
+            },
+            {
+              "name": "Shadows Only"
+            }
+          ]
+        },
+        {
+          "name": "centered",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "custom_aabb",
+          "description": "Godot AABB property; use a Godot Variant literal."
+        },
+        {
+          "name": "double_sided",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "extra_cull_margin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "fixed_size",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "flip_h",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "flip_v",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "frame",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "gi_lightmap_texel_scale",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "gi_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Static"
+            },
+            {
+              "name": "Dynamic"
+            }
+          ]
+        },
+        {
+          "name": "hframes",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "ignore_occlusion_culling",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "layers",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "lod_bias",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "material_overlay",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "material_override",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "modulate",
+          "description": "Godot Color property; use a Godot Variant literal."
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "no_depth_test",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "offset",
+          "description": "Godot Vector2 property; use a Godot Variant literal."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "pixel_size",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "region_enabled",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "region_rect",
+          "description": "Godot Rect2 property; use a Godot Variant literal."
+        },
+        {
+          "name": "render_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "shaded",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "texture",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "texture_filter",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Nearest"
+            },
+            {
+              "name": "Linear"
+            },
+            {
+              "name": "Nearest Mipmap"
+            },
+            {
+              "name": "Linear Mipmap"
+            },
+            {
+              "name": "Nearest Mipmap Anisotropic"
+            },
+            {
+              "name": "Linear Mipmap Anisotropic"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "transparency",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "transparent",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "vframes",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_begin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_begin_margin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_end",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_end_margin",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "visibility_range_fade_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Disabled"
+            },
+            {
+              "name": "Self"
+            },
+            {
+              "name": "Dependencies"
+            }
+          ]
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "StaticBody3D",
+      "description": "Godot StaticBody3D node in the strict VRWeb vocabulary.",
+      "attributes": [
+        {
+          "name": "auto_translate_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "axis_lock_angular_x",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "axis_lock_angular_y",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "axis_lock_angular_z",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "axis_lock_linear_x",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "axis_lock_linear_y",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "axis_lock_linear_z",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "collision_layer",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "collision_mask",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "collision_priority",
+          "description": "Godot float property; use a Godot Variant literal."
+        },
+        {
+          "name": "constant_angular_velocity",
+          "description": "Godot Vector3 property; use a Godot Variant literal."
+        },
+        {
+          "name": "constant_linear_velocity",
+          "description": "Godot Vector3 property; use a Godot Variant literal."
+        },
+        {
+          "name": "disable_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Remove"
+            },
+            {
+              "name": "Make Static"
+            },
+            {
+              "name": "Keep Active"
+            }
+          ]
+        },
+        {
+          "name": "editor_description",
+          "description": "Godot String property; use a Godot Variant literal."
+        },
+        {
+          "name": "input_capture_on_drag",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "input_ray_pickable",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "name",
+          "description": "Godot node name; required for stable NodePath references."
+        },
+        {
+          "name": "physics_interpolation_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "On"
+            },
+            {
+              "name": "Off"
+            }
+          ]
+        },
+        {
+          "name": "physics_material_override",
+          "description": "Godot Object property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Pausable"
+            },
+            {
+              "name": "When Paused"
+            },
+            {
+              "name": "Always"
+            },
+            {
+              "name": "Disabled"
+            }
+          ]
+        },
+        {
+          "name": "process_physics_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_priority",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_group",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Inherit"
+            },
+            {
+              "name": "Main Thread"
+            },
+            {
+              "name": "Sub Thread"
+            }
+          ]
+        },
+        {
+          "name": "process_thread_group_order",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "process_thread_messages",
+          "description": "Godot int property; use a Godot Variant literal."
+        },
+        {
+          "name": "rotation_edit_mode",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "Euler"
+            },
+            {
+              "name": "Quaternion"
+            },
+            {
+              "name": "Basis"
+            }
+          ]
+        },
+        {
+          "name": "rotation_order",
+          "description": "Godot int property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "XYZ"
+            },
+            {
+              "name": "XZY"
+            },
+            {
+              "name": "YXZ"
+            },
+            {
+              "name": "YZX"
+            },
+            {
+              "name": "ZXY"
+            },
+            {
+              "name": "ZYX"
+            }
+          ]
+        },
+        {
+          "name": "top_level",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "transform",
+          "description": "Godot Transform3D property; use a Godot Variant literal."
+        },
+        {
+          "name": "unique_name_in_owner",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        },
+        {
+          "name": "visibility_parent",
+          "description": "Godot NodePath property; use a Godot Variant literal."
+        },
+        {
+          "name": "visible",
+          "description": "Godot bool property; use a Godot Variant literal.",
+          "values": [
+            {
+              "name": "true"
+            },
+            {
+              "name": "false"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

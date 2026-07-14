@@ -29,8 +29,9 @@ static func save_root(root: Node, output_path: String = "") -> Dictionary:
 		return {"ok": false, "code": ERR_ALREADY_IN_USE,
 			"error": "<vrweb> в %s изменился на диске; переимпортируйте сцену" % source_path}
 
-	var mode := str(root.get_meta(VrwebHtmlDocument.META_MODE, VrwebBuilder.MODE_COMBINE))
-	var report := VrwebExporter.export_vrweb_block_report(root, mode, output_path)
+	var mode := str(root.get_meta(VrwebHtmlDocument.META_MODE, VrwebFormat.MODE_COMBINE))
+	var report := VrwebExporter.export_vrweb_block_report(root, mode, output_path,
+			VrwebCompatibility.PROFILE_STRICT)
 	if not bool(report.ok):
 		return {"ok": false, "code": ERR_CANT_CREATE, "error": "; ".join(report.errors)}
 	var replaced := VrwebHtmlDocument.replace_block(source, str(report.vrweb))

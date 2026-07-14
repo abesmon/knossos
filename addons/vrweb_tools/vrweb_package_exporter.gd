@@ -8,7 +8,8 @@ extends RefCounted
 static func build(script: GDScript, module_id: String, output_path: String,
 		base_class: String, requires: Array[String] = ["vrweb/core/1", "vrweb/scene/1",
 				"godot/engine/4"], optional: Array[String] = ["vrweb/state/1", "vrweb/input/1",
-				"vrweb/assets/1", "vrweb/timers/1", "vrweb/log/1"]) -> Dictionary:
+				"vrweb/assets/1", "vrweb/timers/1", "vrweb/log/1"],
+		metadata: Dictionary = {}) -> Dictionary:
 	if script.resource_path.is_empty() or not script.resource_path.begins_with("res://"):
 		return _error("package требует сохранённый GDScript из res://")
 	var collected := _collect_scripts(script.resource_path)
@@ -17,13 +18,23 @@ static func build(script: GDScript, module_id: String, output_path: String,
 	var files: Dictionary = collected.files
 	var assets: Dictionary = collected.assets
 	var main_path := script.resource_path.trim_prefix("res://")
+	var values := {
+		"id": module_id, "version": metadata.get("version", VrwebModuleMetadata.DEFAULT_VERSION),
+		"permissions": metadata.get("permissions", []),
+		"requires": metadata.get("requires", requires),
+		"optional": metadata.get("optional", optional),
+	}
+	var normalized := VrwebModuleMetadata.normalize(values)
+	if not bool(normalized.ok):
+		return _error("; ".join(normalized.errors))
+	var module: Dictionary = normalized.value
 	var manifest := {
-		"format": 1, "id": module_id, "version": "0.0.0", "knossos_api": "1",
+		"format": 1, "id": module.id, "version": module.version, "knossos_api": "1",
 		"runtime": "trusted-gdscript",
 		"exports": {"default": {"script": main_path, "base": base_class}},
 		"assets": assets,
-		"permissions": [],
-		"requires": requires, "optional": optional,
+		"permissions": module.permissions,
+		"requires": module.requires, "optional": module.optional,
 	}
 	var packer := ZIPPacker.new()
 	if packer.open(output_path) != OK:
@@ -42,7 +53,7 @@ static func build(script: GDScript, module_id: String, output_path: String,
 	var package_bytes := FileAccess.get_file_as_bytes(output_path)
 	if package_bytes.is_empty():
 		return _error("создан пустой package")
-	return {"ok": true, "error": "", "integrity": ScriptingModuleIntegrity.sri_sha256(package_bytes),
+	return {"ok": true, "error": "", "integrity": _sri_sha256(package_bytes),
 		"hash": _sha256_hex(package_bytes), "files": files.keys(), "assets": assets}
 
 
@@ -217,6 +228,13 @@ static func _sha256_hex(bytes: PackedByteArray) -> String:
 	context.start(HashingContext.HASH_SHA256)
 	context.update(bytes)
 	return context.finish().hex_encode()
+
+
+static func _sri_sha256(bytes: PackedByteArray) -> String:
+	var context := HashingContext.new()
+	context.start(HashingContext.HASH_SHA256)
+	context.update(bytes)
+	return "sha256-" + Marshalls.raw_to_base64(context.finish())
 
 
 static func _error(message: String) -> Dictionary:

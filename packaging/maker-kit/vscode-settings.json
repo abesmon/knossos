@@ -1,0 +1,10 @@
+{
+  "html.customData": [
+    "./schemas/vrweb-html-data.json"
+  ],
+  "files.exclude": {
+    "**/.godot": true,
+    "**/*.import": true,
+    "**/*.uid": true
+  }
+}

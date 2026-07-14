@@ -1,0 +1,21 @@
+config_version=5
+
+[application]
+
+config/name="VRWeb Maker Starter"
+run/main_scene="res://world.tscn"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/vrweb_tools/plugin.cfg")
+
+[vrweb]
+
+maker/dist_dir="res://dist"
+maker/html_mode="exclusive"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -3,7 +3,8 @@ extends Node
 ## End-to-end HTML scene import/save regression. Run:
 ##   godot --headless --path . res://tests/test_html_scene_import.tscn
 
-const CODEC := preload("res://addons/vrweb_tools/vrweb_html_scene_codec.gd")
+const CODEC := preload("res://integrations/knossos/vrweb_tools/vrweb_html_scene_codec.gd")
+const PORTABLE_CODEC := preload("res://addons/vrweb_tools/vrweb_portable_html_scene_codec.gd")
 const SAVER := preload("res://addons/vrweb_tools/vrweb_html_scene_saver.gd")
 const DOCUMENT := preload("res://addons/vrweb_tools/vrweb_html_document.gd")
 
@@ -21,11 +22,12 @@ func _ready() -> void:
 		+ "<vrweb mode=\"combine\"><Node3D name=\"Editable\"/></vrweb>\r\n</body>\r\n"
 	_write(source_path, source)
 
-	var root := CODEC.build_from_path(source_path)
+	var root := PORTABLE_CODEC.build_from_path(source_path)
 	_check(root != null, "HTML importer возвращает сцену")
 	if root == null:
 		get_tree().quit(1)
 		return
+	CODEC.attach_procedural_preview(root)
 	_check(bool(root.get_meta(DOCUMENT.META_IMPORTED, false)), "tool-safe vrweb помечен редактируемым")
 	_check(root.get_child_count() == 2, "import cache содержит помеченный procedural preview")
 	_check(root.get_child(0).name == "Editable", "vrweb-узел материализован")
@@ -67,7 +69,8 @@ func _ready() -> void:
 
 	var exclusive_path := "/tmp/knossos_html_scene_import_exclusive.html"
 	_write(exclusive_path, source.replace("mode=\"combine\"", "mode=\"exclusive\""))
-	var exclusive_root := CODEC.build_from_path(exclusive_path)
+	var exclusive_root := PORTABLE_CODEC.build_from_path(exclusive_path)
+	CODEC.attach_procedural_preview(exclusive_root)
 	_check(exclusive_root != null, "exclusive HTML импортируется")
 	if exclusive_root != null:
 		_check(exclusive_root.get_child_count() == 1,

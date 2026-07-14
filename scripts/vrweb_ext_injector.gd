@@ -3,7 +3,7 @@ extends RefCounted
 
 ## Асинхронная подгрузка и вставка внешних ресурсов VRWeb (<ExtResource>) по списку заявок.
 ## Единая точка для рантайма (scenes/main.gd при навигации) и для дебаг-превью в редакторе
-## (addons/vrweb_tools/vrweb_ext_preview.gd) — оба передают одну и ту же структуру `ext`.
+## (integrations/knossos/vrweb_tools/vrweb_ext_preview.gd) — оба передают одну структуру `ext`.
 ##
 ## `ext` = { defs: { id -> {type, url} }, targets: [ ... ] }, где target — либо свойство
 ## узла/ресурса ({obj, prop, id}), либо вставка GLTF-сцены ребёнком ({obj, id, child:true}).

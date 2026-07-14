@@ -9,6 +9,7 @@
 ./build.sh mac      # только macOS
 ./build.sh win      # только Windows
 ./build.sh linux    # только Linux x86_64
+./build.sh kit      # быстрая локальная сборка/проверка Maker Kit
 ./build.sh --clean  # удалить билды (кэш шаблонов остаётся)
 ```
 
@@ -26,6 +27,7 @@ build/
   knossos-0.0.0-b7-macos.zip      # .app + helper/инструкция для Gatekeeper
   knossos-0.0.0-b7-windows.zip    # knossos.exe + knossos.pck + ffmpeg/webrtc dll
   knossos-0.0.0-b7-linux-x86_64.zip # knossos + knossos.pck + ffmpeg/webrtc/twovoip so
+  vrweb-maker-kit-0.0.0-b7.zip    # standalone Godot project + addon + starter/docs
   .build_number                   # локальный счётчик билдов (не в гите)
 ```
 
@@ -45,6 +47,11 @@ build/
   > Godot **не** подставляет `config/version` в Info.plist/ресурс `.exe` автоматически —
   > за это отвечают per-preset поля версии, которые `build.sh` и заполняет (см. ниже).
 
+Knossos и Maker Kit идут одним release train: platform target `mac`, `win`, `linux`
+или `all` всегда дополнительно собирает Maker Kit с теми же semver и build number.
+Цель `kit` нужна только для быстрой локальной итерации и не образует отдельный
+публичный release lifecycle.
+
 Куда попадает номер:
 
 | Платформа | Поле | Что это |
@@ -53,6 +60,7 @@ build/
 | macOS  | `application/short_version` → CFBundleShortVersionString | semver |
 | Windows| `application/file_version` / `application/product_version` | `<semver>.<номер>` в ресурсе версии `.exe` |
 | Linux  | имя `.zip` | `knossos-<semver>-b<номер>-linux-x86_64.zip` |
+| Maker Kit | manifest и имя `.zip` | `<semver>`, build number и compatibility matrix |
 | все    | имя `.zip` | `knossos-<semver>-b<номер>-<платформа>.zip` |
 
 `export_presets.cfg` закоммичен с **пустыми** полями версии. `build.sh` штампует их
@@ -77,6 +85,15 @@ build/
 7. **Пакует** в `.zip` (macOS — через `ditto`, чтобы сохранить структуру
    бандла и фреймворки) и валидирует результат (наличие бинаря, ffmpeg-библиотек).
    В macOS ZIP дополнительно кладёт helper и инструкцию для снятия карантина.
+8. **Собирает Maker Kit** как отдельный standalone Godot project: addon, starter,
+   examples, README, changelog, `compatibility.json` и генерируемую HTML completion schema. Затем
+   распаковывает уже готовый
+   ZIP в чистый временный project и выполняет strict CLI smoke-test.
+
+Workflow `.github/workflows/maker-kit.yml` дополнительно скачивает официальный Godot 4.6.3 на
+macOS, Windows и Linux и запускает `tests/run_maker_portability.py`. Harness в чистом
+проекте проверяет freshness HTML schema, missing/case-sensitive asset paths, glTF dependencies
+и byte-identical повторную сборку `dist/`.
 
 ## Первый запуск macOS-сборки без нотаризации
 
@@ -99,6 +116,17 @@ build/
 | `macOS`           | macOS     | universal (x86_64+arm64) | distribution_type=Testing, codesign=Disabled (подпись делает build.sh) |
 | `Windows Desktop` | Windows   | x86_64             | embed_pck=false (exe + pck рядом)    |
 | `Linux`           | Linux     | x86_64             | embed_pck=false (бинарь + pck рядом) |
+
+### Maker Kit self-test экспортированной сборки
+
+Экспортированный Knossos намеренно не разрешает command-line scene path overrides. Для узкой
+CI-проверки scripting package штатный loading screen принимает user argument
+`--vrweb-maker-self-test` после `--` и переключается на embedded
+`tests/test_package_demo.tscn`. Тест читает заранее собранный Maker Kit `.vrmod`, проверяет
+integrity/unpack/assets, компилирует module и материализует компонент теми же runtime-классами,
+что обычная страница. Клиент намеренно не пересобирает package из remapped `.gdc` своего PCK:
+package build относится к addon, а exported Knossos — consumer готового артефакта.
+Аргумент ничего не делает без явного запуска и не открывает произвольный путь из CLI.
 
 ## Нативные зависимости (GDExtension)
 

@@ -1,0 +1,18 @@
+config_version=5
+
+[application]
+
+config/name="VRWeb Maker Clean Core Test"
+run/main_scene="res://test.tscn"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+config/use_custom_user_dir=true
+config/custom_user_dir_name="vrweb-maker-clean-test"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/vrweb_tools/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

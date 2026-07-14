@@ -56,8 +56,10 @@ static func unpack(module: Dictionary) -> Dictionary:
 	for asset_spec in parsed.manifest.assets.values():
 		if not contents.has(str(asset_spec.path)):
 			return _error("missing_asset_file")
-	var root := UNPACK_ROOT.path_join(hash)
-	var absolute_root := Sandbox.resolve(root)
+	# Registry must load from the same sandboxed path into which files are extracted. Keeping
+	# unsandboxed user:// here works only when Sandbox.id() is empty and breaks isolated clients.
+	var root := Sandbox.resolve(UNPACK_ROOT.path_join(hash))
+	var absolute_root := root
 	DirAccess.make_dir_recursive_absolute(absolute_root)
 	for path in contents:
 		var output := absolute_root.path_join(str(path))

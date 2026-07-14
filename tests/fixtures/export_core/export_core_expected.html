@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb export</title>
+</head>
+<body>
+  <vrweb mode="exclusive">
+    <MeshInstance3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.05, 0)" mesh="SubResource:::r0">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::r1"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+    <OmniLight3D transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 4, 0)" omni_range="12.0"/>
+    <Sprite3D texture="ExtResource:::e0"/>
+    <ExtScene src="ExtResource:::e1" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 0.1, 2)"/>
+    <VRWebSpawner mode="random">
+      <SpawnerPoint transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 1.6, 3)"/>
+      <SpawnerPoint transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 1.6, -3)"/>
+    </VRWebSpawner>
+  <Resource id="r0" type="BoxMesh" size="Vector3(2, 1, 3)"/>
+  <Resource id="r1" type="BoxShape3D" size="Vector3(2, 1, 3)"/>
+  <ExtResource id="e0" type="Texture2D" path="https://godotengine.org/assets/press/icon_color.png"/>
+  <ExtResource id="e1" type="PackedScene" path="https://example.com/duck.glb"/>
+  </vrweb>
+</body>
+</html>

@@ -322,7 +322,7 @@ HTML-картинка ([actors/image_panel/image_panel.gd](../../actors/image_pa
 
 | Файл | Роль |
 |---|---|
-| [scripts/html_parser.gd](../../scripts/html_parser.gd) | сохраняет исходный регистр имени тега в `HtmlNode.raw_tag` (классы Godot — PascalCase) |
+| [addons/vrweb_tools/html_parser.gd](../../addons/vrweb_tools/html_parser.gd) | сохраняет исходный регистр имени тега в `HtmlNode.raw_tag` (классы Godot — PascalCase) |
 | [scripts/vrweb_builder.gd](../../scripts/vrweb_builder.gd) | `VrwebBuilder.build(doc, base_url)` — находит блок, строит ресурсы, дерево узлов и спавн через `ClassDB`; собирает заявки на внешние ресурсы; особые теги `<ExtScene>`/`<VRWebMirror>`/`<VRWebVideoPlayer>`/`<VRWebVideoScreen>`/`<VRWebReplicatedState>`/`<VRWebStateAction>` |
 | [scripts/vrweb_mirror.gd](../../scripts/vrweb_mirror.gd) + [resources/mirror_reflection.gdshader](../../resources/mirror_reflection.gdshader) | `VrwebMirror` — узел зеркала: планарное отражение через `SubViewport` + отражённую камеру, кадр на плоскость шейдером по `SCREEN_UV` |
 | [scripts/image_loader.gd](../../scripts/image_loader.gd) | пул HTTP + кэш + декод текстур; переиспользуется для `<ExtResource>`-текстур |
@@ -354,8 +354,8 @@ HTML-картинка ([actors/image_panel/image_panel.gd](../../actors/image_pa
 
 Сейчас `VrwebBuilder` инстанцирует через `ClassDB` **любой** класс Godot и ставит **любые**
 свойства из атрибутов недоверенной страницы. Document и live peer declarations уже проходят
-единый [VrwebContentPolicy](content-policy.md), но его первый срез намеренно работает как
-allow-all/audit и пока ничего не блокирует. Это **сознательно принятый риск на стадии
+единый [VrwebContentPolicy](content-policy.md), но текущий режим работает как
+allow-all/audit и ничего не блокирует. Это **сознательно принятый риск на стадии
 прототипа** (для доверенных локальных тест-страниц). Общая политика — не жёсткие запреты, а
 **пользовательские уровни безопасности** (вайтлисты классов/доменов на выбор пользователя);
 статус, философия и карта всех поверхностей риска — в [security.md](../security.md).

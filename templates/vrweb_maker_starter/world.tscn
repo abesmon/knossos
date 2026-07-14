@@ -1,0 +1,77 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://addons/vrweb_tools/vrweb_spawner.gd" id="1_spawner"]
+[ext_resource type="Script" path="res://addons/vrweb_tools/vrweb_ext_resource.gd" id="2_external"]
+[ext_resource type="Script" path="res://addons/vrweb_tools/vrweb_local_asset.gd" id="3_local"]
+
+[sub_resource type="Resource" id="ExternalImage"]
+script = ExtResource("3_local")
+type = "Texture2D"
+source_path = "res://assets/starter-image.svg"
+
+[sub_resource type="Resource" id="ExternalModel"]
+script = ExtResource("2_external")
+url = "https://example.invalid/replace-me.glb"
+type = "PackedScene"
+
+[sub_resource type="StandardMaterial3D" id="FloorMaterial"]
+albedo_color = Color(0.23, 0.28, 0.34, 1)
+
+[sub_resource type="BoxMesh" id="FloorMesh"]
+material = SubResource("FloorMaterial")
+size = Vector3(10, 0.2, 10)
+
+[sub_resource type="BoxShape3D" id="FloorShape"]
+size = Vector3(10, 0.2, 10)
+
+[sub_resource type="StandardMaterial3D" id="CubeMaterial"]
+albedo_color = Color(0.15, 0.55, 0.9, 1)
+
+[sub_resource type="BoxMesh" id="CubeMesh"]
+material = SubResource("CubeMaterial")
+size = Vector3(1.5, 1.5, 1.5)
+
+[sub_resource type="BoxShape3D" id="CubeShape"]
+size = Vector3(1.5, 1.5, 1.5)
+
+[node name="World" type="Node3D"]
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+mesh = SubResource("FloorMesh")
+
+[node name="FloorBody" type="StaticBody3D" parent="."]
+
+[node name="FloorCollision" type="CollisionShape3D" parent="FloorBody"]
+shape = SubResource("FloorShape")
+
+[node name="Cube" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.85, -2)
+mesh = SubResource("CubeMesh")
+
+[node name="CubeBody" type="StaticBody3D" parent="."]
+position = Vector3(0, 0.85, -2)
+
+[node name="CubeCollision" type="CollisionShape3D" parent="CubeBody"]
+shape = SubResource("CubeShape")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-55, -30, 0)
+shadow_enabled = true
+
+[node name="Fill" type="OmniLight3D" parent="."]
+position = Vector3(0, 3, 1)
+omni_range = 8.0
+
+[node name="ExternalImagePlaceholder" type="Sprite3D" parent="."]
+position = Vector3(2.5, 1.5, -2)
+metadata/vrweb_ext = {"texture": SubResource("ExternalImage")}
+
+[node name="ExternalModelPlaceholder" type="Node3D" parent="."]
+position = Vector3(-2.5, 0, -2)
+metadata/vrweb_ext_scene = SubResource("ExternalModel")
+
+[node name="Spawn" type="Node3D" parent="."]
+script = ExtResource("1_spawner")
+
+[node name="Start" type="Marker3D" parent="Spawn"]
+position = Vector3(0, 1.6, 2)

@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html><head><title>Envelope stays exact</title></head><body>
+<main>Read-only procedural source</main>
+<vrweb mode="combine">
+  <MeshInstance3D mesh="SubResource:::mesh"/>
+  <StaticBody3D><CollisionShape3D shape="SubResource:::shape"/></StaticBody3D>
+  <Sprite3D texture="ExtResource:::image"/>
+  <VRWebSpawner mode="first"><SpawnerPoint transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 2)"/></VRWebSpawner>
+  <Resource id="mesh" type="BoxMesh" size="Vector3(2, 1, 3)"/>
+  <Resource id="shape" type="BoxShape3D" size="Vector3(2, 1, 3)"/>
+  <ExtResource id="image" type="Texture2D" path="images/image.png"/>
+</vrweb>
+<footer>Suffix remains exact</footer></body></html>

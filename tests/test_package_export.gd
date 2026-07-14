@@ -13,6 +13,11 @@ func _ready() -> void:
 	authored.set("marker", "authored-package")
 	authored.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_PACKAGE)
 	authored.set_meta(VrwebExporter.META_SCRIPT_ID, "exported.package")
+	authored.set_meta(VrwebModuleMetadata.META_VERSION, "2.1.0")
+	authored.set_meta(VrwebModuleMetadata.META_PERMISSIONS, ["network:origin"])
+	authored.set_meta(VrwebModuleMetadata.META_REQUIRES,
+			["vrweb/core/1", "vrweb/scene/1", "godot/engine/4"])
+	authored.set_meta(VrwebModuleMetadata.META_OPTIONAL, ["vrweb/assets/1", "vrweb/log/1"])
 	var root := Node3D.new()
 	root.add_child(authored)
 	var output := "user://package_export/page.html"
@@ -21,6 +26,9 @@ func _ready() -> void:
 	var html := str(report.html)
 	_eq(report.ok, true, "structured export report succeeds")
 	_eq(report.packages.size(), 1, "export report lists package")
+	_eq(report.packages[0].version, "2.1.0", "export report includes authored version")
+	_eq(report.packages[0].permissions, ["network:origin"],
+			"export report includes declared permissions")
 	_eq(report.packages[0].assets.has("switch_scene"), true, "export report lists assets")
 	var first_package := FileAccess.get_file_as_bytes(
 			output.get_base_dir().path_join("exported.package.vrmod"))
@@ -60,6 +68,9 @@ func _ready() -> void:
 		var unpacked := ScriptingModulePackage.unpack(module)
 		_eq(unpacked.ok, true, "exported package validates and unpacks")
 		if unpacked.ok:
+			_eq(unpacked.module.manifest.version, "2.1.0", "manifest keeps authored version")
+			_eq(unpacked.module.manifest.permissions, ["network:origin"],
+					"manifest keeps declared permissions")
 			_eq(unpacked.module.manifest.assets.has("message"), true,
 					"exporter declares relative non-script dependency as asset")
 			_eq(unpacked.module.manifest.assets.has("switch_scene"), true,

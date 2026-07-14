@@ -59,9 +59,12 @@ func _initialize() -> void:
 	root.add_child(spawner)
 
 	# --- Экспорт ---
-	var html := VrwebExporter.export_scene(root, VrwebBuilder.MODE_EXCLUSIVE)
+	var html := VrwebExporter.export_scene(root, VrwebFormat.MODE_EXCLUSIVE)
 	print("=== EXPORTED HTML ===")
 	print(html)
+	var golden := FileAccess.get_file_as_string(
+			"res://tests/fixtures/export_core/export_core_expected.html")
+	ok = _check(html == golden, "export matches byte-for-byte golden fixture") and ok
 	root.free()
 
 	# --- Чтение обратно ---

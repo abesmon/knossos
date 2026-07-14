@@ -252,7 +252,8 @@ resolver может отклонить неправильный корень, з
    `set_avatar_node()` overload, а не нового document API;
 5. built-in `vrwebavatar://N` начинает указывать на `avatars/avatar_N.vrwml`.
 
-Локальный `.tscn` остаётся authoring source и dev fallback для built-in проекта. Внешний HTTP
+Локальный `.tscn` остаётся authoring source и внутренним dev fallback только для built-in
+проекта; он не является значением `avatar_uri` и не поставляется внешнему клиенту. Внешний HTTP
 `.tscn` отклоняется; ошибка VRWML не приводит к загрузке одноимённого `.tscn`.
 
 Sibling manifest продолжает работать без изменения модели: для `avatar.vrwml` адрес остаётся
@@ -260,8 +261,8 @@ Sibling manifest продолжает работать без изменения
 
 ## Безопасность без усложнения формата
 
-Data-only VRWML полезнее внешнего `.tscn`, только если class names проходят выбранную
-вызывающей стороной policy до инстанцирования:
+Безопасность data-only VRWML основана на том, что class names проходят выбранную вызывающей
+стороной policy до инстанцирования:
 
 - avatar loader использует allowlist стандартных node/resource/avatar classes и свойств;
 - `script`, `source_code`, callbacks, filesystem/network-классы запрещены;

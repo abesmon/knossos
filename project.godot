@@ -162,3 +162,10 @@ view_zoom_out={
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
+
+[vrweb]
+
+maker/dist_dir="res://dist"
+maker/html_mode="exclusive"
+tools/export_registry_script="res://scripts/vrwml_class_registry.gd"
+tools/integration_script="res://integrations/knossos/vrweb_tools/knossos_tools_integration.gd"

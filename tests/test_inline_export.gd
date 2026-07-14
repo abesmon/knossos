@@ -23,7 +23,15 @@ func _ready() -> void:
 	var html := VrwebExporter.export_scene(export_root, VrwebBuilder.MODE_EXCLUSIVE)
 	export_root.free()
 	_eq(html.contains('type="application/vrweb+gdscript"'), true, "export writes script block")
+	_eq(html.contains('data-mode="trusted-gdscript"'), true,
+			"export explicitly marks trusted runtime")
 	_eq(html.contains('<VRWebComponent module="#exported.inline"'), true, "export writes component")
+	var dependent := GDScript.new()
+	dependent.source_code = "extends Node3D\nvar value = preload('./dependency.gd')\n"
+	var rejected := VrwebInlineExporter.prepare(dependent, "invalid.inline", "Node3D")
+	_eq(rejected.ok, false, "inline helper rejects file dependencies")
+	_eq(str(rejected.error).contains("package"), true,
+			"inline dependency diagnostic recommends package")
 
 	var doc := HtmlParser.parse(html)
 	var collected := ScriptingModuleCollector.collect(doc, "vrwebresource://exported.html")

@@ -161,30 +161,53 @@ GDScript остаётся явно доверенным режимом с пра
 
 Критерий готовности первой поставки: built-in и HTTP-аватары загружаются из data-only VRWML,
 оба текущих аватара сохраняют внешний вид/реакции, а произвольный Script не материализуется
-неявно.
+неявно. `.tscn` в этом workflow существует только как локальный Godot authoring-файл или
+локальная editable copy; внешним runtime-форматом аватара он не является.
 
 ### P1 — Exporter и внешние ресурсы
 
-- [ ] Поддержать материалы, `.gltf` с внешними buffers/textures и необходимые меши GLB.
 - [ ] Доделать asset graph: same-origin URL и автоматические зависимости, а не только literal
   `load()`/`preload()`.
 - [ ] Проверить bundled images/audio/glTF/GLB и сложные import options в editor/export builds
   на macOS, Windows и Linux.
 - [ ] Подтвердить byte-identical `.vrmod` ZIP на поддерживаемых платформах.
-- [ ] Добавить module id в Inspector/metadata UI.
-- [ ] Расширить export report: permissions, skipped files с причинами, dependency graph, hashes.
-- [ ] Отклонять `@tool`, autoload, native libs, C#, выходы за dependency graph и запрещённые
-  inline-зависимости.
+- [ ] Добавить в export report явные skipped files с причинами и полный dependency graph.
+- [ ] Добавить явную диагностику autoload/native libs и выхода package dependencies за полный
+  разрешённый graph.
 - [ ] Запускать preview через обычный runtime и content policy клиента.
 - [ ] Добавить save-hook, автоматически снимающий preview-свойства перед сохранением.
 - [ ] Добавить экспорт declarative events/действий после фиксации их контракта.
 
-### P1 — Демо и документация внешнего разработчика
+### VRWeb Maker Kit — актуальное состояние
 
-- [ ] Сделать парные inline/package примеры и объяснить выбор формы поставки.
-- [ ] Добавить негативные демо: wrong integrity, новый hash, deny, compile error и mount error.
-- [ ] Написать guide: manifest, public API, permissions, integrity, lifecycle, ограничения и
-  диагностика.
+Maker Kit — самостоятельный Godot 4.6 addon в `addons/vrweb_tools`, не имеющий compile-time
+зависимостей от Knossos. Автор работает с `.tscn`, Inspector и обычными Godot nodes/resources;
+результатом мира является HTML с embedded `<vrweb>`. Data-only `.vrwml` используется для
+аватаров, а не как отдельный формат публикации мира.
+
+В текущую поставку входят:
+
+- strict/compatible export, structured diagnostics, headless CLI и versioned vocabulary;
+- переносимый bundle локальных image/audio/GLB/glTF assets с manifest и hashes;
+- lossless редактирование embedded `<vrweb>` существующей HTML-страницы;
+- явные inline и `.vrmod` trusted-GDScript режимы с metadata, integrity и примерами;
+- **Build & Run in Knossos** через отдельный `dist/`;
+- starter project, HTML Custom Data completion и install/update guide;
+- отдельный Maker Kit archive, который `build.sh` выпускает рядом с Knossos с теми же semver
+  и build number;
+- clean-project, negative scripting, exported-package и portability tests.
+
+Knossos подключает runtime preview, avatar registry/import и external-resource runtime adapter
+снаружи addon. Полный пользовательский pipeline и текущие ограничения описаны в
+[content-authoring-pipeline.md](content-authoring-pipeline.md), инструкция автора — в
+[maker-kit.md](maker-kit.md).
+
+### P1 — VRWeb Maker Kit: будущая release-проверка
+
+- [ ] Получить зелёный запуск `maker-kit.yml` на macOS, Windows и Linux для exact-case/missing
+  asset paths, glTF dependencies, schema freshness и byte-identical rebuild.
+- [ ] Перед публичным релизом открыть output release archive чистым exported Knossos на macOS,
+  Windows и Linux и сохранить результаты как release evidence.
 
 ### P2 — Release confidence
 
