@@ -23,7 +23,7 @@
 
 ```
 build/
-  knossos-0.0.0-b7-macos.zip      # внутри knossos.app (universal, ad-hoc подпись)
+  knossos-0.0.0-b7-macos.zip      # .app + helper/инструкция для Gatekeeper
   knossos-0.0.0-b7-windows.zip    # knossos.exe + knossos.pck + ffmpeg/webrtc dll
   knossos-0.0.0-b7-linux-x86_64.zip # knossos + knossos.pck + ffmpeg/webrtc/twovoip so
   .build_number                   # локальный счётчик билдов (не в гите)
@@ -76,6 +76,19 @@ build/
    `libgdffmpeg`, FFmpeg `.so`, WebRTC и TwoVoIP рядом с бинарём.
 7. **Пакует** в `.zip` (macOS — через `ditto`, чтобы сохранить структуру
    бандла и фреймворки) и валидирует результат (наличие бинаря, ffmpeg-библиотек).
+   В macOS ZIP дополнительно кладёт helper и инструкцию для снятия карантина.
+
+## Первый запуск macOS-сборки без нотаризации
+
+В корне macOS ZIP рядом с `knossos.app` лежат:
+
+- `Open Knossos.command` — ищет `knossos.app` рядом с собой, в `/Applications` и
+  `~/Applications`, показывает найденный путь, спрашивает подтверждение, удаляет
+  только `com.apple.quarantine` рекурсивно и запускает Knossos;
+- `README - macOS.txt` — короткая пользовательская инструкция и ручная команда
+  с готовым путём `/Applications/knossos.app`.
+
+Это временный fallback для ad-hoc сборок. Он не заменяет Developer ID подпись и нотаризацию.
 
 ## Пресеты экспорта
 

@@ -24,6 +24,7 @@ BUILD="$ROOT/build"
 CACHE="$BUILD/.cache"
 NAME="knossos"
 PRESETS="$ROOT/export_presets.cfg"
+MACOS_PACKAGE_FILES="$ROOT/packaging/macos"
 BUILD_NUMBER_FILE="$BUILD/.build_number"   # локальный счётчик, не в гите (весь build/ в .gitignore)
 
 cd "$ROOT"
@@ -194,10 +195,15 @@ build_mac() {
     warn "Не нашёл libgdffmpeg в .app — видеоплеер может не работать"
   fi
 
+  step "Добавляю helper и инструкцию для первого запуска"
+  cp "$MACOS_PACKAGE_FILES/Open Knossos.command" "$dir/"
+  cp "$MACOS_PACKAGE_FILES/README - macOS.txt" "$dir/"
+  chmod +x "$dir/Open Knossos.command"
+
   step "Упаковка в zip (ditto, чтобы сохранить структуру бандла)"
   local zip="$BUILD/$NAME-$ARCHIVE_TAG-macos.zip"
   rm -f "$zip"
-  ( cd "$dir" && ditto -c -k --sequesterRsrc --keepParent "$NAME.app" "$zip" )
+  ditto -c -k --sequesterRsrc "$dir/" "$zip"
   ok "macOS готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
 }
 
