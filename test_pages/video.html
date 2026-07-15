@@ -16,7 +16,7 @@
      addons/ffmpeg/ (иначе экраны покажут «video unavailable»). См. docs/video-player.md.</p>
 
   <!-- exclusive: HTML-сцену не строим, в мире только узлы vrweb -->
-  <vrweb mode="exclusive">
+  <vrwml mode="exclusive">
     <!-- Пол + свет -->
     <MeshInstance3D mesh="SubResource:::FloorMesh"
                     transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0.05,0)">
@@ -62,7 +62,7 @@
 
     <Resource id="FloorMesh" type="BoxMesh" size="Vector3(20, 0.1, 20)"/>
     <Resource id="FloorShape" type="BoxShape3D" size="Vector3(20, 0.1, 20)"/>
-  </vrweb>
+  </vrwml>
 
   <footer><p>назад на <a href="index.html">главную</a></p></footer>
 </body>

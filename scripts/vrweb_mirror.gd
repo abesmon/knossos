@@ -2,8 +2,8 @@ class_name VrwebMirror
 extends MeshInstance3D
 
 ## Зеркало в духе VRChat (VRC_MirrorReflection): плоскость, которая в реальном времени
-## показывает отражение сцены. Размещается кастомным VRWeb-тегом <VRWebMirror> (см.
-## scripts/vrweb_builder.gd и docs/vrweb-tags.md).
+## показывает отражение сцены. Размещается стандартным тегом VRWML <VRWebMirror> (см.
+## scripts/vrweb_builder.gd и docs/space/vrwml-tags.md).
 ##
 ## Техника — планарное отражение (работает и в GL Compatibility, в отличие от
 ## ReflectionProbe): отдельная камера в SubViewport ставится в зеркальное отражение

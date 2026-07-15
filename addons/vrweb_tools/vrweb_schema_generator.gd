@@ -2,8 +2,9 @@
 class_name VrwebSchemaGenerator
 extends RefCounted
 
-## Generates VS Code HTML Custom Data from the same strict vocabulary that drives export and
-## import. The JSON is editor metadata, not a second compatibility policy.
+## Generates VS Code HTML Custom Data for the local strict Maker Kit policy. The complete VRWML
+## vocabulary is broader (all Godot classes plus standard special tags); this JSON only provides
+## completion for the subset this Maker Kit profile has verified.
 
 const SCHEMA_VERSION := 1.1
 const SKIP_PROPERTIES := {
@@ -17,20 +18,21 @@ const SKIP_PROPERTIES := {
 static func build() -> Dictionary:
 	var tags: Array[Dictionary] = []
 	tags.append(_tag(VrwebFormat.TAG,
-			"VRWeb scene embedded in an HTML document.", [
+			"VRWML scene embedded in an HTML document.", [
 		_attr("mode", "World composition mode.", [VrwebFormat.MODE_EXCLUSIVE,
 				VrwebFormat.MODE_COMBINE]),
 	]))
 	tags.append(_tag(VrwebFormat.RESOURCE_TAG,
 			"Inline Godot Resource definition. Property values use Godot Variant syntax.", [
 		_attr("id", "Resource identifier used by SubResource::: references."),
-		_attr("type", "Strict resource class.", _sorted_keys(VrwebCompatibility.RESOURCE_CLASSES)),
+		_attr("type", "Resource class allowed by the local strict Maker Kit policy.",
+				_sorted_keys(VrwebCompatibility.RESOURCE_ALLOWLIST)),
 	]))
 	tags.append(_tag(VrwebFormat.EXT_RESOURCE_TAG,
 			"External resource definition loaded from path.", [
 		_attr("id", "Resource identifier used by ExtResource::: references."),
 		_attr("type", "External resource class.",
-				_sorted_keys(VrwebCompatibility.EXTERNAL_RESOURCE_TYPES)),
+				_sorted_keys(VrwebCompatibility.EXTERNAL_TYPE_ALLOWLIST)),
 		_attr("path", "Absolute HTTP(S)/VRWeb URL or a relative bundled asset path."),
 	]))
 	tags.append(_tag(VrwebFormat.EXT_SCENE_TAG,
@@ -53,8 +55,9 @@ static func build() -> Dictionary:
 		_attr("module", "Module id, or #id for an inline script."),
 		_attr("class", "Exported module class; inline modules use default."),
 	] + _class_attributes("Node3D", true)))
-	for class_name_ in _sorted_keys(VrwebCompatibility.NODE_CLASSES):
-		tags.append(_tag(class_name_, "Godot %s node in the strict VRWeb vocabulary." % class_name_,
+	for class_name_ in _sorted_keys(VrwebCompatibility.NODE_ALLOWLIST):
+		tags.append(_tag(class_name_,
+				"Godot %s node allowed by the local strict Maker Kit policy." % class_name_,
 				_class_attributes(class_name_, true)))
 	return {
 		"version": SCHEMA_VERSION,

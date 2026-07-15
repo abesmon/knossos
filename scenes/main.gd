@@ -525,7 +525,7 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 
 func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
 		module_result: Dictionary) -> void:
-	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
+	# Собственный синтаксис VRWeb: блок <vrwml> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
 	for module_error in module_result.errors:
@@ -821,7 +821,7 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 		_world.add_child(vrweb["root"])
 
 	# Регистрируем видео-плееры и привязываем экраны (после добавления всего в дерево).
-	# Сканируем весь мир: экраны бывают и из <vrweb>-тегов, и из обычного HTML-тега <video>
+	# Сканируем весь мир: экраны бывают и из <vrwml>-тегов, и из обычного HTML-тега <video>
 	# (WorldGenerator строит из него такой же VrwebVideoScreen). Геометрия HTML теперь
 	# достраивается порциями по кадрам (тайм-слайс), поэтому HTML-экраны появляются не сразу —
 	# сканируем после сигнала build_finished. Маленькие страницы строятся синхронно (build_complete
@@ -1249,7 +1249,7 @@ func _setup_ui_extras() -> void:
 	_update_conn_indicator()
 
 	# Консоль пространства (`~`, см. docs/space-console.md): read-only часть — хранимое дерево
-	# страницы БЕЗ блока <vrweb>; редактируемая — единый слитый слой сцены, который консоль
+	# страницы БЕЗ блока <vrwml>; редактируемая — единый слитый слой сцены, который консоль
 	# собирает сама из индекса vrweb и эфемерного состояния NetworkManager.
 	_console.setup(_page_html_sans_vrweb, func() -> Dictionary: return _vrweb_index,
 		func() -> String: return _current_url)
@@ -1334,7 +1334,7 @@ func _update_conn_indicator(status: Dictionary = {}) -> void:
 		+ ("\n" + detail if detail != "" else "")
 
 
-## Сериализация хранимого документа страницы БЕЗ блока <vrweb> — read-only часть консоли
+## Сериализация хранимого документа страницы БЕЗ блока <vrwml> — read-only часть консоли
 ## (сам vrweb показывается там слитым с эфемерным оверлеем). Блок на время сериализации
 ## временно вынимается из дерева и возвращается на место (синхронно, дерево общее).
 func _page_html_sans_vrweb() -> String:

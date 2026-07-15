@@ -1,12 +1,12 @@
 # Видео-плеер (как в VRChat)
 
 > **Суть:** логический видео-плеер декодирует видео по ссылке в текстуру («рендер-буфер»),
-> которую можно натянуть на любое число поверхностей мира. Управляется кастомными VRWeb-тегами,
+> которую можно натянуть на любое число поверхностей мира. Управляется стандартными тегами VRWML,
 > в онлайне воспроизведение синхронизируется между клиентами. Прямая аналогия —
 > video-player из VRChat.
 
 Расширение Слоя 1 ([README.md](../README.md)) + Слоя 2 (синхронизация). Опирается
-на тот же паттерн кастомного узла-тега, что и зеркало (`<VRWebMirror>` →
+на тот же паттерн специального стандартного тега, что и зеркало (`<VRWebMirror>` →
 [vrweb-mirror.gd](../../scripts/vrweb_mirror.gd)).
 
 ---
@@ -62,15 +62,15 @@
 | `size` | `"ширина:высота"` в метрах (как у зеркала). Не задан → пропорции берутся из видео (дефолт 16:9) |
 | `transform` и пр. | обычные свойства `Node3D` |
 
-Это кастомные теги VRWeb (не классы Godot) — обрабатываются особо в
+Это специальные стандартные теги VRWML — в Knossos они обрабатываются особо в
 [vrweb_builder.gd](../../scripts/vrweb_builder.gd), как `<VRWebMirror>`/`<ExtScene>`.
 
 ### Стандартный HTML-тег `<video>`
 
-Обычный `<video>` из веб-страницы тоже становится плеером — не нужен `<vrweb>`-блок. Топология
+Обычный `<video>` из веб-страницы тоже становится плеером — не нужен `<vrwml>`-блок. Топология
 (`TopologyBuilder`) классифицирует `<video>` как объект `media` с `media_tag="video"`, а
 `WorldGenerator` строит из него **тот же `VrwebVideoScreen`** (неявный плеер по `src`), что и
-кастомный тег. Так HTML-видео проигрывается реальным плеером приложения.
+стандартный тег VRWML. Так HTML-видео проигрывается реальным плеером приложения.
 
 ```html
 <video controls preload="metadata">
@@ -89,7 +89,7 @@
 - Без аддона FFmpeg или без `src` — деградирует до статичной заглушки `▷` (как прочие `media`).
 
 Привязку HTML-экранов делает тот же `VrwebVideoManager`: `main._rebuild_world` сканирует **весь
-мир** (`scan(_world)`), а не только корень `<vrweb>`, поэтому экраны из обоих источников
+мир** (`scan(_world)`), а не только корень `<vrwml>`, поэтому экраны из обоих источников
 регистрируются и синхронизируются одинаково.
 
 > **Важно:** раз `scan` обходит весь `_world`, старое поддерево к моменту скана должно быть уже
@@ -318,7 +318,7 @@ URL**, синхронизируется только **состояние тра
 - **id неявных экранов** (по `src`) детерминирован URL; явных плееров без `id` — порядком
   тегов в блоке. Одинаковый HTML → одинаковый id у всех (нужно для совпадения по сети).
 - **Безопасность.** Video-URL — вектор SSRF/DoS, как и прочие внешние ресурсы. Закрывается
-  общим sandbox/whitelist до выхода на реальные URL (см. конец [vrweb-tags.md](../space/vrweb-tags.md)).
+  общим sandbox/whitelist до выхода на реальные URL (см. конец [vrwml-tags.md](../space/vrwml-tags.md)).
 
 ---
 
@@ -328,7 +328,7 @@ URL**, синхронизируется только **состояние тра
 |---|---|
 | [scripts/vrweb_video_player.gd](../../scripts/vrweb_video_player.gd) | логический плеер: FFmpeg-декод в текстуру, прогрессивная докачка src (буферизация, ранний старт), транспорт, локальный/удалённый режимы |
 | [scripts/vrweb_video_screen.gd](../../scripts/vrweb_video_screen.gd) | поверхность-квад (`WorldUiSurface`): albedo = текстура плеера, заглушка до кадра, клик `interact_at` → toggle/seek, наэкранный UI (прогресс/буфер) по `hover_at`/`pointer_exit`, `size_changed` после подгонки aspect ratio |
-| [scenes/vrweb_video_screen.tscn](../../scenes/vrweb_video_screen.tscn) | обязательная составная сцена экрана: `Mesh`, `Collision`, `Placeholder`, `PlaybackUI`; кастомный тег инстанцирует именно её, не голый скрипт |
+| [scenes/vrweb_video_screen.tscn](../../scenes/vrweb_video_screen.tscn) | обязательная составная сцена экрана: `Mesh`, `Collision`, `Placeholder`, `PlaybackUI`; стандартный тег VRWML инстанцирует именно её, не голый скрипт |
 | [scripts/vrweb_video_manager.gd](../../scripts/vrweb_video_manager.gd) | реестр плееров, привязка экранов и адаптер Replicated State |
 | [scripts/network/replicated_state_store.gd](../../scripts/network/replicated_state_store.gd) | схемы, access rules, command/delta/snapshot, revision и лимиты |
 | [scripts/network/video_state_schema.gd](../../scripts/network/video_state_schema.gd) | типизированные поля, команды и reducers транспорта видео |

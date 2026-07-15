@@ -32,16 +32,16 @@ func _initialize() -> void:
 
 
 # ============================================================================
-#  Единый документ сцены (слитый <vrweb> + дельта-оверлей)
+#  Единый документ сцены (слитый <vrwml> + дельта-оверлей)
 # ============================================================================
 
 const PAGE_VRWEB := """
-<vrweb>
+<vrwml>
   <MeshInstance3D id="box" transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0.5,0)" mesh="SubResource:::M1">
     <StaticBody3D />
   </MeshInstance3D>
   <Resource id="M1" type="BoxMesh" size="Vector3(2,1,3)" />
-</vrweb>
+</vrwml>
 """
 
 
@@ -165,7 +165,7 @@ func _test_scene_add_vrweb_node() -> void:
 func _test_scene_add_world_kind() -> void:
 	var index := _page_index()
 	var merged := SceneHtml.serialize_scene(index, {})
-	var edited := merged.replace("</vrweb>", "  <bubble ttl=\"15\" url=\"u\" position=\"0 1 0\" />\n</vrweb>")
+	var edited := merged.replace("</vrwml>", "  <bubble ttl=\"15\" url=\"u\" position=\"0 1 0\" />\n</vrwml>")
 	var parsed := SceneHtml.parse_scene(HtmlParser.parse(edited))
 	var d := SceneHtml.diff_scene(index, {}, parsed, func(): return "gen.9")
 	_eq(d["actions"].size(), 1, "одно действие")
@@ -187,8 +187,8 @@ func _test_scene_guards() -> void:
 	var re_class := merged.replace("<StaticBody3D id=\"n0-0\" />", "<RigidBody3D id=\"n0-0\" />")
 	d = SceneHtml.diff_scene(index, {}, SceneHtml.parse_scene(HtmlParser.parse(re_class)), func(): return "g")
 	_ok(not d["ok"], "смена класса узла страницы → ошибка")
-	# Правка атрибутов самого блока <vrweb>.
-	var re_block := merged.replace("<vrweb>", "<vrweb mode=\"exclusive\">")
+	# Правка атрибутов самого блока <vrwml>.
+	var re_block := merged.replace("<vrwml>", "<vrwml mode=\"exclusive\">")
 	d = SceneHtml.diff_scene(index, {}, SceneHtml.parse_scene(HtmlParser.parse(re_block)), func(): return "g")
 	_ok(not d["ok"], "правка атрибутов блока → ошибка")
 

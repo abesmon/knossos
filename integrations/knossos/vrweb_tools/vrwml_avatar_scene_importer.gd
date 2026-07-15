@@ -19,18 +19,17 @@ func _import_scene(path: String, _flags: int, _options: Dictionary) -> Object:
 	var base_url := PageFetcher.LOCAL_SCHEME + ProjectSettings.globalize_path(path)
 	var built := VrwebBuilder.build(HtmlParser.parse(text), base_url, null, policy)
 	var holder := built.get("root") as Node3D
-	if policy.has_errors() or holder == null or holder.get_child_count() != 1 \
+	if policy.has_errors():
+		push_warning("VRWML import skipped unsupported parts: %s (%s)" % [path, policy.summary()])
+	if holder == null or holder.get_child_count() != 1 \
 			or not (holder.get_child(0) is Avatar):
 		if holder != null:
 			holder.free()
-		push_error("VRWML import rejected: %s%s" % [path,
-				(" (" + policy.summary() + ")") if policy.has_errors() else ""])
+		push_error("VRWML import: %s не создал единственный корень Avatar" % path)
 		return null
 	var ext: Dictionary = built.get("ext", {})
 	if not ext.get("targets", []).is_empty():
-		holder.free()
-		push_error("VRWML import: %s содержит ExtResource; используйте editable-copy command" % path)
-		return null
+		push_warning("VRWML import: внешние свойства %s останутся пустыми; editable-copy command загрузит их" % path)
 	var avatar := holder.get_child(0) as Avatar
 	holder.remove_child(avatar)
 	holder.free()

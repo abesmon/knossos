@@ -4,13 +4,13 @@ extends RefCounted
 const IMAGE_PANEL_SCENE := preload("res://actors/image_panel/image_panel.tscn")
 const PUBLIC_CLASSES := preload("res://scripts/vrwml_class_registry.gd")
 
-## Парсер собственного синтаксиса VRWeb: блок <vrweb> внутри HTML-документа, который
-## описывает 3D-сцену напрямую узлами Godot (Слой 1, расширение из docs/vrweb-overview.md).
+## Материализатор VRWML: блок <vrwml> внутри HTML-документа или standalone-документ
+## описывает 3D-сцену напрямую объектами Godot (см. docs/space/vrwml-format-and-pipeline.md).
 ##
 ## Синтаксис намеренно совместим с моделью узлов Godot, чтобы наш клиент мог строить сцену
 ## один-в-один, а другие реализации — маппить классы на свои аналоги. Пример:
 ##
-##   <vrweb mode="combine|exclusive">
+##   <vrwml mode="combine|exclusive">
 ##     <MeshInstance3D mesh="SubResource:::BoxId123"
 ##                     transform="Transform3D(1.17,0,0, 0,1.16,-0.14, 0,0.14,1.16, 0.15,0.28,0.12)">
 ##       <StaticBody3D>
@@ -20,7 +20,7 @@ const PUBLIC_CLASSES := preload("res://scripts/vrwml_class_registry.gd")
 ##
 ##     <Resource id="BoxId123" type="BoxMesh" size="Vector3(2,1,3)"/>
 ##     <Resource id="BoxShape3D_0wfyh" type="BoxShape3D" size="Vector3(2,1,3)"/>
-##   </vrweb>
+##   </vrwml>
 ##
 ## Правила:
 ##   * Имя тега-узла = класс Godot (PascalCase, регистр сохраняет HtmlParser в raw_tag).
@@ -31,13 +31,13 @@ const PUBLIC_CLASSES := preload("res://scripts/vrwml_class_registry.gd")
 ##   * <ExtResource id="..." type="ClassName" path="<url>"/> — ВНЕШНИЙ ресурс из интернета,
 ##     ссылка по значению "ExtResource:::<id>". Качается асинхронно «после» сборки и
 ##     инжектируется в целевые свойства, когда готов (см. VrwebBuilder.build -> "ext").
-##   * mode="exclusive" — HTML игнорируется; "combine" (по умолчанию) — vrweb поверх HTML.
-##   * <VRWebSpawner>/<SpawnerPoint> — кастомные мета-теги (правила спавна), не классы Godot.
+##   * mode="exclusive" — HTML игнорируется; "combine" (по умолчанию) — VRWML поверх HTML.
+##   * <VRWebSpawner>/<SpawnerPoint> — специальные теги VRWML (правила спавна).
 ##
 ## ⚠️ Безопасность: сейчас инстанцируется ЛЮБОЙ ClassDB-класс/свойство из недоверенной страницы.
-## Это принятый риск прототипа — закрыть песочницей до выхода на реальные URL (см. docs/vrweb-tags.md).
+## Это принятый риск прототипа — закрыть песочницей до выхода на реальные URL (см. docs/vrwml-tags.md).
 
-const TAG := "vrweb"
+const TAG := "vrwml"
 const RESOURCE_TAG := "Resource"
 const EXT_RESOURCE_TAG := "ExtResource"
 const EXT_SCENE_TAG := "ExtScene"
@@ -101,7 +101,7 @@ var _content_policy: VrwebContentPolicy
 var _policy_context: Dictionary = {}
 
 
-## Ищет блок <vrweb> в документе и строит из него сцену.
+## Ищет блок <vrwml> в документе и строит из него сцену.
 ## base_url — адрес страницы, относительно которого резолвятся пути внешних ресурсов.
 ## Возвращает { found, mode, root, spawn, ext, nodes, resources }:
 ##   root — Node3D-холдер с построенными узлами (ещё не в дереве) или null, если узлов нет;
@@ -122,7 +122,7 @@ static func build(doc: HtmlNode, base_url: String = "", scripting_modules = null
 
 
 ## Строит ОДИН узел сцены из плоских данных эфемерного объекта kind="vrweb-node":
-## tag — класс Godot (или кастомный vrweb-тег), attrs — сырые строки-литералы (как в HTML),
+## tag — класс Godot или специальный тег VRWML, attrs — сырые строки-литералы (как в HTML),
 ## resources — суб-ресурсы страницы (ссылки "SubResource:::<id>" резолвятся против них).
 ## Дети не строятся — они приходят отдельными объектами и монтируются вьюхой.
 static func build_element(tag: String, attrs: Dictionary, resources: Dictionary, base_url: String = "",
@@ -166,12 +166,7 @@ func _build(doc: HtmlNode) -> Dictionary:
 
 	var root := Node3D.new()
 	root.name = "VRWeb"
-	for child in block.children:
-		if child.is_text() or _is_meta_tag(child):
-			continue
-		var node := _build_node(child)
-		if node != null:
-			root.add_child(node)
+	_append_materialized_children(root, block)
 
 	var ext := {"defs": _ext_defs, "targets": _ext_targets}
 	if root.get_child_count() == 0:
@@ -190,7 +185,7 @@ func _is_meta_tag(elem: HtmlNode) -> bool:
 
 # --- Внешние ресурсы (<ExtResource>) ---
 
-## Собирает определения внешних ресурсов { id: {type, url} } из всего поддерева <vrweb>.
+## Собирает определения внешних ресурсов { id: {type, url} } из всего поддерева <vrwml>.
 ## Сами байты не качаются — это делает потребитель результата асинхронно (см. main._inject_ext_resources).
 func _collect_ext(block: HtmlNode) -> void:
 	var defs: Array[HtmlNode] = []
@@ -264,6 +259,19 @@ func _build_node(elem: HtmlNode) -> Node:
 	return node
 
 
+## Unsupported/denied wrappers are skipped like unknown HTML elements, while descendants that
+## the client can materialize are promoted to the closest available parent.
+func _append_materialized_children(parent: Node, element: HtmlNode) -> void:
+	for child in element.children:
+		if child.is_text() or _is_meta_tag(child):
+			continue
+		var node := _build_node(child)
+		if node != null:
+			parent.add_child(node)
+		else:
+			_append_materialized_children(parent, child)
+
+
 func _instantiate_node(elem: HtmlNode) -> Node:
 	if elem.raw_tag == EXT_SCENE_TAG:
 		return _build_ext_scene(elem)
@@ -301,12 +309,7 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 	var node := obj as Node
 	_apply_attributes(node, elem)
 	_route_audio_to_world(node)
-	for child in elem.children:
-		if child.is_text() or _is_meta_tag(child):
-			continue
-		var sub := _build_node(child)
-		if sub != null:
-			node.add_child(sub)
+	_append_materialized_children(node, elem)
 	return node
 
 
@@ -373,7 +376,7 @@ func _build_ext_scene(elem: HtmlNode) -> Node:
 
 
 ## <VRWebMirror size="ширина:высота" transform="..."/> — зеркало в духе VRChat (планарное
-## отражение, см. scripts/vrweb_mirror.gd). Это кастомный VRWeb-тег, а не класс Godot, поэтому
+## отражение, см. scripts/vrweb_mirror.gd). Это специальный стандартный тег VRWML, поэтому
 ## строится особо (как <ExtScene>). size — размеры плоскости в метрах ("1:2" → 1×2 м, одиночное
 ## "1.5" → квадрат). resolution_scale (0.1..1) — качество текстуры отражения. Прочие атрибуты
 ## (transform и т.п.) применяются как обычные свойства Node3D.
@@ -529,7 +532,7 @@ func _build_page_component(elem: HtmlNode) -> Node:
 
 
 ## <VRWebImage src="<url>" alt="..." width="2" height="1.5" position="Vector3(...)"/> —
-## картинка, размещённая в мире (кастомный тег, см. docs/network/realtime-resources.md).
+## картинка, размещённая в мире (стандартный тег VRWML, см. docs/network/realtime-resources.md).
 ## Строит общий ImagePanel в режиме якоря по центру; тот же класс отображает HTML `<img>`.
 ## src — realtime-ресурс
 ## (vrwebblob://) или обычный URL; width/height — метры (0/нет = натуральный размер).

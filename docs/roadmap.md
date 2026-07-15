@@ -56,7 +56,7 @@ exporter и базовый trusted scripting vertical slice. Активная р
 
 Готово:
 
-- VRWeb-теги и внешние GLTF/GLB-сцены;
+- VRWML и внешние GLTF/GLB-сцены;
 - синхронизированный видеоплеер;
 - editor exporter и preview;
 - home server, подтверждённая идентичность и анонимный режим;
@@ -97,7 +97,7 @@ GDScript остаётся явно доверенным режимом с пра
 не позволяет обойти правила через пира и не ломает остальную сцену при локальном отказе.
 
 Связанные контракты: [content-policy.md](space/content-policy.md),
-[security.md](security.md), [vrweb-tags.md](space/vrweb-tags.md).
+[security.md](security.md), [vrwml-tags.md](space/vrwml-tags.md).
 
 ### P0 — Scripting preflight и transport boundaries
 
@@ -129,43 +129,9 @@ GDScript остаётся явно доверенным режимом с пра
 - [ ] Локализовать compile/mount failure: статическая часть страницы продолжает работать.
 - [ ] Покрыть refresh/navigation во время fetch и поздние callbacks после unmount.
 
-## Trusted Modules MVP
-
-### P1 — VRWML documents и аватары
-
-Целевая архитектура и критерии по фазам: [vrwml-format-and-pipeline.md](space/vrwml-format-and-pipeline.md).
-
-- [x] Добавить standalone `.vrwml` output/input поверх существующих `VrwebExporter` и
-  `VrwebBuilder`, сохранив ту же class-name/property модель, что у embedded `<vrweb>`.
-- [x] В avatar export включать корень сцены и добавить симметричный public class registry для
-  scripted `Avatar`/аппликаторов/marker resources, не экспортируя GDScript.
-- [x] Добавить deterministic scene → VRWML → scene tests; назначение документа определять
-  контекстом загрузчика, не доверяя самозаявленному `profile`.
-- [x] Специфицировать `Avatar`, `LookPitchApplier`, `VoiceScaleApplier` и
-  `UserTextureApplier` как публичные VRWML-классы, не поставляя их GDScript.
-- [x] Добавить VRWML round-trip ссылок и bindings для `AvatarAnimationTreeApplier`.
-- [x] Зафиксировать avatar parameters, их типы/defaults и current/optional/reserved status.
-- [x] Добавить transport authority registry: local-context параметры фильтруются на отправке и
-  приёме и могут пополняться без изменения RPC/VRWML.
-- [x] Добавить контекстные avatar validator/allowlist до materialization.
-- [x] Экспортировать оба built-in аватара в `.vrwml`; resolver собирает их обратно в
-  `PackedScene`, сохраняя существующий API `AvatarHost`.
-- [x] Добавить базовый import VRWML в editable `.tscn` и обратный export.
-- [x] Зарегистрировать `.vrwml` через нативный `EditorSceneFormatImporter`; документы с
-  асинхронными `ExtResource` оставлять явному editable-copy workflow.
-- [x] Добавить единый экспорт `.vrwml`/HTML wrapper в штатное меню Godot
-  `Scene → Export As…`, сохранив `.tscn` как authoring source of truth.
-- [x] Добавить несохраняемый preview mode и fail-closed diagnostics неподдерживаемого содержимого.
-- [ ] Добавить структурный semantic diff поддерживаемого подмножества после re-export.
-- [x] Удалить внешний `.tscn` compatibility path после миграции pack/settings/fixtures.
-
-Критерий готовности первой поставки: built-in и HTTP-аватары загружаются из data-only VRWML,
-оба текущих аватара сохраняют внешний вид/реакции, а произвольный Script не материализуется
-неявно. `.tscn` в этом workflow существует только как локальный Godot authoring-файл или
-локальная editable copy; внешним runtime-форматом аватара он не является.
-
 ### P1 — Exporter и внешние ресурсы
 
+- [ ] Добавить структурный semantic diff реализованной части сцены после re-export.
 - [ ] Доделать asset graph: same-origin URL и автоматические зависимости, а не только literal
   `load()`/`preload()`.
 - [ ] Проверить bundled images/audio/glTF/GLB и сложные import options в editor/export builds
@@ -177,30 +143,6 @@ GDScript остаётся явно доверенным режимом с пра
 - [ ] Запускать preview через обычный runtime и content policy клиента.
 - [ ] Добавить save-hook, автоматически снимающий preview-свойства перед сохранением.
 - [ ] Добавить экспорт declarative events/действий после фиксации их контракта.
-
-### VRWeb Maker Kit — актуальное состояние
-
-Maker Kit — самостоятельный Godot 4.6 addon в `addons/vrweb_tools`, не имеющий compile-time
-зависимостей от Knossos. Автор работает с `.tscn`, Inspector и обычными Godot nodes/resources;
-результатом мира является HTML с embedded `<vrweb>`. Data-only `.vrwml` используется для
-аватаров, а не как отдельный формат публикации мира.
-
-В текущую поставку входят:
-
-- strict/compatible export, structured diagnostics, headless CLI и versioned vocabulary;
-- переносимый bundle локальных image/audio/GLB/glTF assets с manifest и hashes;
-- lossless редактирование embedded `<vrweb>` существующей HTML-страницы;
-- явные inline и `.vrmod` trusted-GDScript режимы с metadata, integrity и примерами;
-- **Build & Run in Knossos** через отдельный `dist/`;
-- starter project, HTML Custom Data completion и install/update guide;
-- отдельный Maker Kit archive, который `build.sh` выпускает рядом с Knossos с теми же semver
-  и build number;
-- clean-project, negative scripting, exported-package и portability tests.
-
-Knossos подключает runtime preview, avatar registry/import и external-resource runtime adapter
-снаружи addon. Полный пользовательский pipeline и текущие ограничения описаны в
-[content-authoring-pipeline.md](content-authoring-pipeline.md), инструкция автора — в
-[maker-kit.md](maker-kit.md).
 
 ### P1 — VRWeb Maker Kit: будущая release-проверка
 
@@ -334,7 +276,7 @@ Knossos подключает runtime preview, avatar registry/import и external
 
 - Какие визуальные эвристики нужны как fallback для div-soup сайтов?
 - Нужен ли открытый формат community/site-specific правил трансляции HTML → 3D?
-- Какой default safe profile выбрать для неизвестных декларативных классов после audit?
+- Какой default warning/skip profile выбрать для неизвестных декларативных классов после audit?
 - Достаточен ли `vrweb-instance` как общеэкосистемный private-instance contract?
 - Какие реальные потребители должны сформировать `fetch/storage` capabilities?
 - Когда масштаб комнат оправдает SFU и облегчённый voice-only клиент?

@@ -1,4 +1,4 @@
-<vrweb>
+<vrwml>
   <Avatar name="DefaultAvatar">
     <MeshInstance3D name="Mesh" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)" mesh="SubResource:::r0" surface_material_override/0="SubResource:::r1"/>
     <MeshInstance3D name="Face" transform="Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 1.45, -0.42)" mesh="SubResource:::r2" surface_material_override/0="SubResource:::r3">
@@ -17,4 +17,4 @@
   <Resource id="r4" type="SphereMesh" material="SubResource:::r6" radius="0.07" height="0.1" radial_segments="5" rings="4"/>
   <Resource id="r5" type="UserSettingsAvatarTexture"/>
   <Resource id="r6" type="StandardMaterial3D" albedo_color="Color(1, 0.18431373, 0, 1)"/>
-</vrweb>
+</vrwml>

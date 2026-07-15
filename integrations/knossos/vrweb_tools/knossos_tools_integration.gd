@@ -56,11 +56,11 @@ func on_scene_changed(root: Node) -> void:
 	VrwebHtmlSceneCodec.make_preview_internal(root)
 	_load_html_preview_images(root)
 	if bool(root.get_meta(VrwebHtmlDocument.META_IMPORTED, false)):
-		_status("HTML scene: <vrweb> редактируемый, procedural geometry — read-only preview.")
+		_status("HTML scene: <vrwml> редактируемый, procedural geometry — read-only preview.")
 	else:
 		_status("HTML открыт только для preview: %s." %
 				str(root.get_meta(VrwebHtmlDocument.META_READ_ONLY_REASON,
-				"нет editable <vrweb>")))
+				"нет editable <vrwml>")))
 
 
 func _build_dock(dock: VBoxContainer) -> void:
@@ -195,12 +195,13 @@ func _parse_avatar_vrwml(path: String) -> Dictionary:
 	var policy := AvatarVrwmlPolicy.new()
 	var built := VrwebBuilder.build(HtmlParser.parse(text), base_url, null, policy)
 	var holder := built.get("root") as Node3D
-	if policy.has_errors() or holder == null or holder.get_child_count() != 1 \
+	if policy.has_errors():
+		push_warning("VRWML avatar skipped unsupported parts: %s" % policy.summary())
+	if holder == null or holder.get_child_count() != 1 \
 			or not (holder.get_child(0) is Avatar):
 		if holder != null:
 			holder.free()
-		var detail := ": " + policy.summary() if policy.has_errors() else ""
-		return {"error": "VRWML не прошёл avatar diagnostics%s" % detail}
+		return {"error": "VRWML не создал единственный пригодный корень Avatar"}
 	var avatar := holder.get_child(0) as Avatar
 	holder.remove_child(avatar)
 	holder.free()
@@ -242,11 +243,11 @@ func _on_clear_preview() -> void:
 func _on_save_html_scene() -> void:
 	var root := EditorInterface.get_edited_scene_root()
 	if root == null or not bool(root.get_meta(VrwebHtmlDocument.META_IMPORTED, false)):
-		_status("Открытая сцена не является редактируемым HTML с <vrweb>.")
+		_status("Открытая сцена не является редактируемым HTML с <vrwml>.")
 		return
 	var result := VrwebHtmlSceneSaver.save_root(root)
 	if bool(result.get("ok", false)):
-		_status("HTML сохранён: изменён только блок <vrweb>.")
+		_status("HTML сохранён: изменён только блок <vrwml>.")
 		EditorInterface.get_resource_filesystem().scan()
 	else:
 		_status("HTML не сохранён: %s" % result.get("error", "unknown error"))

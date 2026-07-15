@@ -18,8 +18,8 @@ func _ready() -> void:
 			"напольный якорь поднимает квад над origin")
 
 	var doc := HtmlParser.parse("""
-	<vrweb><VRWebImage src="" alt="tool" width="2"
-	 transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 1,2,3)" /></vrweb>
+	<vrwml><VRWebImage src="" alt="tool" width="2"
+	 transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 1,2,3)" /></vrwml>
 	""")
 	var built: Dictionary = VrwebBuilder.build(doc)
 	var holder := built.get("root") as Node3D

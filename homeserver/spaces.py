@@ -165,7 +165,7 @@ def space_url(cfg: Config, space: sqlite3.Row) -> str:
 
 
 def page_html(cfg: Config, space: sqlite3.Row) -> str:
-    """HTML-страница пространства: заголовок + блок <vrweb> с persist/rev.
+    """HTML-страница пространства: заголовок + блок <vrwml> с persist/rev.
     Атрибуты блока задаёт сервер (клиентский дифф запрещает их править)."""
     rev = vrweb_scene.rev_of(str(space["content"]))
     name = _esc(str(space["name"]))
@@ -176,9 +176,9 @@ def page_html(cfg: Config, space: sqlite3.Row) -> str:
         "</head>\n<body>\n"
         "  <header><h1>%s</h1></header>\n"
         "  <main><p>Персональное пространство на %s.</p></main>\n"
-        "  <vrweb mode=\"combine\" persist=\"%s%s\" rev=\"%s\">\n"
+        "  <vrwml mode=\"combine\" persist=\"%s%s\" rev=\"%s\">\n"
         "%s\n"
-        "  </vrweb>\n"
+        "  </vrwml>\n"
         "</body>\n</html>\n"
     ) % (name, name, _esc(cfg.domain), cfg.effective_base_url(), FLUSH_PATH, rev,
          str(space["content"]))

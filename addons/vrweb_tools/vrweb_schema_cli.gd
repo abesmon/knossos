@@ -18,14 +18,14 @@ func _initialize() -> void:
 	var expected: String = SchemaGenerator.json_text()
 	if check:
 		if not FileAccess.file_exists(output):
-			push_error("VRWeb schema is missing: " + output)
+			push_error("VRWML schema is missing: " + output)
 			quit(1)
 			return
 		if FileAccess.get_file_as_string(output) != expected:
-			push_error("VRWeb schema is stale; regenerate " + output)
+			push_error("VRWML schema is stale; regenerate " + output)
 			quit(1)
 			return
-		print("VRWeb schema is current: " + output)
+		print("VRWML schema is current: " + output)
 		quit(0)
 		return
 	var absolute := ProjectSettings.globalize_path(output) if output.begins_with("res://") \
@@ -33,10 +33,10 @@ func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(absolute.get_base_dir())
 	var file := FileAccess.open(absolute, FileAccess.WRITE)
 	if file == null:
-		push_error("Cannot write VRWeb schema: " + output)
+		push_error("Cannot write VRWML schema: " + output)
 		quit(1)
 		return
 	file.store_string(expected)
 	file.close()
-	print("VRWeb schema generated: " + output)
+	print("VRWML schema generated: " + output)
 	quit(0)

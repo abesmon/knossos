@@ -6,10 +6,10 @@ var _failed := false
 func _ready() -> void:
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 	var doc := HtmlParser.parse("""
-<vrweb mode="exclusive">
+<vrwml mode="exclusive">
   <Node3D name="FromDocument" position="Vector3(1,2,3)"/>
   <Resource id="Box" type="BoxMesh" size="Vector3(1,1,1)"/>
-</vrweb>
+</vrwml>
 """)
 	var built := VrwebBuilder.build(doc, "https://example.test/world", null, policy)
 	_eq(built.root != null, true, "allow-all policy preserves document materialization")

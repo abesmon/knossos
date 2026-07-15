@@ -2,8 +2,8 @@
   "version": 1.1,
   "tags": [
     {
-      "name": "vrweb",
-      "description": "VRWeb scene embedded in an HTML document.",
+      "name": "vrwml",
+      "description": "VRWML scene embedded in an HTML document.",
       "attributes": [
         {
           "name": "mode",
@@ -29,7 +29,7 @@
         },
         {
           "name": "type",
-          "description": "Strict resource class.",
+          "description": "Resource class allowed by the local strict Maker Kit policy.",
           "values": [
             {
               "name": "ArrayMesh"
@@ -547,7 +547,7 @@
     },
     {
       "name": "Area3D",
-      "description": "Godot Area3D node in the strict VRWeb vocabulary.",
+      "description": "Godot Area3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "angular_damp",
@@ -956,7 +956,7 @@
     },
     {
       "name": "AudioStreamPlayer3D",
-      "description": "Godot AudioStreamPlayer3D node in the strict VRWeb vocabulary.",
+      "description": "Godot AudioStreamPlayer3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "area_mask",
@@ -1275,7 +1275,7 @@
     },
     {
       "name": "CollisionShape3D",
-      "description": "Godot CollisionShape3D node in the strict VRWeb vocabulary.",
+      "description": "Godot CollisionShape3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -1486,7 +1486,7 @@
     },
     {
       "name": "DirectionalLight3D",
-      "description": "Godot DirectionalLight3D node in the strict VRWeb vocabulary.",
+      "description": "Godot DirectionalLight3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -1894,7 +1894,7 @@
     },
     {
       "name": "Marker3D",
-      "description": "Godot Marker3D node in the strict VRWeb vocabulary.",
+      "description": "Godot Marker3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -2077,7 +2077,7 @@
     },
     {
       "name": "MeshInstance3D",
-      "description": "Godot MeshInstance3D node in the strict VRWeb vocabulary.",
+      "description": "Godot MeshInstance3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -2376,7 +2376,7 @@
     },
     {
       "name": "Node",
-      "description": "Godot Node node in the strict VRWeb vocabulary.",
+      "description": "Godot Node node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -2484,7 +2484,7 @@
     },
     {
       "name": "Node3D",
-      "description": "Godot Node3D node in the strict VRWeb vocabulary.",
+      "description": "Godot Node3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -2663,7 +2663,7 @@
     },
     {
       "name": "OmniLight3D",
-      "description": "Godot OmniLight3D node in the strict VRWeb vocabulary.",
+      "description": "Godot OmniLight3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -3025,7 +3025,7 @@
     },
     {
       "name": "SpotLight3D",
-      "description": "Godot SpotLight3D node in the strict VRWeb vocabulary.",
+      "description": "Godot SpotLight3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",
@@ -3383,7 +3383,7 @@
     },
     {
       "name": "Sprite3D",
-      "description": "Godot Sprite3D node in the strict VRWeb vocabulary.",
+      "description": "Godot Sprite3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "alpha_antialiasing_edge",
@@ -3913,7 +3913,7 @@
     },
     {
       "name": "StaticBody3D",
-      "description": "Godot StaticBody3D node in the strict VRWeb vocabulary.",
+      "description": "Godot StaticBody3D node allowed by the local strict Maker Kit policy.",
       "attributes": [
         {
           "name": "auto_translate_mode",

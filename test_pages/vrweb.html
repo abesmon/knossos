@@ -18,8 +18,8 @@
        mode="exclusive", чтобы HTML игнорировался и осталась только сцена vrweb.</p>
   </section>
 
-  <!-- Сцена VRWeb: пол + парящий ящик с коллизией. Обычный браузер игнорирует <vrweb>. -->
-  <vrweb mode="combine">
+  <!-- Сцена VRWeb: пол + парящий ящик с коллизией. Обычный браузер игнорирует <vrwml>. -->
+  <vrwml mode="combine">
     <!-- Пол -->
     <Node3D name="Container" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0, 0)">
       <MeshInstance3D mesh="SubResource:::FloorMesh"
@@ -82,7 +82,7 @@
     <ExtResource id="DuckMesh" type="Mesh" path="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb"/>
     <ExtResource id="DuckScene" type="PackedScene" path="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Duck/glTF-Binary/Duck.glb"/>
     <ExtResource id="Ambient" type="AudioStreamOggVorbis" path="https://upload.wikimedia.org/wikipedia/commons/c/c8/Example.ogg"/>
-  </vrweb>
+  </vrwml>
 
   <footer><p>назад на <a href="index.html">главную</a></p></footer>
 </body>

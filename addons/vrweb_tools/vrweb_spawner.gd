@@ -6,7 +6,7 @@ extends Node3D
 ## Экспортируется как мета-тег <VRWebSpawner mode="...">, а каждый дочерний Marker3D —
 ## как <SpawnerPoint transform="..."/> (origin → точка спавна, -Z базиса → куда смотреть).
 ## Сам узел в сцену клиента не инстанцируется (это правило, а не объект) —
-## см. VrwebBuilder._build_spawn и docs/vrweb-tags.md.
+## см. VrwebBuilder._build_spawn и docs/vrwml-tags.md.
 ##
 ## Поставьте этот узел в сцену, добавьте внутрь несколько Marker3D — это точки спавна.
 

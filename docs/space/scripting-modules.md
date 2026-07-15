@@ -1,6 +1,11 @@
-# VRWeb scripting modules: пользовательские классы и скрипты
+# VRWML scripting modules: пользовательские классы и скрипты
 
-> **Статус: базовый trusted runtime vertical slice реализован.** Inline, внешний `.gd` и
+> **Статус стандарта: предварительный.** `VRWebModule` и `VRWebComponent` входят в VRWML,
+> однако способ доставки и исполнения ещё может быть пересмотрен. Текущая реализация основана
+> на открытом GDScript: альтернативный клиент может реализовать интерпретатор/виртуализацию
+> либо явно деградировать компонент, если такого runtime нет.
+>
+> **Статус Knossos: базовый trusted runtime vertical slice реализован.** Inline, внешний `.gd` и
 > package `.vrmod` проходят общий navigation/runtime pipeline; работают integrity/cache,
 > exact-hash trust UI, lifecycle, public context API, manifest-declared assets и
 > воспроизводимый package-demo. До trusted MVP остаются multiplayer module compatibility,
@@ -76,9 +81,9 @@ func mount(context):
     context.log.info("light switch mounted")
 </script>
 
-<vrweb>
+<vrwml>
   <VRWebComponent module="#light-switch" class="default" transform="..."/>
-</vrweb>
+</vrwml>
 ```
 
 Это не второй loader: клиент синтезирует в памяти однофайловый module manifest с export
@@ -276,7 +281,7 @@ MVP. Приоритеты, критерии готовности, зависим
 
 ## Связанные материалы
 
-- [vrweb-tags.md](vrweb-tags.md) — декларативная сцена и уровень без пользовательского кода;
+- [vrwml-tags.md](vrwml-tags.md) — декларативная сцена и уровень без пользовательского кода;
 - [security.md](../security.md) — общая модель доверия;
 - [replicated-state.md](../network/replicated-state.md) — сетевой state API.
 

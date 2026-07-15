@@ -1545,7 +1545,7 @@ func _build_image_panel(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw
 	return panel
 
 
-## Строит экран для HTML-тега <video>: тот же VrwebVideoScreen, что и кастомный VRWeb-тег
+## Строит экран для HTML-тега <video>: тот же VrwebVideoScreen, что и стандартный тег VRWML
 ## (см. docs/video-player.md). Привязку к (неявному) плееру и докачку делает VrwebVideoManager
 ## при scan. Возвращает null, если нет src или недоступен аддон FFmpeg — тогда рисуем заглушку.
 func _build_video_screen(obj: Dictionary, holder: Node3D, local_pos: Vector3, yaw: float, size: Vector2) -> Node3D:

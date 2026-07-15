@@ -19,7 +19,7 @@ func _ready() -> void:
 		+ "<section><h2>Первая</h2><p>Объект на стене</p>" \
 		+ "<img src=\"preview.png\" alt=\"Картина\" width=\"256\" height=\"128\"></section>" \
 		+ "<section><h2>Вторая</h2><a href=\"next.html\">Портал</a></section></main>\r\n" \
-		+ "<vrweb mode=\"combine\"><Node3D name=\"Editable\"/></vrweb>\r\n</body>\r\n"
+		+ "<vrwml mode=\"combine\"><Node3D name=\"Editable\"/></vrwml>\r\n</body>\r\n"
 	_write(source_path, source)
 
 	var root := PORTABLE_CODEC.build_from_path(source_path)
@@ -62,7 +62,7 @@ func _ready() -> void:
 	_check(output.contains("1, 2, 3)"), "изменение сцены попало внутрь vrweb")
 
 	# Parallel source edit must not be overwritten by stale editor state.
-	_write(output_path, output.replace("</vrweb>", " \n</vrweb>"))
+	_write(output_path, output.replace("</vrwml>", " \n</vrwml>"))
 	var conflict := SAVER.save_root(root, output_path)
 	_check(not bool(conflict.get("ok", false)), "внешнее изменение vrweb даёт conflict")
 	root.free()

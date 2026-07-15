@@ -49,9 +49,13 @@ func _test_avatar_policy() -> void:
 			"avatar policy exposes structured rejection diagnostics")
 	var integrated := AvatarVrwmlPolicy.new()
 	var built := VrwebBuilder.build(HtmlParser.parse(
-			"<vrweb><Avatar><HTTPRequest/></Avatar></vrweb>"), "test://avatar", null, integrated)
+			"<vrwml><Avatar><HTTPRequest><Node3D name=\"Preserved\"/></HTTPRequest>" \
+			+ "</Avatar></vrwml>"), "test://avatar", null, integrated)
 	_check(integrated.has_errors(), "builder records rejected child instead of silent partial loss")
 	var holder := built.get("root") as Node3D
+	_check(holder != null and holder.get_child_count() == 1 \
+			and holder.get_child(0).get_node_or_null("Preserved") != null,
+			"builder preserves supported descendants of a rejected wrapper")
 	if holder != null:
 		holder.free()
 
@@ -114,7 +118,7 @@ func _test_avatar(idx: int, write: bool) -> void:
 	var report := VrwebExporter.export_vrwml_report(authored)
 	var text := str(report.get("vrwml", ""))
 	_check(bool(report.get("ok", false)), "avatar_%d export report ok" % idx)
-	_check(text.begins_with("<vrweb>\n  <Avatar"), "avatar_%d exports semantic root" % idx)
+	_check(text.begins_with("<vrwml>\n  <Avatar"), "avatar_%d exports semantic root" % idx)
 	_check(text.contains("<LookPitchApplier"), "avatar_%d exports LookPitchApplier" % idx)
 	_check(text.contains("<VoiceScaleApplier"), "avatar_%d exports VoiceScaleApplier" % idx)
 	_check(text.contains("<UserTextureApplier"), "avatar_%d exports UserTextureApplier" % idx)

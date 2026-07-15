@@ -73,7 +73,7 @@ Preflight стоит после fetch/integrity/unpack и до `ScriptingModuleR
 | Поверхность | Риск | Статус | Где подробно |
 |---|---|---|---|
 | **Scripting modules / `.vrmod`** | Trusted GDScript имеет права приложения | **Смягчён:** integrity + default ask + exact-hash trust store; настоящей capability-песочницы ещё нет | [space/scripting-modules.md](space/scripting-modules.md) |
-| **vrweb-теги страницы** | `VrwebBuilder` инстанцирует через `ClassDB` любой класс Godot и ставит любые свойства из атрибутов недоверенной страницы: исполнение кода (`script`/GDExtension), свойства-пути → чтение ФС, сетевые узлы (SSRF/DoS) | **Принят** | [space/vrweb-tags.md](space/vrweb-tags.md) → «Принятое допущение» |
+| **VRWML страницы** | `VrwebBuilder` инстанцирует через `ClassDB` любой класс Godot и ставит любые свойства из атрибутов недоверенной страницы: исполнение кода (`script`/GDExtension), свойства-пути → чтение ФС, сетевые узлы (SSRF/DoS) | **Принят** | [space/vrwml-tags.md](space/vrwml-tags.md) → «Принятое допущение» |
 | **Эфемерные действия пиров** | `vrweb-node` из действий пиров строится тем же `VrwebBuilder.build_element` — тот же риск, даже без захода на злонамеренную страницу | **Принят** | [network/ephemeral-changes.md](network/ephemeral-changes.md), [client/space-console.md](client/space-console.md) |
 | **Флаш персистенции** | Запекает узлы пиров в страницу на сервере — после чего они грузятся и инстанцируются как обычные узлы страницы | **Принят** (транзитивно от двух предыдущих) | [network/page-persistence.md](network/page-persistence.md) |
 | **Внешний аватар** | Внешний `.tscn` со скриптами/произвольными классами отклоняется. HTTP принимает только data-only `.vrwml` через avatar allowlist/budgets | **Закрыт для `.tscn`**; VRWML остаётся ограниченным policy и resource budgets | [client/avatars.md](client/avatars.md) → «Известные риски» |
@@ -107,7 +107,7 @@ Preflight стоит после fetch/integrity/unpack и до `ScriptingModuleR
 ## Рекомендации пользователям
 
 - Оставляйте режим «Спрашивать для неизвестных» и сохраняйте разрешение только для понятных
-  origin/module/hash. Помните: это защищает scripting modules, но пока не все VRWeb-теги.
+  origin/module/hash. Помните: это защищает scripting modules, но пока не весь VRWML.
 - Внешний `.tscn` отклоняется; для внешних аватаров используйте только `.vrwml` и всё равно
   проверяйте origin и внешние ресурсы документа.
 - Не используйте `--insecure-identity` вне локальной разработки.

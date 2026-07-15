@@ -2,7 +2,7 @@
 class_name VrwebExporter
 extends RefCounted
 
-## Экспорт собранной в редакторе Godot-сцены в HTML-документ с тегами <vrweb> —
+## Экспорт собранной в редакторе Godot-сцены в HTML-документ с тегами <vrwml> —
 ## ОБРАТНАЯ операция к VrwebBuilder (scripts/vrweb_builder.gd), который читает такой HTML.
 ##
 ## Правила зеркалят читателя:
@@ -16,7 +16,7 @@ extends RefCounted
 ##
 ## Использование:
 ##   VrwebExporter.export_scene(root, "combine"|"exclusive") — HTML, дети root;
-##   VrwebExporter.export_vrwml(root) — standalone <vrweb>, включая сам root.
+##   VrwebExporter.export_vrwml(root) — standalone <vrwml>, включая сам root.
 
 const SUB_PREFIX := VrwebFormat.SUBRESOURCE_PREFIX
 const EXT_PREFIX := VrwebFormat.EXTRESOURCE_PREFIX
@@ -46,7 +46,7 @@ var _package_seq := 0
 var _module_head_lines: Array[String] = []
 var _report := {"ok": true, "packages": [], "assets": [], "warnings": [], "errors": [],
 	"profile": VrwebCompatibility.PROFILE_COMPATIBLE,
-	"catalog_version": VrwebCompatibility.CATALOG_VERSION}
+	"policy_version": VrwebCompatibility.POLICY_VERSION}
 var _standalone := false
 var _profile := VrwebCompatibility.PROFILE_COMPATIBLE
 var _output_path := ""
@@ -87,7 +87,7 @@ static func export_vrwml_report(root: Node, output_path: String = "",
 	return e._report
 
 
-## Только блок <vrweb> для lossless-сохранения импортированной HTML-сцены. В отличие от
+## Только блок <vrwml> для lossless-сохранения импортированной HTML-сцены. В отличие от
 ## export_scene(), HTML envelope не создаётся: вызывающий заменяет этим текстом ровно исходный
 ## диапазон блока, сохраняя всё вокруг без нормализации.
 static func export_vrweb_block_report(root: Node, mode: String = VrwebFormat.MODE_COMBINE,
@@ -150,10 +150,10 @@ func _export(root: Node, mode: String, output_path: String) -> String:
 		out.append("  </script>")
 	out.append("</head>")
 	out.append("<body>")
-	out.append(pad + "<vrweb mode=\"%s\">" % safe_mode)
+	out.append(pad + "<vrwml mode=\"%s\">" % safe_mode)
 	for line in inner:
 		out.append(line)
-	out.append(pad + "</vrweb>")
+	out.append(pad + "</vrwml>")
 	out.append("</body>")
 	out.append("</html>")
 	out.append("")
@@ -180,10 +180,10 @@ func _export_vrwml(root: Node, output_path: String) -> String:
 		_report_error("standalone VRWML не включает исполняемые Script/module definitions")
 	_free_defaults()
 
-	var out: Array[String] = ["<vrweb>"]
+	var out: Array[String] = ["<vrwml>"]
 	out.append_array(body_lines)
 	out.append_array(res_lines)
-	out.append("</vrweb>")
+	out.append("</vrwml>")
 	out.append("")
 	return "\n".join(out)
 
@@ -195,7 +195,7 @@ func _export_vrweb_block(root: Node, mode: String, output_path: String) -> Strin
 	var body_lines: Array[String] = []
 	if root != null:
 		# get_children() excludes internal preview nodes by default. That is the persistence
-		# boundary of imported HTML scenes: only editable children become <vrweb> content.
+		# boundary of imported HTML scenes: only editable children become <vrwml> content.
 		for child in root.get_children():
 			_build_node(child, 1, body_lines)
 
@@ -211,13 +211,13 @@ func _export_vrweb_block(root: Node, mode: String, output_path: String) -> Strin
 	_write_asset_manifest(output_path)
 	_write_packages(output_path)
 	if not _module_head_lines.is_empty() or not _inline_scripts.is_empty():
-		_report_error("lossless HTML save не может менять Script/module definitions вне <vrweb>")
+		_report_error("lossless HTML save не может менять Script/module definitions вне <vrwml>")
 	_free_defaults()
 
-	var out: Array[String] = ["<vrweb mode=\"%s\">" % safe_mode]
+	var out: Array[String] = ["<vrwml mode=\"%s\">" % safe_mode]
 	out.append_array(body_lines)
 	out.append_array(res_lines)
-	out.append("</vrweb>")
+	out.append("</vrwml>")
 	return "\n".join(out)
 
 
@@ -265,8 +265,8 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 	var cls := public_class if public_class != "" else node.get_class()
 	if _profile == VrwebCompatibility.PROFILE_STRICT and public_class == "" \
 			and not VrwebCompatibility.supports_node(cls):
-		_report_error("узел %s: класс %s не входит в strict vocabulary %s" % [
-			_node_label(node), cls, VrwebCompatibility.CATALOG_VERSION])
+		_report_error("узел %s: класс %s не разрешён strict policy Maker Kit %s" % [
+			_node_label(node), cls, VrwebCompatibility.POLICY_VERSION])
 	var pad := "  ".repeat(depth)
 	var attrs := _node_attrs(node, cls)
 	var kids := node.get_children()
@@ -497,8 +497,8 @@ func _emit_resource(id: String, res: Resource, out: Array[String]) -> void:
 	var cls := public_class if public_class != "" else res.get_class()
 	if _profile == VrwebCompatibility.PROFILE_STRICT and public_class == "" \
 			and not VrwebCompatibility.supports_resource(cls):
-		_report_error("resource %s: класс %s не входит в strict vocabulary %s" % [
-			id, cls, VrwebCompatibility.CATALOG_VERSION])
+		_report_error("resource %s: класс %s не разрешён strict policy Maker Kit %s" % [
+			id, cls, VrwebCompatibility.POLICY_VERSION])
 	if res is Mesh:
 		var triangle_count := (res as Mesh).get_faces().size() / 3
 		if triangle_count > VrwebCompatibility.HEAVY_MESH_TRIANGLES:
@@ -513,8 +513,8 @@ func _emit_resource(id: String, res: Resource, out: Array[String]) -> void:
 func _emit_ext(id: String, ext: VrwebExtResource, out: Array[String]) -> void:
 	if _profile == VrwebCompatibility.PROFILE_STRICT \
 			and not VrwebCompatibility.supports_external_type(ext.type):
-		_report_error("external resource %s: type %s не входит в strict vocabulary %s" % [
-			id, ext.type, VrwebCompatibility.CATALOG_VERSION])
+		_report_error("external resource %s: type %s не разрешён strict policy Maker Kit %s" % [
+			id, ext.type, VrwebCompatibility.POLICY_VERSION])
 	if _profile == VrwebCompatibility.PROFILE_STRICT and not ext is VrwebLocalAsset:
 		var scheme := ext.url.get_slice(":", 0).to_lower()
 		var safe_relative := not ext.url.contains(":") \

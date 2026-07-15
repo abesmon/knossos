@@ -104,10 +104,12 @@ func _resolve_vrwml_text(text: String, base_url: String, on_ready: Callable) -> 
 	var policy := AvatarVrwmlPolicy.new()
 	var built := VrwebBuilder.build(doc, base_url, null, policy)
 	var holder := built.get("root") as Node3D
-	if policy.has_errors() or not bool(built.get("found", false)) or holder == null \
+	if policy.has_errors():
+		Log.warn("avatar", "части VRWML-аватара пропущены policy (%s): %s" % \
+				[policy.summary(), base_url])
+	if not bool(built.get("found", false)) or holder == null \
 			or holder.get_child_count() != 1:
-		var detail := " (%s)" % policy.summary() if policy.has_errors() else ""
-		Log.warn("avatar", "VRWML-аватар отклонён%s: %s" % [detail, base_url])
+		Log.warn("avatar", "VRWML не создал единственный пригодный корень аватара: %s" % base_url)
 		if holder != null:
 			holder.free()
 		on_ready.call(null)

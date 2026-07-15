@@ -220,7 +220,7 @@ func _make_node(object: Dictionary) -> Node:
 			return STROKE.instantiate()
 		SceneHtml.KIND_NODE:
 			# Добавленный узел vrweb-слоя: строится тем же путём, что узлы страницы
-			# (тот же принятый ClassDB-риск, см. docs/vrweb-tags.md). Дети приходят
+			# (тот же принятый ClassDB-риск, см. docs/vrwml-tags.md). Дети приходят
 			# отдельными объектами и монтируются обычной вложенностью.
 			var props: Dictionary = object.get("props", {})
 			return VrwebBuilder.build_element(str(props.get("tag", "")),

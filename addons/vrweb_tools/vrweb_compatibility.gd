@@ -2,11 +2,12 @@
 class_name VrwebCompatibility
 extends RefCounted
 
-## Versioned Maker Kit vocabulary used by editor export and the headless CLI.
-## `compatible` preserves the historical ClassDB-wide exporter behavior; `strict` only accepts
-## this portable declarative subset plus classes explicitly exposed by the host registry.
+## Versioned local safety/portability policy used by Maker Kit export and the headless CLI.
+## It is deliberately narrower than the complete VRWML vocabulary. `compatible` preserves the
+## historical ClassDB-wide exporter behavior; `strict` only accepts this locally verified subset
+## plus classes explicitly exposed by the host registry.
 
-const CATALOG_VERSION := "0.2-mvp1"
+const POLICY_VERSION := "0.2-mvp1"
 const PROFILE_STRICT := "strict"
 const PROFILE_COMPATIBLE := "compatible"
 const MAX_NODES := 2048
@@ -14,7 +15,7 @@ const MAX_RESOURCES := 1024
 const MAX_EXTERNAL_RESOURCES := 256
 const HEAVY_MESH_TRIANGLES := 100000
 
-const NODE_CLASSES := {
+const NODE_ALLOWLIST := {
 	"Node": true,
 	"Node3D": true,
 	"MeshInstance3D": true,
@@ -29,7 +30,7 @@ const NODE_CLASSES := {
 	"AudioStreamPlayer3D": true,
 }
 
-const RESOURCE_CLASSES := {
+const RESOURCE_ALLOWLIST := {
 	"BoxMesh": true,
 	"SphereMesh": true,
 	"CapsuleMesh": true,
@@ -46,7 +47,7 @@ const RESOURCE_CLASSES := {
 	"ConcavePolygonShape3D": true,
 }
 
-const EXTERNAL_RESOURCE_TYPES := {
+const EXTERNAL_TYPE_ALLOWLIST := {
 	"Texture2D": true,
 	"ImageTexture": true,
 	"CompressedTexture2D": true,
@@ -64,12 +65,12 @@ static func normalized_profile(profile: String) -> String:
 
 
 static func supports_node(class_name_: String) -> bool:
-	return NODE_CLASSES.has(class_name_)
+	return NODE_ALLOWLIST.has(class_name_)
 
 
 static func supports_resource(class_name_: String) -> bool:
-	return RESOURCE_CLASSES.has(class_name_)
+	return RESOURCE_ALLOWLIST.has(class_name_)
 
 
 static func supports_external_type(class_name_: String) -> bool:
-	return EXTERNAL_RESOURCE_TYPES.has(class_name_)
+	return EXTERNAL_TYPE_ALLOWLIST.has(class_name_)

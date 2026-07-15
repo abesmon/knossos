@@ -290,11 +290,11 @@ build_maker_kit() {
     "$stage/addons/vrweb_tools/plugin.cfg" > "$stage/addons/vrweb_tools/plugin.cfg.tmp"
   mv "$stage/addons/vrweb_tools/plugin.cfg.tmp" "$stage/addons/vrweb_tools/plugin.cfg"
 
-  catalog="$(sed -nE 's/^const CATALOG_VERSION := "([^"]+)".*/\1/p' \
+  policy="$(sed -nE 's/^const POLICY_VERSION := "([^"]+)".*/\1/p' \
     "$ROOT/addons/vrweb_tools/vrweb_compatibility.gd" | head -1)"
   godot_compat="$(printf '%s' "$VERSION_FULL" | awk -F. '{printf "%s.%s.x", $1, $2}')"
-  printf '{\n  "maker_kit": "%s",\n  "knossos": "%s",\n  "build": %s,\n  "godot": "%s",\n  "vrweb_vocabulary": "%s"\n}\n' \
-    "$SEMVER" "$SEMVER" "$BUILD_NUMBER" "$godot_compat" "$catalog" \
+  printf '{\n  "maker_kit": "%s",\n  "knossos": "%s",\n  "build": %s,\n  "godot": "%s",\n  "vrwml_policy": "%s"\n}\n' \
+    "$SEMVER" "$SEMVER" "$BUILD_NUMBER" "$godot_compat" "$policy" \
     > "$stage/compatibility.json"
 
   # Fail closed if the distributable addon regains a compile-time Knossos dependency.
@@ -318,9 +318,9 @@ verify_maker_schema() {
       --script res://addons/vrweb_tools/vrweb_schema_cli.gd -- \
       --output=res://schemas/vrweb-html-data.json --check >/dev/null 2>&1; then
     tail -30 "$log" >&2
-    die "VRWeb HTML completion schema отстала от strict vocabulary"
+    die "VRWML HTML completion schema отстала от strict policy Maker Kit"
   fi
-  ok "HTML completion schema синхронна с strict vocabulary"
+  ok "HTML completion schema синхронна с strict policy Maker Kit"
 }
 
 verify_maker_kit_archive() {

@@ -1,7 +1,7 @@
 # docs / space
 
 Здесь собраны документы про то, как из веб-страницы получается **3D-пространство**: правила
-процедурной генерации из обычного HTML и правила сборки сцены из vrweb-тегов. Это ядро Слоя 1
+процедурной генерации из обычного HTML и правила сборки декларативной сцены из VRWML. Это ядро Слоя 1
 из обзора ([../README.md](../README.md)).
 
 Как эти правила воплощены в коде пайплайна — в [implementation.md](../implementation.md).
@@ -28,8 +28,7 @@ Public API внешних scripting modules и capability contract — в [scrip
 
 ## Кастомные сцены
 
-- [vrweb-tags.md](vrweb-tags.md) — vrweb-теги: собственный синтаксис сцены поверх HTML, режимы
-  `combine`/`exclusive`, загрузка внешних GLB-ресурсов.
-- [vrwml-format-and-pipeline.md](vrwml-format-and-pipeline.md) — целевой standalone-формат
-  `.vrwml` поверх существующей class-name/property-модели, стандартные avatar-классы и
-  двусторонний editor/runtime-пайплайн без публичной зависимости от `.tscn`.
+- [vrwml-format-and-pipeline.md](vrwml-format-and-pipeline.md) — нормативная модель VRWML:
+  единый формат сцен, все Godot-классы, специальные стандартные классы и формы доставки.
+- [vrwml-tags.md](vrwml-tags.md) — подробный реализованный каталог стандартных тегов VRWML,
+  режимы композиции, загрузка внешних GLB-ресурсов и ограничения текущего Knossos runtime.

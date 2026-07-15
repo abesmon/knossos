@@ -2,7 +2,7 @@
 class_name VrwebPortableHtmlSceneCodec
 extends RefCounted
 
-## Lossless HTML envelope + portable declarative <vrweb> materialization. Procedural HTML
+## Lossless HTML envelope + portable declarative <vrwml> materialization. Procedural HTML
 ## geometry intentionally remains a host/runtime adapter concern.
 
 
@@ -17,11 +17,13 @@ static func build_from_path(path: String) -> Node3D:
 		block = HtmlParser.parse(str(span.block)).find_descendant(VrwebFormat.TAG)
 	var materialized := VrwebMarkupMaterializer.build(block,
 			VrwebCompatibility.PROFILE_STRICT) if block != null else {
-		"ok": false, "root": null, "mode": VrwebFormat.MODE_COMBINE,
-		"errors": [str(span.get("error", "HTML не содержит <vrweb>"))], "warnings": []}
-	var editable := bool(span.get("ok", false)) and bool(materialized.get("ok", false))
+		"ok": false, "complete": false, "root": null, "mode": VrwebFormat.MODE_COMBINE,
+		"errors": [str(span.get("error", "HTML не содержит <vrwml>"))], "warnings": []}
+	var materialized_ok := bool(materialized.get("ok", false))
+	var editable := bool(span.get("ok", false)) and materialized_ok \
+			and bool(materialized.get("complete", false))
 	var root := materialized.get("root") as Node3D
-	if not editable:
+	if root == null or not materialized_ok:
 		if root != null:
 			root.free()
 		root = Node3D.new()
@@ -39,8 +41,9 @@ static func build_from_path(path: String) -> Node3D:
 		root.set_meta(VrwebHtmlDocument.META_SUFFIX, source.substr(finish))
 		root.set_meta(VrwebHtmlDocument.META_BLOCK_HASH, str(span.block).sha256_text())
 	if not editable:
-		root.set_meta(VrwebHtmlDocument.META_READ_ONLY_REASON,
-			"; ".join(materialized.get("errors", [])))
+		var reasons: Array = materialized.get("errors", [])
+		reasons.append_array(materialized.get("warnings", []))
+		root.set_meta(VrwebHtmlDocument.META_READ_ONLY_REASON, "; ".join(reasons))
 	_set_owner_recursive(root, root)
 	return root
 
@@ -49,4 +52,3 @@ static func _set_owner_recursive(node: Node, owner: Node) -> void:
 	for child in node.get_children():
 		child.owner = owner
 		_set_owner_recursive(child, owner)
-

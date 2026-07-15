@@ -21,18 +21,13 @@ static func build(block: HtmlNode,
 func _build(block: HtmlNode) -> Dictionary:
 	if block == null or block.tag != VrwebFormat.TAG:
 		return {"ok": false, "root": null, "mode": VrwebFormat.MODE_COMBINE,
-			"errors": ["HTML не содержит <vrweb>"], "warnings": []}
+			"errors": ["HTML не содержит <vrwml>"], "warnings": []}
 	_collect_definitions(block)
 	var root := Node3D.new()
 	root.name = "VRWeb"
-	for child in block.children:
-		if child.is_text() or _is_definition(child):
-			continue
-		var node := _build_node(child, "/VRWeb")
-		if node != null:
-			root.add_child(node)
+	_append_materialized_children(root, block, "/VRWeb")
 	var mode := VrwebFormat.normalized_mode(block.get_attr("mode", VrwebFormat.MODE_COMBINE))
-	return {"ok": _errors.is_empty(), "root": root, "mode": mode,
+	return {"ok": _errors.is_empty(), "complete": _warnings.is_empty(), "root": root, "mode": mode,
 		"resources": _resources, "errors": _errors, "warnings": _warnings}
 
 
@@ -41,7 +36,7 @@ func _collect_definitions(block: HtmlNode) -> void:
 		if child.raw_tag == VrwebFormat.EXT_RESOURCE_TAG:
 			var id := child.get_attr("id")
 			if id.is_empty() or _external.has(id):
-				_error("ExtResource id отсутствует или дублируется: " + id)
+				_warn("ExtResource id отсутствует или дублируется: " + id)
 				continue
 			var external := VrwebExtResource.new()
 			external.type = child.get_attr("type")
@@ -53,13 +48,13 @@ func _collect_definitions(block: HtmlNode) -> void:
 		var id := child.get_attr("id")
 		var type := child.get_attr("type")
 		if id.is_empty() or _resources.has(id):
-			_error("Resource id отсутствует или дублируется: " + id)
+			_warn("Resource id отсутствует или дублируется: " + id)
 			continue
 		var resource = _instantiate(type, false, "Resource " + id)
 		if resource is Resource:
 			_resources[id] = resource
 		else:
-			_error("Resource %s: не удалось создать %s" % [id, type])
+			_warn("Resource %s: не удалось создать %s" % [id, type])
 	for child in block.children:
 		if child.raw_tag == VrwebFormat.RESOURCE_TAG:
 			var resource = _resources.get(child.get_attr("id"))
@@ -78,23 +73,30 @@ func _build_node(element: HtmlNode, parent_path: String) -> Node:
 		if external is VrwebExtResource:
 			placeholder.set_meta(VrwebExtResource.META_SCENE, external)
 		else:
-			_error(parent_path + "/ExtScene: неизвестный external reference " + reference)
+			_warn(parent_path + "/ExtScene: неизвестный external reference " + reference)
 		return placeholder
 	var type := element.raw_tag
 	var path := parent_path + "/" + type
 	var instance = _instantiate(type, true, path)
 	if not instance is Node:
-		_error(path + ": не удалось создать node")
+		_warn(path + ": не удалось создать node")
 		return null
 	var node := instance as Node
 	_apply_attributes(node, element, path, {})
-	for child in element.children:
-		if child.is_text():
-			continue
-		var child_node := _build_node(child, path)
-		if child_node != null:
-			node.add_child(child_node)
+	_append_materialized_children(node, element, path)
 	return node
+
+
+## Skip an unsupported wrapper but retain every descendant the local policy can materialize.
+func _append_materialized_children(parent: Node, element: HtmlNode, parent_path: String) -> void:
+	for child in element.children:
+		if child.is_text() or _is_definition(child):
+			continue
+		var child_node := _build_node(child, parent_path)
+		if child_node != null:
+			parent.add_child(child_node)
+		else:
+			_append_materialized_children(parent, child, parent_path)
 
 
 func _build_spawner(element: HtmlNode) -> VrwebSpawner:
@@ -108,7 +110,7 @@ func _build_spawner(element: HtmlNode) -> VrwebSpawner:
 		if value is Transform3D:
 			point.transform = value
 		else:
-			_error("VRWebSpawner/SpawnerPoint: invalid transform")
+			_warn("VRWebSpawner/SpawnerPoint: invalid transform")
 		spawner.add_child(point)
 	return spawner
 
@@ -120,10 +122,10 @@ func _instantiate(type: String, node: bool, context: String):
 	var supported := VrwebCompatibility.supports_node(type) if node \
 			else VrwebCompatibility.supports_resource(type)
 	if _profile == VrwebCompatibility.PROFILE_STRICT and not supported:
-		_error("%s: %s не входит в strict vocabulary" % [context, type])
+		_warn("%s: %s пропущен локальной strict policy" % [context, type])
 		return null
 	if not ClassDB.class_exists(type) or not ClassDB.can_instantiate(type):
-		_error("%s: неизвестный ClassDB type %s" % [context, type])
+		_warn("%s: неизвестный ClassDB type %s" % [context, type])
 		return null
 	var instance = ClassDB.instantiate(type)
 	if node and not instance is Node:
@@ -149,18 +151,18 @@ func _apply_attributes(object: Object, element: HtmlNode, context: String,
 		if raw.begins_with(VrwebFormat.EXTRESOURCE_PREFIX):
 			var external = _external.get(raw.trim_prefix(VrwebFormat.EXTRESOURCE_PREFIX))
 			if not external is VrwebExtResource or not object is Node:
-				_error("%s.%s: invalid external reference" % [context, property])
+				_warn("%s.%s: invalid external reference" % [context, property])
 				continue
 			var bindings: Dictionary = object.get_meta(VrwebExtResource.META_BINDINGS, {}).duplicate()
 			bindings[property] = external
 			object.set_meta(VrwebExtResource.META_BINDINGS, bindings)
 			continue
 		if not _has_property(object, property):
-			_error("%s: неизвестное property %s" % [context, property])
+			_warn("%s: неизвестное property %s" % [context, property])
 			continue
 		var resolved = _resolve_value(raw)
 		if resolved == null and raw != "null":
-			_error("%s.%s: значение не разобрано" % [context, property])
+			_warn("%s.%s: значение не разобрано" % [context, property])
 			continue
 		object.set(property, resolved)
 
@@ -194,5 +196,5 @@ func _is_definition(element: HtmlNode) -> bool:
 	return element.raw_tag in [VrwebFormat.RESOURCE_TAG, VrwebFormat.EXT_RESOURCE_TAG]
 
 
-func _error(message: String) -> void:
-	_errors.append(message)
+func _warn(message: String) -> void:
+	_warnings.append(message)

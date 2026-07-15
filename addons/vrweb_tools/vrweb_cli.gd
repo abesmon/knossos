@@ -99,7 +99,7 @@ func _print_report(report: Dictionary) -> void:
 
 func _finish_with_usage(message: String, report_path: String) -> void:
 	var report := {"ok": false, "profile": VrwebCompatibility.PROFILE_STRICT,
-		"catalog_version": VrwebCompatibility.CATALOG_VERSION, "packages": [], "warnings": [],
+		"policy_version": VrwebCompatibility.POLICY_VERSION, "packages": [], "warnings": [],
 		"errors": [message]}
 	_write_report(report_path, report)
 	_print_report(report)

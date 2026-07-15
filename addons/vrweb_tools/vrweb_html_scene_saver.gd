@@ -22,12 +22,12 @@ static func save_root(root: Node, output_path: String = "") -> Dictionary:
 	if not bool(span.ok):
 		return {"ok": false, "code": ERR_PARSE_ERROR, "error": str(span.error)}
 
-	# Не затираем параллельную ручную правку исходного <vrweb> после импорта.
+	# Не затираем параллельную ручную правку исходного <vrwml> после импорта.
 	var imported_hash := str(root.get_meta(VrwebHtmlDocument.META_BLOCK_HASH, ""))
 	var current_hash := str(span.block).sha256_text()
 	if not imported_hash.is_empty() and imported_hash != current_hash:
 		return {"ok": false, "code": ERR_ALREADY_IN_USE,
-			"error": "<vrweb> в %s изменился на диске; переимпортируйте сцену" % source_path}
+			"error": "<vrwml> в %s изменился на диске; переимпортируйте сцену" % source_path}
 
 	var mode := str(root.get_meta(VrwebHtmlDocument.META_MODE, VrwebFormat.MODE_COMBINE))
 	var report := VrwebExporter.export_vrweb_block_report(root, mode, output_path,

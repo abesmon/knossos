@@ -2,10 +2,10 @@
 class_name VrwebFormat
 extends RefCounted
 
-## Stable vocabulary shared by the authoring exporter and the runtime builder. Keeping these
-## names in the addon prevents the export path from depending on Knossos' VrwebBuilder class.
+## Stable special-tag names shared by the authoring exporter and the runtime builder. The complete
+## VRWML vocabulary additionally includes every Godot class and registered standard classes.
 
-const TAG := "vrweb"
+const TAG := "vrwml"
 const RESOURCE_TAG := "Resource"
 const EXT_RESOURCE_TAG := "ExtResource"
 const EXT_SCENE_TAG := "ExtScene"

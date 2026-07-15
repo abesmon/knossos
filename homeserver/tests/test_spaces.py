@@ -206,7 +206,7 @@ def test_page_owner_and_guest_when_home(client):
     # Владелец входит всегда (Bearer к своему серверу).
     page = client.get(path, headers=_auth(token))
     assert page.status_code == 200
-    assert "persist=" in page.text and "rev=" in page.text and "<vrweb" in page.text
+    assert "persist=" in page.text and "rev=" in page.text and "<vrwml" in page.text
 
     # Хозяин дома (в комнате пространства через свой сигналинг) — дверь открыта гостям.
     room = vrweb_scene.seed_key(url)

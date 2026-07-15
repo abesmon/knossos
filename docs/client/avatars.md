@@ -321,7 +321,7 @@ emission… — в любом месте дерева), задав ему `defau
   модель берутся из `Settings` (ник/лицо/`avatar_uri`) — те же, что уходят пирам. Тело висит
   на слое видимости `LocalAvatar.AVATAR_LAYER`: камера первого лица его исключает (`cull_mask`
   в `Player`), а камеры зеркал — рендерят. Так игрок видит себя только в отражении, как в
-  VRChat. См. зеркало в [vrweb-tags.md](../space/vrweb-tags.md#vrwebmirror--зеркало-как-в-vrchat).
+  VRChat. См. зеркало в [vrwml-tags.md](../space/vrwml-tags.md#vrwebmirror--зеркало-как-в-vrchat).
 - **UI выбора аватара.** Экран настроек ([scenes/settings.gd](../../scenes/settings.gd)) имеет
   поле «Адрес аватара» с кнопкой «✕» (сброс к дефолту `vrwebavatar://1`): правит
   `Settings.avatar_uri`, сохранение рассылает новую карточку пирам. Визуального выбора из пака

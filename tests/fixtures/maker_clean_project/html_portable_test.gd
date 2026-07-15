@@ -21,11 +21,16 @@ func _ready() -> void:
 			and output.contains("4, 0, 0")
 	var reparsed := VrwebPortableHtmlSceneCodec.build_from_path("res://roundtrip.html")
 	ok = ok and reparsed != null and bool(reparsed.get_meta(VrwebHtmlDocument.META_IMPORTED, false))
-	var unsupported_block := HtmlParser.parse("<vrweb><Camera3D/></vrweb>").find_descendant("vrweb")
+	var unsupported_block := HtmlParser.parse(
+			"<vrwml><Camera3D><Node3D name=\"Preserved\"/></Camera3D></vrwml>") \
+			.find_descendant("vrwml")
 	var unsupported := VrwebMarkupMaterializer.build(unsupported_block,
 			VrwebCompatibility.PROFILE_STRICT)
-	ok = ok and not bool(unsupported.get("ok", true)) \
-			and str(unsupported.get("errors", [])).contains("Camera3D")
+	ok = ok and bool(unsupported.get("ok", false)) \
+			and not bool(unsupported.get("complete", true)) \
+			and str(unsupported.get("warnings", [])).contains("Camera3D") \
+			and (unsupported.get("root") as Node).get_child_count() == 1 \
+			and (unsupported.get("root") as Node).get_child(0).name == "Preserved"
 	if unsupported.get("root") is Node:
 		(unsupported.root as Node).free()
 	root.free()

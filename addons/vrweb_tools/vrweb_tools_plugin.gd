@@ -155,7 +155,7 @@ func _build_export_dialog() -> void:
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
 	_file_dialog.access = EditorFileDialog.ACCESS_RESOURCES
 	_file_dialog.add_filter("*.vrwml", "VRWML scene")
-	_file_dialog.add_filter("*.html", "HTML with VRWeb wrapper")
+	_file_dialog.add_filter("*.html", "HTML with VRWML wrapper")
 	_file_dialog.add_option("HTML scene mode", PackedStringArray([
 		VrwebFormat.MODE_COMBINE,
 		VrwebFormat.MODE_EXCLUSIVE,
@@ -229,7 +229,7 @@ func _register_export_as_menu() -> void:
 	var menu := get_export_as_menu()
 	if menu.get_item_index(EXPORT_AS_VRWML_ID) >= 0:
 		return
-	menu.add_item("VRWeb Scene…", EXPORT_AS_VRWML_ID)
+	menu.add_item("VRWML Scene…", EXPORT_AS_VRWML_ID)
 	var index := menu.get_item_index(EXPORT_AS_VRWML_ID)
 	menu.set_item_metadata(index, _on_export_scene_pressed)
 
@@ -390,8 +390,8 @@ func _show_export_review(report: Dictionary, path: String, written: bool) -> voi
 	var lines: Array[String] = [
 		"Result: %s" % ("written" if written else "blocked"),
 		"Output: %s" % path,
-		"Profile: %s (catalog %s)" % [report.get("profile", ""),
-			report.get("catalog_version", "")],
+		"Profile: %s (policy %s)" % [report.get("profile", ""),
+			report.get("policy_version", "")],
 		"Packages: %d" % report.get("packages", []).size(),
 		"Assets: %d" % report.get("assets", []).size(),
 	]

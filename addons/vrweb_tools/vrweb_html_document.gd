@@ -4,7 +4,7 @@ extends RefCounted
 
 ## Lossless envelope helper for editable HTML scenes. HtmlParser intentionally normalizes
 ## markup when serializing; this scanner instead remembers the exact source range occupied by
-## the first real <vrweb> block, so saving can replace only that range byte-for-byte around it.
+## the first real <vrwml> block, so saving can replace only that range byte-for-byte around it.
 
 const META_SOURCE_PATH := "vrweb_html_source_path"
 const META_MODE := "vrweb_html_mode"
@@ -24,7 +24,7 @@ const RAW_TEXT_TAGS := {"script": true, "style": true, "textarea": true, "title"
 
 
 ## {ok,start,end,block,error}; end is exclusive. Comments and raw-text contents are skipped,
-## so strings such as `const demo = "<vrweb>"` are not mistaken for the scene block.
+## so strings such as `const demo = "<vrwml>"` are not mistaken for the scene block.
 static func locate(source: String) -> Dictionary:
 	var lower := source.to_lower()
 	var pos := 0
@@ -33,7 +33,7 @@ static func locate(source: String) -> Dictionary:
 		if not bool(token.ok):
 			return token
 		if bool(token.eof):
-			return {"ok": false, "error": "HTML не содержит <vrweb>"}
+			return {"ok": false, "error": "HTML не содержит <vrwml>"}
 		pos = int(token.end)
 		if bool(token.get("skip", false)):
 			continue
@@ -41,13 +41,13 @@ static func locate(source: String) -> Dictionary:
 		if not bool(token.closing) and RAW_TEXT_TAGS.has(name):
 			var close_at := lower.find("</" + name, pos)
 			if close_at < 0:
-				return {"ok": false, "error": "Незакрытый <%s> перед <vrweb>" % name}
+				return {"ok": false, "error": "Незакрытый <%s> перед <vrwml>" % name}
 			var close_end := _find_tag_end(source, close_at + 2 + name.length())
 			if close_end < 0:
 				return {"ok": false, "error": "Незакрытый </%s>" % name}
 			pos = close_end + 1
 			continue
-		if name != "vrweb" or bool(token.closing):
+		if name != VrwebFormat.TAG or bool(token.closing):
 			continue
 		var start := int(token.start)
 		var depth := 1
@@ -56,7 +56,7 @@ static func locate(source: String) -> Dictionary:
 			if not bool(inner.ok):
 				return inner
 			if bool(inner.eof):
-				return {"ok": false, "error": "Незакрытый <vrweb>"}
+				return {"ok": false, "error": "Незакрытый <vrwml>"}
 			pos = int(inner.end)
 			if bool(inner.get("skip", false)):
 				continue
@@ -64,20 +64,20 @@ static func locate(source: String) -> Dictionary:
 			if not bool(inner.closing) and RAW_TEXT_TAGS.has(inner_name):
 				var raw_close := lower.find("</" + inner_name, pos)
 				if raw_close < 0:
-					return {"ok": false, "error": "Незакрытый <%s> внутри <vrweb>" % inner_name}
+					return {"ok": false, "error": "Незакрытый <%s> внутри <vrwml>" % inner_name}
 				var raw_end := _find_tag_end(source, raw_close + 2 + inner_name.length())
 				if raw_end < 0:
 					return {"ok": false, "error": "Незакрытый </%s>" % inner_name}
 				pos = raw_end + 1
 				continue
-			if inner_name != "vrweb":
+			if inner_name != VrwebFormat.TAG:
 				continue
 			depth += -1 if bool(inner.closing) else 1
 			if depth == 0:
 				var finish := int(inner.end)
 				return {"ok": true, "start": start, "end": finish,
 					"block": source.substr(start, finish - start), "error": ""}
-	return {"ok": false, "error": "HTML не содержит <vrweb>"}
+	return {"ok": false, "error": "HTML не содержит <vrwml>"}
 
 
 static func replace_block(source: String, replacement: String) -> Dictionary:
