@@ -1,4 +1,4 @@
-extends Control
+extends Node
 
 ## Стартовый экран загрузки (main scene проекта). Даёт асинхронной инициализации завершиться
 ## ДО входа в main — сейчас это discovery домашнего сервера (HomeServer.refresh): он может
@@ -17,9 +17,7 @@ const MAKER_SELF_TEST_SCENE := "res://tests/test_package_demo.tscn"
 ## висящий сервер не должен держать пользователя на заставке — дождётся main.
 const MAX_WAIT_SEC := 6.0
 
-@onready var _status: Label = $Center/VBox/Status
-
-var _dots_time := 0.0
+@onready var _hub: LoadingHub = $LoadingHub
 
 
 func _ready() -> void:
@@ -27,17 +25,10 @@ func _ready() -> void:
 		print("VRWEB_MAKER_EXPORTED_SELF_TEST start")
 		get_tree().call_deferred("change_scene_to_file", MAKER_SELF_TEST_SCENE)
 		return
-	_status.text = "Подключаемся к домашнему серверу"
+	_hub.open("Подключаемся к домашнему серверу")
 	if HomeServer.server_url() == "":
-		_status.text = "Загрузка"
+		_hub.set_status("Загрузка")
 	_wait_and_go()
-
-
-func _process(delta: float) -> void:
-	# Анимация многоточия — видно, что приложение живо, а не зависло.
-	_dots_time += delta
-	var base := _status.text.rstrip(".")
-	_status.text = base + ".".repeat(1 + int(_dots_time * 2.0) % 3)
 
 
 func _wait_and_go() -> void:

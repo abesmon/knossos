@@ -11,6 +11,7 @@ const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/scripting_modules/scrip
 
 @onready var _world: Node3D = $world
 @onready var _ui: MainUI = $UI
+@onready var _loading_hub: LoadingHub = $LoadingHub
 @onready var _address: LineEdit = _ui.address
 # cancel/refresh — одно место в навбаре: во время загрузки виден cancel (прервать),
 # в покое — refresh (перезагрузить). Переключает _set_loading.
@@ -309,6 +310,7 @@ func _on_cancel() -> void:
 		return
 	_cancel_load()
 	_set_loading(false)
+	_leave_loading_hub()
 	_set_status("Загрузка отменена")
 
 
@@ -405,12 +407,17 @@ func _set_ui_focusable(focusable: bool) -> void:
 
 
 func _navigate(url: String, base: String, push_history: bool) -> void:
-	# Пузырь «ушёл сюда» роняем НЕ здесь, а в _on_fetched — когда переход фактически состоялся
-	# (страница получена). До фетча адреса могло не быть или загрузку могли отменить — лишний
-	# пузырь тогда ни к чему. См. _drop_leave_bubble и docs/ephemeral-changes.md.
+	# Пузырь «ушёл сюда» роняем до входа в хаб: после него старый мир и соединение уже сняты.
+	# См. _drop_leave_bubble и docs/ephemeral-changes.md.
 	# Любая новая навигация отменяет ещё идущую (иначе старый ответ мог бы «доехать» поверх новой).
 	if _loading:
 		_cancel_load()
+	# Переход начинается в нейтральном хабе: покинутая страница больше не видна и не
+	# продолжает исполняться, а сетевое соединение с её комнатой гарантированно закрыто.
+	# Пузырь роняем до сноса мира; здесь URL ещё до возможного HTTP-редиректа.
+	if _current_url != "":
+		_drop_leave_bubble(PageFetcher.resolve_url(url, base if base != "" else _current_url))
+	_enter_loading_hub("Загрузка %s" % url)
 	_set_loading(true)
 	_set_status("Загрузка %s …" % url)
 	if push_history:
@@ -450,11 +457,6 @@ func _drop_leave_bubble(target: String) -> void:
 
 
 func _on_fetched(html: String, final_url: String) -> void:
-	# Переход состоялся (страница получена) — ТОЛЬКО теперь роняем «пузырь» в покидаемой комнате.
-	# Делаем это до перезаписи _current_url: игрок ещё на старом месте, а p2p-меш покидаемой
-	# комнаты жив (снесёт его _join_current_room в _finish_page — до него ещё есть кадр на флаш
-	# reliable-пакета). Цель — final_url (учитывает редирект). См. docs/ephemeral-changes.md.
-	_drop_leave_bubble(final_url)
 	_current_url = final_url
 	_address.text = final_url
 	# Переход состоялся — запись истории закоммичена, она больше не «фантом» (см. _navigate).
@@ -627,16 +629,12 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 
 	var room_count: int = space.get("rooms", {}).size()
 	_set_status("%s — %d пространств, %d мс" % [final_url, room_count, dt])
+	_leave_loading_hub()
 
 	# Новая страница — старый документ консоли (и правки к нему) больше не имеют смысла.
 	if _console != null:
 		_console.on_navigated()
 
-	# Даём reliable-пакету «пузыря» (роняем его в _on_fetched, ещё в покидаемой комнате) уйти до
-	# сноса меша: join_room новой комнаты рвёт p2p-меш покидаемой синхронно, а put_packet во WebRTC
-	# улетает лишь со следующим poll меша. Один кадр = один poll → пузырь дойдёт до пиров даже на
-	# странице без внешних стилей, где _finish_page идёт синхронно из _on_fetched.
-	await get_tree().process_frame
 	# Комната мультиплеера = страница. В онлайне переключаемся на комнату нового URL
 	# (NetworkManager рвёт старые p2p-соединения и пересоздаёт mesh).
 	_join_current_room()
@@ -649,6 +647,7 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 
 func _on_failed(message: String, url: String) -> void:
 	_set_loading(false)
+	_leave_loading_hub()
 	_set_status("Ошибка: %s (%s)" % [message, url])
 
 
@@ -736,16 +735,41 @@ func _collect_meta(node: HtmlNode, out: Array) -> void:
 		_collect_meta(c, out)
 
 
-func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
-	# Сносим старое пространство, игрока сохраняем. remove_child СРАЗУ (а не только queue_free):
-	# queue_free удаляет из дерева лишь в конце кадра, а video_manager.scan(_world) ниже бежит
-	# в этом же кадре — иначе он обошёл бы старое (умирающее) поддерево vrweb и привязал бы уже
-	# привязанные экраны/мёртвые плееры (двойной connect texture_ready и freed instance в _process).
+## Переводит клиент в нейтральное состояние между страницами. В отличие от прежнего
+## in-place swap старый мир прекращает жить сразу, а не после ответа сервера/разрешений.
+func _enter_loading_hub(status: String) -> void:
+	_ui.visible = false
+	_player.process_mode = Node.PROCESS_MODE_DISABLED
+	_loading_hub.open(status)
+	_clear_world()
+	NetworkManager.disconnect_from_server()
+
+
+## Возвращает обычную камеру, HUD и обработку игрока после сборки либо ошибки/отмены.
+func _leave_loading_hub() -> void:
+	_loading_hub.close()
+	_player.process_mode = Node.PROCESS_MODE_INHERIT
+	_ui.visible = true
+
+
+## Удаляет всё содержимое страницы, сохраняя локального Player как контроллер следующего мира.
+## remove_child нужен сразу: queue_free удаляет из дерева только в конце кадра.
+func _clear_world() -> void:
+	_world_gen = null
+	_remote_view = null
 	for child in _world.get_children():
 		if child == _player:
 			continue
 		_world.remove_child(child)
 		child.queue_free()
+
+
+func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
+	# Сносим старое пространство, игрока сохраняем. remove_child СРАЗУ (а не только queue_free):
+	# queue_free удаляет из дерева лишь в конце кадра, а video_manager.scan(_world) ниже бежит
+	# в этом же кадре — иначе он обошёл бы старое (умирающее) поддерево vrweb и привязал бы уже
+	# привязанные экраны/мёртвые плееры (двойной connect texture_ready и freed instance в _process).
+	_clear_world()
 
 	# Лоадер картинок живёт внутри мира: при следующей навигации мир сносится вместе с ним,
 	# незавершённые загрузки старой страницы умирают сами.
@@ -1318,6 +1342,8 @@ func _on_aim_target_changed(active: bool, hint: String) -> void:
 func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
+	if _loading_hub != null and _loading_hub.visible:
+		_loading_hub.set_status(text)
 	Log.info("main", text)
 
 

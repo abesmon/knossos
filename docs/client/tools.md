@@ -58,7 +58,7 @@ Player (хаб ввода: _unhandled_input, именованные действ
   Состояния `IDLE → AIMING → AWAITING_FILE → IDLE`; в `AWAITING_FILE` инструмент ждёт
   `provide_file(ok, path)` от main (пикер — UI, живёт в main; спавн артефакта — в инструменте).
 - **BubbleTool** — системный: запрос активации всегда отклоняет (слота нет), вызывается
-  программно (`drop(target_url)` из `main._drop_leave_bubble` при состоявшемся переходе).
+  программно (`drop(target_url)` из `main._drop_leave_bubble` перед входом в хаб перехода).
 
 ## Границы
 

@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3 uid="uid://c84gpactvtr31"]
+[gd_scene load_steps=4 format=3 uid="uid://c84gpactvtr31"]
 
 [ext_resource type="Script" uid="uid://bnjojsmm0dv7e" path="res://scenes/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/ui/main_ui.tscn" id="2_ui"]
+[ext_resource type="PackedScene" path="res://scenes/ui/loading_hub.tscn" id="3_hub"]
 
 [node name="main" type="Node" unique_id=1839757088]
 script = ExtResource("1_main")
@@ -10,3 +11,6 @@ script = ExtResource("1_main")
 layout_mode = 1
 
 [node name="world" type="Node3D" parent="." unique_id=1830425431]
+
+[node name="LoadingHub" parent="." instance=ExtResource("3_hub")]
+visible = false
