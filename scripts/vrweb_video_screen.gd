@@ -128,7 +128,7 @@ func _apply_aspect(tex: Texture2D) -> void:
 	_layout_ui()
 	_auto_sized = true
 	if old_size.distance_to(_quad.size) > 0.01:
-		size_changed.emit(_quad.size)
+		notify_size_changed(_quad.size)
 
 
 ## Общий интерфейс взаимодействия по лучу игрока. Клик по видимому прогресс-бару — перемотка

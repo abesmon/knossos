@@ -101,8 +101,8 @@ func fit_view() -> void:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), COLOR_BG)
 	if _rooms.is_empty():
-		var font := get_theme_default_font()
-		draw_string(font, Vector2(24, 36), "Пусто — загрузите страницу",
+		var empty_state_font := get_theme_default_font()
+		draw_string(empty_state_font, Vector2(24, 36), "Пусто — загрузите страницу",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, COLOR_TEXT_DIM)
 		return
 
@@ -117,9 +117,9 @@ func _draw() -> void:
 	_draw_corridors()
 
 	# Подписи поверх всего.
-	var font := get_theme_default_font()
+	var label_font := get_theme_default_font()
 	for id in _rooms:
-		_draw_label(id, font)
+		_draw_label(id, label_font)
 
 
 func _draw_grid() -> void:

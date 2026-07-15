@@ -208,8 +208,8 @@ func _screen_to_graph(p: Vector2) -> Vector2:
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), COLOR_BG)
 	if _positions.is_empty():
-		var font := get_theme_default_font()
-		draw_string(font, Vector2(24, 36), "Граф пуст — загрузите страницу",
+		var empty_state_font := get_theme_default_font()
+		draw_string(empty_state_font, Vector2(24, 36), "Граф пуст — загрузите страницу",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, COLOR_TEXT_DIM)
 		return
 
@@ -226,9 +226,9 @@ func _draw() -> void:
 			draw_line(from, to, COLOR_EDGE, maxf(1.5 * _zoom, 1.0), true)
 
 	# Узлы поверх рёбер.
-	var font := get_theme_default_font()
+	var node_font := get_theme_default_font()
 	for id in _positions:
-		_draw_node(id, font)
+		_draw_node(id, node_font)
 
 
 func _draw_node(id: int, font: Font) -> void:

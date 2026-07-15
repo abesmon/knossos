@@ -275,27 +275,28 @@ func save() -> void:
 
 ## Стабильный ключ exact-code правила. URL ресурса намеренно не входит: redirect/CDN может
 ## меняться, но доверие всё равно ограничено origin страницы, module id и проверенным hash.
-func scripting_module_rule_key(origin: String, module_id: String, hash: String) -> String:
-	return (origin + "\n" + module_id + "\n" + hash).sha256_text()
+func scripting_module_rule_key(origin: String, module_id: String, content_hash: String) -> String:
+	return (origin + "\n" + module_id + "\n" + content_hash).sha256_text()
 
 
-func scripting_module_decision(origin: String, module_id: String, hash: String) -> String:
+func scripting_module_decision(origin: String, module_id: String, content_hash: String) -> String:
 	if scripting_module_policy == SCRIPT_POLICY_ALLOW_ALL:
 		return "allow"
 	if scripting_module_policy == SCRIPT_POLICY_BLOCK_ALL:
 		return "block"
-	var rule = scripting_module_rules.get(scripting_module_rule_key(origin, module_id, hash), {})
+	var rule = scripting_module_rules.get(
+			scripting_module_rule_key(origin, module_id, content_hash), {})
 	return str(rule.get("decision", "")) if typeof(rule) == TYPE_DICTIONARY else ""
 
 
 func remember_scripting_module_decision(origin: String, module: Dictionary, decision: String) -> void:
 	if decision not in ["allow", "block"]:
 		return
-	var hash := str(module.get("hash", ""))
+	var content_hash := str(module.get("hash", ""))
 	var id := str(module.get("id", ""))
-	scripting_module_rules[scripting_module_rule_key(origin, id, hash)] = {
+	scripting_module_rules[scripting_module_rule_key(origin, id, content_hash)] = {
 		"decision": decision, "origin": origin, "module_id": id,
-		"resource_url": str(module.get("resolved_url", "inline")), "hash": hash,
+		"resource_url": str(module.get("resolved_url", "inline")), "hash": content_hash,
 		"updated_at": int(Time.get_unix_time_from_system()),
 	}
 	save()

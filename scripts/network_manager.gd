@@ -618,7 +618,7 @@ func _normalize_replicated_error(code: String) -> String:
 
 
 func _allow_replicated_command(sender: int) -> bool:
-	var second := int(Time.get_ticks_msec() / 1000)
+	var second := floori(Time.get_ticks_msec() / 1000.0)
 	var rate: Dictionary = _replicated_command_rates.get(sender, {"second": second, "count": 0})
 	if int(rate["second"]) != second:
 		rate = {"second": second, "count": 0}
@@ -627,14 +627,14 @@ func _allow_replicated_command(sender: int) -> bool:
 	return int(rate["count"]) <= MAX_REPLICATED_COMMANDS_PER_SECOND
 
 
-func _metric(name: String, amount: int = 1) -> void:
+func _metric(metric_name: String, amount: int = 1) -> void:
 	if _replicated_metrics_started_ms == 0:
 		_replicated_metrics_started_ms = Time.get_ticks_msec()
-	_replicated_metrics[name] = int(_replicated_metrics.get(name, 0)) + amount
+	_replicated_metrics[metric_name] = int(_replicated_metrics.get(metric_name, 0)) + amount
 
 
-func _metric_max(name: String, value: int) -> void:
-	_replicated_metrics[name] = maxi(int(_replicated_metrics.get(name, 0)), value)
+func _metric_max(metric_name: String, value: int) -> void:
+	_replicated_metrics[metric_name] = maxi(int(_replicated_metrics.get(metric_name, 0)), value)
 
 
 func _fail_replicated_pending(code: String) -> void:
@@ -1631,17 +1631,17 @@ func _recv_replicated_delta(delta: Dictionary) -> void:
 
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_replicated_snapshot_begin(transfer_id: int, total_bytes: int, chunks: int,
-		hash: PackedByteArray) -> void:
+		content_hash: PackedByteArray) -> void:
 	if not sender_is_authority() or transfer_id <= 0 or total_bytes <= 0 \
 			or total_bytes > MAX_REPLICATED_SNAPSHOT_BYTES or chunks <= 0 \
 			or chunks != ceili(float(total_bytes) / REPLICATED_SNAPSHOT_CHUNK_BYTES) \
-			or hash.size() != 32:
+			or content_hash.size() != 32:
 		_metric("snapshot_begin_invalid_count")
 		return
 	var parts: Array[PackedByteArray] = []
 	parts.resize(chunks)
 	_replicated_snapshot_rx = {"id": transfer_id, "sender": multiplayer.get_remote_sender_id(),
-		"total": total_bytes, "count": chunks, "hash": hash, "parts": parts, "received": 0,
+		"total": total_bytes, "count": chunks, "hash": content_hash, "parts": parts, "received": 0,
 		"deadline": Time.get_ticks_msec() + REPLICATED_SNAPSHOT_TIMEOUT_MS,
 		"started": Time.get_ticks_msec()}
 	_metric("snapshot_begin_count")

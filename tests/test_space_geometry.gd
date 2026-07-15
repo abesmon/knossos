@@ -296,7 +296,7 @@ func _count_bodies(node: Node) -> int:
 
 func _expect(case_name: String, what: String, ok: bool, detail: String) -> void:
 	if ok:
-		print("  ✓ %s" % what)
+		print("  ✓ [%s] %s" % [case_name, what])
 	else:
 		_fail += 1
-		print("  ✗ %s — %s" % [what, detail])
+		print("  ✗ [%s] %s — %s" % [case_name, what, detail])

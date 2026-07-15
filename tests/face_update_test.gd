@@ -30,7 +30,7 @@ func _ready() -> void:
 		await _run_receiver()
 
 
-func _on_identity(id: int, _nick: String, face: Texture2D, _uri: String) -> void:
+func _on_identity(_peer_id: int, _nick: String, face: Texture2D, _uri: String) -> void:
 	if _role != "receiver" or face == null:
 		return
 	var crc := _tex_crc(face)

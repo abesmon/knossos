@@ -14,7 +14,7 @@ var timers: ScriptingModuleTimerAPI
 var assets: ScriptingModuleAssetAPI
 var input: ScriptingModuleInputAPI
 var features: ScriptingModuleFeaturesAPI
-var log: ScriptingModuleLogAPI
+var _logger: ScriptingModuleLogAPI
 var _session: ScriptingModuleSession
 var valid := true
 var mounted := false
@@ -35,7 +35,15 @@ func _init(p_module_id: String, p_hash: String, p_root: Node,
 	assets = ScriptingModuleAssetAPI.new(module_root, module_assets)
 	input = ScriptingModuleInputAPI.new(p_root)
 	features = ScriptingModuleFeaturesAPI.new(capabilities)
-	log = ScriptingModuleLogAPI.new(module_id, module_hash)
+	_logger = ScriptingModuleLogAPI.new(module_id, module_hash)
+
+
+## `log` is part of the stable scripting API. Resolve it dynamically so the public name does not
+## shadow Godot's global log() function inside the host implementation.
+func _get(property_name: StringName) -> Variant:
+	if property_name == &"log":
+		return _logger
+	return null
 
 
 func has(feature: String) -> bool:
@@ -53,7 +61,7 @@ func scene_root() -> Node:
 
 func log_message(message: String) -> void:
 	if valid:
-		log.info(message)
+		_logger.info(message)
 
 
 func invalidate() -> void:
@@ -65,5 +73,5 @@ func invalidate() -> void:
 	assets.invalidate()
 	scene.invalidate()
 	features.invalidate()
-	log.invalidate()
+	_logger.invalidate()
 	root = null

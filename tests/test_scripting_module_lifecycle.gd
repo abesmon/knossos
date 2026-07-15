@@ -32,6 +32,7 @@ func unmount():
 	_eq(context.features.has("vrweb/scene/1"), true, "context advertises portable scene API")
 	_eq(context.features.has("godot/engine/4"), true, "trusted runtime advertises Godot API")
 	_eq(context.features.has("vrweb/unknown/1"), false, "unknown capability is absent")
+	_eq(context.log is ScriptingModuleLogAPI, true, "context exposes stable log facade")
 	var target := StaticBody3D.new()
 	component.add_child(target)
 	var activation := {"seen": false}
@@ -56,8 +57,8 @@ func unmount():
 	_eq(context.state.ensure_object("lamp", "switch", {"enabled": false}), true,
 			"module registers namespaced object")
 	_eq(context.state.read("lamp", "switch").get("enabled"), false, "module reads state")
-	var timer_called := false
-	var timer_id := context.timers.start(10.0, func(): timer_called = true)
+	var timer_state := {"called": false}
+	var timer_id := context.timers.start(10.0, func(): timer_state.called = true)
 	_eq(context.has("timers/1"), true, "context advertises lifecycle-safe timers")
 	_eq(timer_id > 0, true, "context starts timer")
 	component.queue_free()
@@ -66,7 +67,7 @@ func unmount():
 	_eq(context.valid, false, "context invalidated after unmount")
 	_eq(context.scene_root(), null, "invalid context releases scene root")
 	_eq(context.timers.cancel(timer_id), false, "unmount cancels owned timers")
-	_eq(timer_called, false, "cancelled timer callback was not invoked")
+	_eq(timer_state.called, false, "cancelled timer callback was not invoked")
 	_eq(context.assets.has("anything"), false, "unmount invalidates asset facade")
 	_eq(is_instance_valid(target), false, "owned input target leaves with component")
 	_eq(context_second.state.is_closed(), false, "first component does not close shared state")

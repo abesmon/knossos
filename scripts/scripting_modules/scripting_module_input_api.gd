@@ -14,11 +14,13 @@ func _init(root: Node) -> void:
 	_root = root
 
 
-func on_activate(target: Node, callback: Callable, hint := "") -> bool:
+func on_activate(target: Node, callback: Callable, activation_hint := "") -> bool:
 	if not _valid or not _owns(target) or not callback.is_valid():
 		return false
 	target.set_meta(META, self)
-	_targets[target.get_instance_id()] = {"node": target, "callback": callback, "hint": str(hint)}
+	_targets[target.get_instance_id()] = {
+		"node": target, "callback": callback, "hint": str(activation_hint),
+	}
 	return true
 
 

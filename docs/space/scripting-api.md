@@ -22,6 +22,10 @@
 Старые `context.has("lifecycle/1"|"scene-root/1"|"replicated-state/1"|...)` оставлены как
 совместимые aliases. Новый код использует `context.features.has("vrweb/.../1")`.
 
+Имя `context.log` остаётся частью стабильного контракта. В host-реализации facade разрешается
+динамически, чтобы не затенять глобальную функцию Godot `log()`, но для module-кода это по-прежнему
+обычное свойство с методами `debug/info/warning/error`.
+
 ## Manifest
 
 Package объявляет обязательные и опциональные capabilities:

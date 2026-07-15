@@ -17,7 +17,8 @@ World-space UI - это любой плоский интерфейс или ме
 - общий контракт `pointer_enter`, `hover_at`, `pointer_exit`, `interact_at`, `scroll_by`,
   `is_active_at`, `aim_hint_at`;
 - сигнал `size_changed` для позднего reflow, когда фактический размер становится известен
-  после загрузки текстуры, кадра видео или layout текста.
+  после загрузки текстуры, кадра видео или layout текста; наследники вызывают общий
+  `notify_size_changed(new_size)`, а не эмитят базовый сигнал напрямую.
 
 [`WorldUiCanvas`](../../actors/world_ui/world_ui_canvas.gd) наследуется от `WorldUiSurface`
 и добавляет reusable 2D canvas на `SubViewport`: фронт/изнанку, коллайдер, unlit-материал с

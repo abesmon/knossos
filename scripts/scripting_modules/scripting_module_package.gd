@@ -10,10 +10,11 @@ const MAX_UNPACKED_BYTES := 64 * 1024 * 1024
 
 
 static func unpack(module: Dictionary) -> Dictionary:
-	var hash := str(module.get("hash", ""))
-	if not ScriptingModuleCache.valid_hash(hash):
+	var module_hash := str(module.get("hash", ""))
+	if not ScriptingModuleCache.valid_hash(module_hash):
 		return _error("invalid_hash")
-	var archive_path := Sandbox.resolve(str(module.get("cache_path", ScriptingModuleCache.path_for(hash))))
+	var archive_path := Sandbox.resolve(str(module.get("cache_path",
+			ScriptingModuleCache.path_for(module_hash))))
 	var reader := ZIPReader.new()
 	if reader.open(archive_path) != OK:
 		return _error("invalid_zip")
@@ -58,11 +59,11 @@ static func unpack(module: Dictionary) -> Dictionary:
 			return _error("missing_asset_file")
 	# Registry must load from the same sandboxed path into which files are extracted. Keeping
 	# unsandboxed user:// here works only when Sandbox.id() is empty and breaks isolated clients.
-	var root := Sandbox.resolve(UNPACK_ROOT.path_join(hash))
-	var absolute_root := root
-	DirAccess.make_dir_recursive_absolute(absolute_root)
+	var module_root := Sandbox.resolve(UNPACK_ROOT.path_join(module_hash))
+	var absolute_module_root := module_root
+	DirAccess.make_dir_recursive_absolute(absolute_module_root)
 	for path in contents:
-		var output := absolute_root.path_join(str(path))
+		var output := absolute_module_root.path_join(str(path))
 		DirAccess.make_dir_recursive_absolute(output.get_base_dir())
 		var file := FileAccess.open(output, FileAccess.WRITE)
 		if file == null:
@@ -71,7 +72,7 @@ static func unpack(module: Dictionary) -> Dictionary:
 		file.close()
 	module["manifest"] = parsed.manifest
 	module["exports"] = parsed.manifest.exports
-	module["module_root"] = root
+	module["module_root"] = module_root
 	return {"ok": true, "module": module, "error": "", "errors": []}
 
 

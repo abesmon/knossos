@@ -958,7 +958,7 @@ func _setup_net() -> void:
 
 	_settings_btn.pressed.connect(_open_settings)
 
-	_build_chat_ui(_ui)
+	_build_chat_ui()
 
 	Settings.changed.connect(_on_settings_changed)
 	# Discovery домашнего сервера завершился (в т.ч. после смены адреса в настройках) —
@@ -1068,7 +1068,7 @@ func _on_connection_changed(online: bool) -> void:
 
 # --- Чат ---
 
-func _build_chat_ui(ui: Control) -> void:
+func _build_chat_ui() -> void:
 	# Текст можно выделять мышью и копировать (Ctrl/Cmd+C). Для этого лог должен принимать
 	# события мыши (не IGNORE) — заодно это включает клики по ссылкам ниже.
 	# Ссылки в сообщениях ([url]…[/url], см. _linkify) подчёркиваем и делаем кликабельными;

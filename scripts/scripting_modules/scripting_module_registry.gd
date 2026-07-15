@@ -41,9 +41,9 @@ func prepare(definitions: Array, mode: ScriptMode,
 		if str(module.get("runtime", "")) != ScriptingModuleCollector.RUNTIME_TRUSTED:
 			errors.append("module «%s»: runtime ещё не поддержан" % str(module.get("id", "")))
 			continue
-		var hash := str(module.get("hash", ""))
+		var module_hash := str(module.get("hash", ""))
 		var allowed := mode == ScriptMode.ALLOW_ALL \
-				or (mode == ScriptMode.SELECTED and selected_hashes.has(hash))
+				or (mode == ScriptMode.SELECTED and selected_hashes.has(module_hash))
 		if not allowed:
 			pending.append(module)
 			continue
@@ -62,7 +62,7 @@ func prepare(definitions: Array, mode: ScriptMode,
 			continue
 		_modules[str(module.get("id", ""))] = {
 			"definition": module,
-			"session": ScriptingModuleSession.new(str(module.get("id", "")), hash),
+			"session": ScriptingModuleSession.new(str(module.get("id", "")), module_hash),
 			"exports": {"default": {"script": script,
 				"base": str(module.get("exports", {}).get("default", {}).get("base", "Node"))}},
 		}

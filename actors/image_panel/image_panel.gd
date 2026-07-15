@@ -180,7 +180,7 @@ func _on_texture(tex: Texture2D) -> void:
 	_label.visible = false
 	_update_layout()
 	if old_size.distance_to(_quad.size) > 0.01:
-		size_changed.emit(_quad.size)
+		notify_size_changed(_quad.size)
 
 
 ## true, если у текстуры есть альфа-канал (значит, может быть прозрачность).

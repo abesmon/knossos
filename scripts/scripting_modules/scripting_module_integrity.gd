@@ -16,21 +16,21 @@ static func verify(module: Dictionary, page_url: String, resolved_url: String,
 	if str(module.get("kind", "")) == "inline":
 		return _result(true, "ok", actual_hex, warnings, true, actual_sri)
 
-	var same_origin := same_origin(page_url, resolved_url)
+	var is_same_origin := same_origin(page_url, resolved_url)
 	var expected := str(module.get("integrity", "")).strip_edges()
-	if not same_origin and expected.is_empty():
+	if not is_same_origin and expected.is_empty():
 		return _result(false, "cross_origin_integrity_required", actual_hex, warnings, false, actual_sri)
 	if not expected.is_empty() and expected != actual_sri:
-		if same_origin:
+		if is_same_origin:
 			warnings.append("same-origin integrity не совпадает: ожидался %s, получен %s" \
 					% [expected, actual_sri])
 		else:
 			return _result(false, "integrity_mismatch", actual_hex, warnings, false, actual_sri)
-	if same_origin and not previous_hash.is_empty() and previous_hash != actual_hex:
+	if is_same_origin and not previous_hash.is_empty() and previous_hash != actual_hex:
 		warnings.append("same-origin module изменился: ранее %s, сейчас %s" \
 				% [previous_hash, actual_hex])
 	return _result(true, "ok_with_warning" if not warnings.is_empty() else "ok",
-			actual_hex, warnings, same_origin, actual_sri)
+			actual_hex, warnings, is_same_origin, actual_sri)
 
 
 static func sri_sha256(bytes: PackedByteArray) -> String:
@@ -78,7 +78,7 @@ static func same_origin(page_url: String, resource_url: String) -> bool:
 	return not page_origin.is_empty() and page_origin == origin_of(resource_url)
 
 
-static func _result(allowed: bool, code: String, hash: String, warnings: Array[String],
-		same_origin: bool, sri: String) -> Dictionary:
-	return {"allowed": allowed, "code": code, "hash": hash, "sri": sri,
-		"warnings": warnings, "same_origin": same_origin}
+static func _result(allowed: bool, code: String, content_hash: String, warnings: Array[String],
+		is_same_origin: bool, sri: String) -> Dictionary:
+	return {"allowed": allowed, "code": code, "hash": content_hash, "sri": sri,
+		"warnings": warnings, "same_origin": is_same_origin}

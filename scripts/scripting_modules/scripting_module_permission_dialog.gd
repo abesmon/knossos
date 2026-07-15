@@ -98,9 +98,9 @@ func _add_row(parent: VBoxContainer, module: Dictionary) -> void:
 	row.add_theme_constant_override("separation", 12)
 	var info := VBoxContainer.new()
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var name := Label.new()
-	name.text = str(module.get("id", "без имени"))
-	info.add_child(name)
+	var module_name_label := Label.new()
+	module_name_label.text = str(module.get("id", "без имени"))
+	info.add_child(module_name_label)
 	var source := Label.new()
 	var url := str(module.get("resolved_url", "inline-код страницы"))
 	source.text = url
@@ -109,17 +109,17 @@ func _add_row(parent: VBoxContainer, module: Dictionary) -> void:
 	source.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
 	info.add_child(source)
 	var fingerprint_row := HBoxContainer.new()
-	var hash := str(module.get("hash", ""))
+	var module_hash := str(module.get("hash", ""))
 	var fingerprint := Label.new()
-	fingerprint.text = "SHA-256: " + _short_fingerprint(hash)
-	fingerprint.tooltip_text = "Полный SHA-256:\n" + hash
+	fingerprint.text = "SHA-256: " + _short_fingerprint(module_hash)
+	fingerprint.tooltip_text = "Полный SHA-256:\n" + module_hash
 	fingerprint.add_theme_color_override("font_color", Color(0.8, 0.84, 0.9))
 	fingerprint_row.add_child(fingerprint)
 	var copy := Button.new()
 	copy.text = "Копировать hash"
-	copy.disabled = hash.is_empty()
+	copy.disabled = module_hash.is_empty()
 	copy.tooltip_text = "Скопировать полный SHA-256 для сверки с поставщиком"
-	copy.pressed.connect(func(): DisplayServer.clipboard_set(hash))
+	copy.pressed.connect(func(): DisplayServer.clipboard_set(module_hash))
 	fingerprint_row.add_child(copy)
 	info.add_child(fingerprint_row)
 	row.add_child(info)
@@ -134,12 +134,12 @@ func _add_row(parent: VBoxContainer, module: Dictionary) -> void:
 	parent.add_child(row)
 
 
-static func _short_fingerprint(hash: String) -> String:
-	if hash.is_empty():
+static func _short_fingerprint(content_hash: String) -> String:
+	if content_hash.is_empty():
 		return "не вычислен"
-	if hash.length() <= 27:
-		return hash
-	return hash.left(12) + "…" + hash.right(12)
+	if content_hash.length() <= 27:
+		return content_hash
+	return content_hash.left(12) + "…" + content_hash.right(12)
 
 
 func _set_all(index: int) -> void:

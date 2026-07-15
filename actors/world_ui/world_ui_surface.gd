@@ -38,6 +38,12 @@ func ui_center_local() -> Vector3:
 	return Vector3.ZERO
 
 
+## Наследники сообщают об уточнённом размере через общий hook, чтобы контракт сигнала оставался
+## сосредоточен в базовой поверхности.
+func notify_size_changed(new_size: Vector2) -> void:
+	size_changed.emit(new_size)
+
+
 ## Мировая точка физического луча -> UV интерфейса: (0,0) сверху слева, (1,1) снизу справа.
 func world_to_ui_uv(point: Vector3) -> Vector2:
 	var size := ui_size()

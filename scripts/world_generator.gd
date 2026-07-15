@@ -966,8 +966,8 @@ func _placement_world(id: int, placement: Dictionary, obj: Dictionary, size: Vec
 	if placement.has("slot"):
 		var slot: Dictionary = placement["slot"]
 		var cell: Vector2i = slot["cell"]
-		var pull: Vector2i = slot["pull"]
-		var pull_off := Vector3(pull.x, 0.0, pull.y) * (GRID * 0.5 - PULL_INSET)
+		var slot_pull: Vector2i = slot["pull"]
+		var pull_off := Vector3(slot_pull.x, 0.0, slot_pull.y) * (GRID * 0.5 - PULL_INSET)
 		return _cell_world(cell.x + 0.5, cell.y + 0.5) + pull_off + Vector3(0, root_y, 0)
 
 	var boxes: Array = _wall_boxes.get(id, [])
@@ -975,13 +975,13 @@ func _placement_world(id: int, placement: Dictionary, obj: Dictionary, size: Vec
 	if box_i < 0 or box_i >= boxes.size():
 		return _positions.get(id, Vector3.ZERO)
 	var box: Dictionary = boxes[box_i]
-	var pull: Vector2i = box["pull"]
+	var wall_pull: Vector2i = box["pull"]
 	var along: float = float(placement.get("along", GRID * 0.5))
-	if pull.x != 0:
-		var x := _cell_world(float(box["fixed"]) + 0.5, 0).x + float(pull.x) * (GRID * 0.5 - PULL_INSET)
+	if wall_pull.x != 0:
+		var x := _cell_world(float(box["fixed"]) + 0.5, 0).x + float(wall_pull.x) * (GRID * 0.5 - PULL_INSET)
 		var z := _cell_world(0, float(box["vary0"])).z + along
 		return Vector3(x, root_y, z)
-	var z2 := _cell_world(0, float(box["fixed"]) + 0.5).z + float(pull.y) * (GRID * 0.5 - PULL_INSET)
+	var z2 := _cell_world(0, float(box["fixed"]) + 0.5).z + float(wall_pull.y) * (GRID * 0.5 - PULL_INSET)
 	var x2 := _cell_world(float(box["vary0"]), 0).x + along
 	return Vector3(x2, root_y, z2)
 

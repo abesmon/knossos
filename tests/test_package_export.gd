@@ -40,11 +40,12 @@ func _ready() -> void:
 	root.free()
 	var duplicate_root := Node3D.new()
 	for index in 2:
-		var duplicate := Node3D.new()
-		duplicate.set_script(script)
-		duplicate.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_PACKAGE)
-		duplicate.set_meta(VrwebExporter.META_SCRIPT_ID, "duplicate.package")
-		duplicate_root.add_child(duplicate)
+		var duplicate_module_node := Node3D.new()
+		duplicate_module_node.set_script(script)
+		duplicate_module_node.set_meta(VrwebExporter.META_SCRIPT_MODE,
+				VrwebExporter.SCRIPT_MODE_PACKAGE)
+		duplicate_module_node.set_meta(VrwebExporter.META_SCRIPT_ID, "duplicate.package")
+		duplicate_root.add_child(duplicate_module_node)
 	var failed_report := VrwebExporter.export_scene_report(duplicate_root,
 			VrwebBuilder.MODE_EXCLUSIVE, output)
 	_eq(failed_report.ok, false, "duplicate package id fails structured report")

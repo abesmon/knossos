@@ -478,7 +478,7 @@ func _refit() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var new_size := _current_size_m()
 	if old_size.distance_to(new_size) > 0.01:
-		size_changed.emit(new_size)
+		notify_size_changed(new_size)
 
 
 func _current_size_m() -> Vector2:
