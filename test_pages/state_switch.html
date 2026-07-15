@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — Replicated State switch</title>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <MeshInstance3D mesh="SubResource:::FloorMesh"
+                    transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0.05,0)">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::FloorShape"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+
+    <WorldEnvironment environment="SubResource:::Environment"/>
+    <DirectionalLight3D rotation_degrees="Vector3(-55,-25,0)" light_energy="0.7"/>
+
+    <!-- Вся предметная реализация находится в странице. Knossos знает только общие
+         state/action API, state DSL и стандартные Godot-узлы. -->
+    <Node3D name="LightSwitch"
+            transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1.25,-4)">
+      <!-- State — лишь невизуальная часть предмета. Его bindings свободно адресуют соседей. -->
+      <VRWebReplicatedState name="State" id="demo-light" schema="demo.light-switch" version="1">
+        <StateField name="enabled" type="bool" default="false"/>
+        <StateCommand name="toggle" operation="toggle" field="enabled"/>
+
+        <StateBinding field="enabled" target="../RedLamp" property="visible"
+                      when_true="false" when_false="true"/>
+        <StateBinding field="enabled" target="../GreenLamp" property="visible"
+                      when_true="true" when_false="false"/>
+        <StateBinding field="enabled" target="../RedStatus" property="visible"
+                      when_true="false" when_false="true"/>
+        <StateBinding field="enabled" target="../GreenStatus" property="visible"
+                      when_true="true" when_false="false"/>
+      </VRWebReplicatedState>
+
+      <!-- Интеракция — отдельный потребитель state и не обязана владеть лампами. -->
+      <VRWebStateAction name="Button" state="../State" command="toggle"
+                        hint="Переключить общий свет" size="2.4:0.9">
+        <MeshInstance3D mesh="SubResource:::ButtonMesh"
+                        material_override="SubResource:::ButtonMaterial">
+          <Label3D position="Vector3(0,0,0.071)" text="ПЕРЕКЛЮЧИТЬ"
+                   font_size="48" outline_size="10" pixel_size="0.005"/>
+        </MeshInstance3D>
+        <CollisionShape3D name="Collision" shape="SubResource:::ButtonShape"/>
+      </VRWebStateAction>
+
+      <MeshInstance3D name="RedLamp" position="Vector3(0,1.65,0)"
+                      mesh="SubResource:::LampMesh" material_override="SubResource:::RedMaterial">
+        <OmniLight3D light_color="Color(0.95,0.08,0.05,1)" omni_range="8"
+                     light_energy="4" shadow_enabled="true"/>
+      </MeshInstance3D>
+      <MeshInstance3D name="GreenLamp" position="Vector3(0,1.65,0)" visible="false"
+                      mesh="SubResource:::LampMesh" material_override="SubResource:::GreenMaterial">
+        <OmniLight3D light_color="Color(0.08,0.95,0.18,1)" omni_range="8"
+                     light_energy="4" shadow_enabled="true"/>
+      </MeshInstance3D>
+      <Label3D name="RedStatus" position="Vector3(0,0.72,0)" text="СВЕТ: КРАСНЫЙ"
+               modulate="Color(0.95,0.08,0.05,1)" font_size="44" outline_size="10" pixel_size="0.005"/>
+      <Label3D name="GreenStatus" position="Vector3(0,0.72,0)" text="СВЕТ: ЗЕЛЁНЫЙ"
+               modulate="Color(0.08,0.95,0.18,1)" visible="false"
+               font_size="44" outline_size="10" pixel_size="0.005"/>
+    </Node3D>
+
+    <Label3D text="REPlicated State: общий переключатель"
+             position="Vector3(0,3.6,-4)" font_size="52" pixel_size="0.006"/>
+    <Label3D text="Нажмите кнопку в любом экземпляре — цвет сменится у всех"
+             position="Vector3(0,3.1,-4)" font_size="32" pixel_size="0.005"/>
+
+    <VRWebSpawner mode="first">
+      <SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1.6,2)"/>
+    </VRWebSpawner>
+
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(14,0.1,14)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(14,0.1,14)"/>
+    <Resource id="ButtonMesh" type="BoxMesh" size="Vector3(2.4,0.9,0.12)"/>
+    <Resource id="ButtonShape" type="BoxShape3D" size="Vector3(2.4,0.9,0.16)"/>
+    <Resource id="LampMesh" type="SphereMesh" radius="0.52" height="1.04"/>
+    <Resource id="ButtonMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.12,0.16,0.24,1)" metallic="0.2" roughness="0.45"/>
+    <Resource id="RedMaterial" type="StandardMaterial3D" albedo_color="Color(0.95,0.08,0.05,1)"
+              emission_enabled="true" emission="Color(0.95,0.08,0.05,1)" emission_energy_multiplier="3"/>
+    <Resource id="GreenMaterial" type="StandardMaterial3D" albedo_color="Color(0.08,0.95,0.18,1)"
+              emission_enabled="true" emission="Color(0.08,0.95,0.18,1)" emission_energy_multiplier="3"/>
+    <Resource id="Environment" type="Environment"
+              background_mode="2" background_color="Color(0.025,0.035,0.06,1)"
+              ambient_light_source="3" ambient_light_color="Color(0.18,0.22,0.35,1)"
+              ambient_light_energy="0.55"/>
+  </vrwml>
+</body>
+</html>

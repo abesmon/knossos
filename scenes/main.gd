@@ -5,25 +5,34 @@ extends Node
 ## Связывает сервисы; сам логику трансляции не содержит.
 
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
-const SETTINGS_SCENE := preload("res://scenes/settings.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
-const SPACE_CONSOLE_SCRIPT := preload("res://scripts/space_console.gd")
+const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/scripting_modules/scripting_module_permission_dialog.gd")
 
 @onready var _world: Node3D = $world
-@onready var _address: LineEdit = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/address bar"
+@onready var _ui: MainUI = $UI
+@onready var _loading_hub: LoadingHub = $LoadingHub
+@onready var _address: LineEdit = _ui.address
 # cancel/refresh — одно место в навбаре: во время загрузки виден cancel (прервать),
 # в покое — refresh (перезагрузить). Переключает _set_loading.
-@onready var _cancel: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/cancel"
-@onready var _refresh: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/PanelContainer/HBoxContainer/refresh"
-@onready var _back_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/back_btn"
-@onready var _fwd_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/fwd_btn"
-@onready var _settings_btn: Button = $"UI/PanelContainer/MarginContainer/HBoxContainer/settings"
+@onready var _cancel: Button = _ui.cancel
+@onready var _refresh: Button = _ui.refresh
+@onready var _back_btn: Button = _ui.back_button
+@onready var _fwd_btn: Button = _ui.forward_button
+@onready var _settings_btn: Button = _ui.settings_button
 
 var _fetcher: PageFetcher
 # Загрузчик внешних CSS (docs/css-cascade.md). Постоянный (не в _world): стили нужны до
 # сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
 var _css_fetcher: CssFetcher
+var _module_fetcher: ScriptingModuleFetcher
+var _script_permission_dialog: ScriptingModulePermissionDialog
+var _script_permission_focus_token := 0
+var _address_focus_token := 0
+var _settings_focus_token := 0
+var _chat_focus_token := 0
+var _console_focus_token := 0
+var _image_dialog_focus_token := 0
 # Максимум ожидания внешних таблиц: дальше строим мир с тем, что успело прийти.
 const CSS_DEADLINE_SEC := 4.0
 # Номер навигации: guard от гонки «продолжение после загрузки CSS против новой навигации».
@@ -34,23 +43,32 @@ var _player: Player
 # после _rebuild_world и не возобновилась). Перезапись при следующей навигации освобождает
 # старый — его корутина увидит снесённый контейнер и сама прекратится.
 var _world_gen: WorldGenerator = null
-var _status: Label
+# Процедурный HTML живёт отдельно от VRWML/overlay/network views, чтобы instance config mode
+# мог снять/вернуть только его без навигации и пересборки комнаты.
+var _html_layer: Node3D = null
+var _page_space: Dictionary = {}
+var _page_seed := 0
+var _world_image_loader: ImageLoader = null
+var _video_manager: VrwebVideoManager = null
+var _base_scene_mode := VrwebBuilder.MODE_COMBINE
+var _effective_scene_mode := VrwebBuilder.MODE_COMBINE
+@onready var _status: Label = _ui.status
 # «Светофор» связи слева от строки статуса: цвет = агрегированное состояние WebRTC-связи
 # (NetworkManager.connection_status), тултип — развёрнутый текст. Кружок = Panel с круглым
 # StyleBoxFlat, чей bg_color мы перекрашиваем.
-var _conn_dot: Panel
+@onready var _conn_dot: Panel = _ui.connection_dot
 var _conn_dot_style: StyleBoxFlat
-@onready var _passive_cursor: TextureRect = $UI/PassiveCursor
-@onready var _active_cursor: TextureRect = $UI/ActiveCursor
+@onready var _passive_cursor: TextureRect = _ui.passive_cursor
+@onready var _active_cursor: TextureRect = _ui.active_cursor
 
 # Индикаторы голоса (низ экрана): два стека — «звук идёт» (micon) и «заглушено» (micoff, красный),
 # в каждом — иконка PTT (видна только в режиме push-to-talk) и иконка микрофона. Активный стек
 # выбирается по политике режима, активная иконка «дышит» прозрачностью по силе голоса.
-@onready var _indicators: Control = $UI/Indicators
-@onready var _micon_stack: Control = $UI/Indicators/miconstack
-@onready var _micoff_stack: Control = $UI/Indicators/micoffstack
-@onready var _micon_ptt: CanvasItem = $UI/Indicators/miconstack/ptt
-@onready var _micoff_ptt: CanvasItem = $UI/Indicators/micoffstack/ptt
+@onready var _indicators: Control = _ui.indicators
+@onready var _micon_stack: Control = _ui.mic_on_stack
+@onready var _micoff_stack: Control = _ui.mic_off_stack
+@onready var _micon_ptt: CanvasItem = _ui.mic_on_ptt
+@onready var _micoff_ptt: CanvasItem = _ui.mic_off_ptt
 
 ## Индикатор голоса: не прозрачнее этого, пока есть речь; после SILENCE_HIDE тишины — 0 (исчезает).
 const VOICE_INDICATOR_MIN_ALPHA := 0.25
@@ -68,6 +86,10 @@ var _base_url: String = ""
 # «Паспорт» текущей страницы из <head> (title/description/thumbnail/metas) — заполняется в
 # _on_fetched и отдаётся вкладке «Мир» настроек (см. _extract_page_meta).
 var _page_meta: Dictionary = {}
+# Фактические hashes executable modules текущей страницы. Пока runtime поддерживает inline
+# allow-all; структура уже пригодна для compatibility/trust UI следующих этапов.
+var _scripting_module_hashes: Dictionary = {}
+var _content_policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 # ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
 # консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
 var _current_doc: HtmlNode = null
@@ -75,7 +97,7 @@ var _current_doc: HtmlNode = null
 # по нему консоль сливает страницу с эфемерным оверлеем, а вьюха адресует живые узлы.
 var _vrweb_index: Dictionary = {"found": false, "attrs": {}, "top": [], "nodes": {}}
 # Консоль пространства (клавиша `~`): HTML-репрезентация + редактирование эфемерного слоя.
-var _console: SpaceConsole
+@onready var _console: SpaceConsole = _ui.console
 # Браузерная история: список записей {url, pose} и индекс текущей. Переход назад/вперёд
 # двигает _history_index; новая навигация обрезает «вперёд» и добавляет запись.
 var _history: Array[Dictionary] = []
@@ -91,19 +113,19 @@ var _loading: bool = false
 var _pending_history_push: bool = false
 
 var _image_dialog_open := false   # открыт файловый диалог инструмента размещения (кнопка 3)
-var _settings_overlay: Control
-var _debug_panel: PanelContainer
-var _debug_label: Label
+@onready var _settings_overlay: Control = _ui.settings_overlay
+@onready var _debug_panel: PanelContainer = _ui.debug_panel
+@onready var _debug_label: Label = _ui.debug_label
 var _remote_view: Node3D
-var _chat_root: VBoxContainer
-var _chat_log: RichTextLabel
-var _chat_input: LineEdit
+@onready var _chat_root: VBoxContainer = _ui.chat_root
+@onready var _chat_log: RichTextLabel = _ui.chat_log
+@onready var _chat_input: LineEdit = _ui.chat_input
 # Чат живёт только в RAM: кольцевой буфер последних CHAT_HISTORY_MAX записей, на диск ничего
 # не пишется. Запись = {kind:"user", nick, text} либо {kind:"system", text} (отбивки переходов).
 const CHAT_HISTORY_MAX := 50
 var _chat_history: Array[Dictionary] = []
 # Таймер угасания: в режиме перемещения через 30с после последнего сообщения лог гаснет до 10%.
-var _chat_idle_timer: Timer
+@onready var _chat_idle_timer: Timer = _ui.chat_idle_timer
 var _chat_fade_tween: Tween
 # Захвачена ли мышь (режим перемещения) — определяет вид чата: поле ввода и угасание.
 var _mouse_captured: bool = true
@@ -112,6 +134,7 @@ var _mouse_captured: bool = true
 func _ready() -> void:
 	_setup_environment()
 	_setup_ui_extras()
+	_ui.image_file_chosen.connect(_image_file_chosen)
 
 	_fetcher = PageFetcher.new()
 	add_child(_fetcher)
@@ -120,6 +143,8 @@ func _ready() -> void:
 
 	_css_fetcher = CssFetcher.new()
 	add_child(_css_fetcher)
+	_module_fetcher = ScriptingModuleFetcher.new()
+	add_child(_module_fetcher)
 
 	_player = PLAYER_SCENE.instantiate()
 	_player.aim_target_changed.connect(_on_aim_target_changed)
@@ -150,7 +175,8 @@ func _ready() -> void:
 	_set_loading(false)
 	_address.text_submitted.connect(func(_t): _on_go())
 	# При клике в адресную строку отпускаем мышь, чтобы можно было печатать.
-	_address.focus_entered.connect(func(): _player.capture_mouse(false))
+	_address.focus_entered.connect(_claim_address_focus)
+	_address.focus_exited.connect(_release_address_focus)
 
 	_setup_net()
 
@@ -202,10 +228,11 @@ func _toggle_console() -> void:
 		return
 	if _console.visible:
 		_console.close()
+		_release_focus_token("_console_focus_token")
 	else:
 		# Консоль — UI-режим: отпускаем мышь (обратно в браузинг вернёт клик по 3D,
 		# который заодно закроет консоль — см. _on_mouse_capture_changed).
-		_player.capture_mouse(false)
+		_console_focus_token = _player.claim_mouse_focus("space_console")
 		_console.open()
 	_sync_chat_with_console()
 
@@ -281,6 +308,7 @@ func _on_go() -> void:
 	# Поэтому base пустой: иначе домен «abesmon.syrupmg.ru» приклеится к текущему пути.
 	# Относительный резолв нужен только для внутристраничных ссылок (см. _activate_transition).
 	_navigate(url, "", true)
+	_release_address_focus()
 	_player.capture_mouse(true)
 
 
@@ -291,6 +319,7 @@ func _on_cancel() -> void:
 		return
 	_cancel_load()
 	_set_loading(false)
+	_leave_loading_hub()
 	_set_status("Загрузка отменена")
 
 
@@ -299,6 +328,12 @@ func _on_cancel() -> void:
 ## его выставит вызывающий (_on_cancel снимает, _navigate тут же поднимает под новую загрузку).
 func _cancel_load() -> void:
 	_fetcher.cancel()
+	if _module_fetcher != null:
+		_module_fetcher.cancel()
+	if is_instance_valid(_script_permission_dialog):
+		_script_permission_dialog.queue_free()
+		_script_permission_dialog = null
+	_restore_mouse_after_script_permission()
 	_nav_id += 1
 
 
@@ -345,8 +380,25 @@ func _on_mouse_capture_changed(captured: bool) -> void:
 func _on_chat_requested() -> void:
 	if _chat_input == null or _chat_root == null or not _chat_root.visible:
 		return
-	_player.capture_mouse(false)
+	if _chat_focus_token == 0:
+		_chat_focus_token = _player.claim_mouse_focus("chat_input")
 	_chat_input.grab_focus()
+
+
+func _claim_address_focus() -> void:
+	if _address_focus_token == 0:
+		_address_focus_token = _player.claim_mouse_focus("address_bar")
+
+
+func _release_address_focus() -> void:
+	_player.release_mouse_focus(_address_focus_token)
+	_address_focus_token = 0
+
+
+func _release_focus_token(property: StringName) -> void:
+	var token := int(get(property))
+	_player.release_mouse_focus(token)
+	set(property, 0)
 
 
 ## Разрешает/запрещает фокусировку интерактивных элементов навбара и чата. FOCUS_NONE убирает
@@ -364,12 +416,17 @@ func _set_ui_focusable(focusable: bool) -> void:
 
 
 func _navigate(url: String, base: String, push_history: bool) -> void:
-	# Пузырь «ушёл сюда» роняем НЕ здесь, а в _on_fetched — когда переход фактически состоялся
-	# (страница получена). До фетча адреса могло не быть или загрузку могли отменить — лишний
-	# пузырь тогда ни к чему. См. _drop_leave_bubble и docs/ephemeral-changes.md.
+	# Пузырь «ушёл сюда» роняем до входа в хаб: после него старый мир и соединение уже сняты.
+	# См. _drop_leave_bubble и docs/ephemeral-changes.md.
 	# Любая новая навигация отменяет ещё идущую (иначе старый ответ мог бы «доехать» поверх новой).
 	if _loading:
 		_cancel_load()
+	# Переход начинается в нейтральном хабе: покинутая страница больше не видна и не
+	# продолжает исполняться, а сетевое соединение с её комнатой гарантированно закрыто.
+	# Пузырь роняем до сноса мира; здесь URL ещё до возможного HTTP-редиректа.
+	if _current_url != "":
+		_drop_leave_bubble(PageFetcher.resolve_url(url, base if base != "" else _current_url))
+	_enter_loading_hub("Загрузка %s" % url)
 	_set_loading(true)
 	_set_status("Загрузка %s …" % url)
 	if push_history:
@@ -409,11 +466,6 @@ func _drop_leave_bubble(target: String) -> void:
 
 
 func _on_fetched(html: String, final_url: String) -> void:
-	# Переход состоялся (страница получена) — ТОЛЬКО теперь роняем «пузырь» в покидаемой комнате.
-	# Делаем это до перезаписи _current_url: игрок ещё на старом месте, а p2p-меш покидаемой
-	# комнаты жив (снесёт его _join_current_room в _finish_page — до него ещё есть кадр на флаш
-	# reliable-пакета). Цель — final_url (учитывает редирект). См. docs/ephemeral-changes.md.
-	_drop_leave_bubble(final_url)
 	_current_url = final_url
 	_address.text = final_url
 	# Переход состоялся — запись истории закоммичена, она больше не «фантом» (см. _navigate).
@@ -461,8 +513,7 @@ func _on_fetched(html: String, final_url: String) -> void:
 ## Продолжение сборки страницы после (возможной) загрузки внешних CSS.
 func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		final_url: String, base_url: String, t0: int) -> void:
-	_set_loading(false)
-	_set_status("Сборка пространства…")
+	_set_status("Подготовка страницы…")
 	# Тексты таблиц в порядке документа (<style> и <link> вперемешку) = порядок каскада.
 	var css_texts: Array = []
 	for ref in sheet_refs:
@@ -473,10 +524,98 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		else:
 			css_texts.append(css_by_url.get(PageFetcher.resolve_url(ref["href"], base_url), ""))
 	StyleResolver.resolve(doc, css_texts)
-	# Собственный синтаксис VRWeb: блок <vrweb> описывает 3D-сцену напрямую узлами Godot.
+	var module_collection := ScriptingModuleCollector.collect(doc, base_url)
+	for module_error in module_collection.errors:
+		Log.warn("modules", str(module_error))
+	var nav := _nav_id
+	_set_status("Загрузка модулей (%d)…" % module_collection.modules.size())
+	_module_fetcher.fetch_all(module_collection.modules, final_url, func(module_result: Dictionary):
+		if nav == _nav_id:
+			_materialize_page(doc, final_url, base_url, t0, module_result))
+
+
+func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
+		module_result: Dictionary) -> void:
+	# Собственный синтаксис VRWeb: блок <vrwml> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
-	var vrweb := VrwebBuilder.build(doc, base_url)
+	for module_error in module_result.errors:
+		Log.warn("modules", "%s: %s" % [str(module_error.get("module_id", "")),
+				str(module_error.get("code", ""))])
+	var fetched_modules: Array = module_result.modules
+	var runnable_modules: Array = []
+	for module in fetched_modules:
+		if str(module.get("kind", "")) == "package":
+			var unpacked := ScriptingModulePackage.unpack(module)
+			if bool(unpacked.ok):
+				runnable_modules.append(unpacked.module)
+			else:
+				Log.warn("modules", "%s: package %s" % [str(module.get("id", "")),
+						str(unpacked.error)])
+		else:
+			runnable_modules.append(module)
+	_authorize_scripting_modules(runnable_modules, final_url, func(allowed_modules: Array):
+		if not is_inside_tree() or final_url != _current_url:
+			return
+		_finish_materialize_page(doc, final_url, base_url, t0, allowed_modules))
+
+
+## Разделяет уже integrity-проверенные модули на известные allow/block и неизвестные. В ask
+## неизвестные показываются одним preflight; до ответа registry.prepare (компиляция) не зовётся.
+func _authorize_scripting_modules(modules: Array, page_url: String, done: Callable) -> void:
+	var origin := ScriptingModuleIntegrity.origin_of(page_url)
+	if origin.is_empty():
+		origin = page_url.get_base_dir()
+	var allowed: Array = []
+	var pending: Array = []
+	for module in modules:
+		var decision := Settings.scripting_module_decision(origin, str(module.get("id", "")),
+				str(module.get("hash", "")))
+		if decision == "allow":
+			allowed.append(module)
+		elif decision != "block":
+			pending.append(module)
+	if pending.is_empty():
+		done.call(allowed)
+		return
+	_set_status("Ожидание разрешения для %d скриптов…" % pending.size())
+	_script_permission_focus_token = _player.claim_mouse_focus("scripting_module_permission")
+	_script_permission_dialog = SCRIPT_PERMISSION_DIALOG.new()
+	add_child(_script_permission_dialog)
+	_script_permission_dialog.decisions_submitted.connect(func(decisions: Dictionary):
+		_script_permission_dialog = null
+		_restore_mouse_after_script_permission()
+		for module in pending:
+			var choice: Dictionary = decisions.get(str(module.get("id", "")), {})
+			var allow := bool(choice.get("allow", false))
+			if bool(choice.get("remember", false)):
+				Settings.remember_scripting_module_decision(origin, module, "allow" if allow else "block")
+			if allow:
+				allowed.append(module)
+		done.call(allowed), CONNECT_ONE_SHOT)
+	_script_permission_dialog.present(pending, page_url)
+
+
+func _restore_mouse_after_script_permission() -> void:
+	if is_instance_valid(_player):
+		_player.release_mouse_focus(_script_permission_focus_token)
+	_script_permission_focus_token = 0
+
+
+func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
+		runnable_modules: Array) -> void:
+	_set_loading(false)
+	_set_status("Сборка пространства…")
+	var module_registry := ScriptingModuleRegistry.new()
+	var module_prepared := module_registry.prepare(
+			runnable_modules, ScriptingModuleRegistry.ScriptMode.ALLOW_ALL)
+	for module_error in module_prepared.errors:
+		Log.warn("modules", str(module_error))
+	_scripting_module_hashes.clear()
+	for module in runnable_modules:
+		if not str(module.get("hash", "")).is_empty():
+			_scripting_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
+	var vrweb := VrwebBuilder.build(doc, base_url, module_registry, _content_policy)
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
 	_vrweb_index = SceneHtml.build_page_index(doc)
@@ -499,16 +638,12 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 
 	var room_count: int = space.get("rooms", {}).size()
 	_set_status("%s — %d пространств, %d мс" % [final_url, room_count, dt])
+	_leave_loading_hub()
 
 	# Новая страница — старый документ консоли (и правки к нему) больше не имеют смысла.
 	if _console != null:
 		_console.on_navigated()
 
-	# Даём reliable-пакету «пузыря» (роняем его в _on_fetched, ещё в покидаемой комнате) уйти до
-	# сноса меша: join_room новой комнаты рвёт p2p-меш покидаемой синхронно, а put_packet во WebRTC
-	# улетает лишь со следующим poll меша. Один кадр = один poll → пузырь дойдёт до пиров даже на
-	# странице без внешних стилей, где _finish_page идёт синхронно из _on_fetched.
-	await get_tree().process_frame
 	# Комната мультиплеера = страница. В онлайне переключаемся на комнату нового URL
 	# (NetworkManager рвёт старые p2p-соединения и пересоздаёт mesh).
 	_join_current_room()
@@ -521,6 +656,7 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 
 func _on_failed(message: String, url: String) -> void:
 	_set_loading(false)
+	_leave_loading_hub()
 	_set_status("Ошибка: %s (%s)" % [message, url])
 
 
@@ -608,22 +744,54 @@ func _collect_meta(node: HtmlNode, out: Array) -> void:
 		_collect_meta(c, out)
 
 
-func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
-	# Сносим старое пространство, игрока сохраняем. remove_child СРАЗУ (а не только queue_free):
-	# queue_free удаляет из дерева лишь в конце кадра, а video_manager.scan(_world) ниже бежит
-	# в этом же кадре — иначе он обошёл бы старое (умирающее) поддерево vrweb и привязал бы уже
-	# привязанные экраны/мёртвые плееры (двойной connect texture_ready и freed instance в _process).
+## Переводит клиент в нейтральное состояние между страницами. В отличие от прежнего
+## in-place swap старый мир прекращает жить сразу, а не после ответа сервера/разрешений.
+func _enter_loading_hub(status: String) -> void:
+	_ui.visible = false
+	_player.process_mode = Node.PROCESS_MODE_DISABLED
+	_loading_hub.open(status)
+	_clear_world()
+	NetworkManager.disconnect_from_server()
+
+
+## Возвращает обычную камеру, HUD и обработку игрока после сборки либо ошибки/отмены.
+func _leave_loading_hub() -> void:
+	_loading_hub.close()
+	_player.process_mode = Node.PROCESS_MODE_INHERIT
+	_ui.visible = true
+
+
+## Удаляет всё содержимое страницы, сохраняя локального Player как контроллер следующего мира.
+## remove_child нужен сразу: queue_free удаляет из дерева только в конце кадра.
+func _clear_world() -> void:
+	_world_gen = null
+	_html_layer = null
+	_page_space = {}
+	_world_image_loader = null
+	_video_manager = null
+	_base_scene_mode = VrwebBuilder.MODE_COMBINE
+	_effective_scene_mode = VrwebBuilder.MODE_COMBINE
+	_remote_view = null
 	for child in _world.get_children():
 		if child == _player:
 			continue
 		_world.remove_child(child)
 		child.queue_free()
 
+
+func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
+	# Сносим старое пространство, игрока сохраняем. remove_child СРАЗУ (а не только queue_free):
+	# queue_free удаляет из дерева лишь в конце кадра, а video_manager.scan(_world) ниже бежит
+	# в этом же кадре — иначе он обошёл бы старое (умирающее) поддерево vrweb и привязал бы уже
+	# привязанные экраны/мёртвые плееры (двойной connect texture_ready и freed instance в _process).
+	_clear_world()
+
 	# Лоадер картинок живёт внутри мира: при следующей навигации мир сносится вместе с ним,
 	# незавершённые загрузки старой страницы умирают сами.
 	var image_loader := ImageLoader.new()
 	image_loader.name = "ImageLoader"
 	_world.add_child(image_loader)
+	_world_image_loader = image_loader
 
 	# Капсулы других игроков живут в мире: при навигации мир сносится — старые капсулы
 	# исчезают (ушёл со страницы = вышел из комнаты), view пересоздаётся для новой.
@@ -653,28 +821,26 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 		if not vrweb_targets.has(rid):
 			vrweb_targets[rid] = page_resources[rid]
 	ephemeral_view.setup(_activate_transition,
-		{"targets": vrweb_targets, "resources": page_resources, "base_url": base_url})
+		{"targets": vrweb_targets, "resources": page_resources, "base_url": base_url,
+		"content_policy": _content_policy})
 
 	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
 	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).
-	var video_manager := VrwebVideoManager.new()
-	video_manager.name = "VrwebVideoManager"
-	_world.add_child(video_manager)
+	_video_manager = VrwebVideoManager.new()
+	_video_manager.name = "VrwebVideoManager"
+	_world.add_child(_video_manager)
 
 	# mode="exclusive" — HTML-сцену не строим вовсе, в мире только узлы vrweb.
 	var exclusive: bool = vrweb.get("found", false) and vrweb.get("mode", "") == VrwebBuilder.MODE_EXCLUSIVE
+	_base_scene_mode = VrwebBuilder.MODE_EXCLUSIVE if exclusive else VrwebBuilder.MODE_COMBINE
+	_effective_scene_mode = _base_scene_mode
+	_page_space = space
+	_page_seed = PageFetcher.space_seed(url, TopologyBuilder.signature(space))
 	var gen: WorldGenerator = null
 	if exclusive:
 		_label_positions = {}
 	else:
-		# Сид пространства — от хоста (base_url) и ПОДПИСИ ТОПОЛОГИИ, а не от полного URL:
-		# топологически одинаковые страницы одного сайта дают идентичный мир. Инстанс
-		# мультиплеера остаётся по seed_key(url) — это отдельная ось (см. _join_current_room).
-		var seed_value := PageFetcher.space_seed(url, TopologyBuilder.signature(space))
-		gen = WorldGenerator.generate(space, _world, seed_value, _activate_transition, base_url, image_loader)
-		_label_positions = gen.label_positions
-	# Держим генератор живым на время потоковой достройки (см. поле _world_gen). exclusive — null.
-	_world_gen = gen
+		gen = _mount_html_layer()
 
 	# Спавн: приоритет у <VRWebSpawner>, затем спавн HTML-топологии «у первого объекта»,
 	# затем (exclusive без спавнера) дефолт у начала координат лицом к сцене.
@@ -692,22 +858,79 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 		_world.add_child(vrweb["root"])
 
 	# Регистрируем видео-плееры и привязываем экраны (после добавления всего в дерево).
-	# Сканируем весь мир: экраны бывают и из <vrweb>-тегов, и из обычного HTML-тега <video>
+	# Сканируем весь мир: экраны бывают и из <vrwml>-тегов, и из обычного HTML-тега <video>
 	# (WorldGenerator строит из него такой же VrwebVideoScreen). Геометрия HTML теперь
 	# достраивается порциями по кадрам (тайм-слайс), поэтому HTML-экраны появляются не сразу —
 	# сканируем после сигнала build_finished. Маленькие страницы строятся синхронно (build_complete
 	# уже true) — тогда сканируем тут же. В exclusive-режиме (gen == null) геометрии HTML нет.
-	if gen != null and not gen.build_complete:
-		gen.build_finished.connect(func():
-			if is_instance_valid(video_manager):
-				video_manager.scan(_world))
-	else:
-		video_manager.scan(_world)
+	# Для streaming callback уже подключён в _mount_html_layer; синхронный/exclusive сканируем сейчас.
+	if gen == null or gen.build_complete:
+		_video_manager.scan(_world)
 
 	# Внешние ресурсы (<ExtResource path="<url>">) качаются и вставляются асинхронно —
 	# прогрессивная подгрузка, как у картинок <img>. Общая логика с дебаг-превью редактора
 	# вынесена в VrwebExtInjector; оба лоадера живут в мире и сносятся при навигации.
 	VrwebExtInjector.inject(vrweb.get("ext", {}), image_loader, _world)
+
+
+## Создать только процедурный HTML-слой из сохранённой топологии. Не телепортирует игрока и
+## не касается VRWML/overlay/network views. Возвращённый генератор нужен начальному spawn.
+func _mount_html_layer() -> WorldGenerator:
+	if is_instance_valid(_html_layer) or _page_space.is_empty() or _world_image_loader == null:
+		return _world_gen
+	_html_layer = Node3D.new()
+	_html_layer.name = "HtmlLayer"
+	_world.add_child(_html_layer)
+	var gen := WorldGenerator.generate(_page_space, _html_layer, _page_seed,
+		_activate_transition, _base_url, _world_image_loader)
+	_world_gen = gen
+	_label_positions = gen.label_positions
+	if not gen.build_complete:
+		gen.build_finished.connect(_on_html_build_finished.bind(gen), CONNECT_ONE_SHOT)
+	return gen
+
+
+func _on_html_build_finished(gen: WorldGenerator) -> void:
+	# Старый генератор мог завершить callback уже после второго переключения режима.
+	if gen != _world_gen or not is_instance_valid(_html_layer):
+		return
+	if is_instance_valid(_video_manager):
+		_video_manager.rescan(_world)
+
+
+func _remove_html_layer() -> void:
+	_world_gen = null
+	_label_positions = {}
+	if is_instance_valid(_html_layer):
+		# Сразу исключаем слой из обходов/физики; queue_free завершит освобождение в конце кадра.
+		var parent := _html_layer.get_parent()
+		if parent != null:
+			parent.remove_child(_html_layer)
+		_html_layer.queue_free()
+	_html_layer = null
+	if is_instance_valid(_video_manager):
+		_video_manager.rescan(_world)
+
+
+## Применить effective instance mode без fetch/navigation/join_room и без смены позы.
+func _apply_instance_scene_config() -> void:
+	if _current_doc == null or _page_space.is_empty():
+		return
+	var mode := _base_scene_mode
+	var attrs := NetworkManager.scene_config_attrs()
+	if str(attrs.get("mode", "")).to_lower() == VrwebBuilder.MODE_EXCLUSIVE:
+		mode = VrwebBuilder.MODE_EXCLUSIVE
+	elif str(attrs.get("mode", "")).to_lower() == VrwebBuilder.MODE_COMBINE:
+		mode = VrwebBuilder.MODE_COMBINE
+	if mode == _effective_scene_mode:
+		return
+	_effective_scene_mode = mode
+	if mode == VrwebBuilder.MODE_EXCLUSIVE:
+		_remove_html_layer()
+	else:
+		var gen := _mount_html_layer()
+		if gen != null and gen.build_complete and is_instance_valid(_video_manager):
+			_video_manager.rescan(_world)
 
 
 ## Единый обработчик переходов от порталов и inline-ссылок RichPanel.
@@ -792,11 +1015,6 @@ func _update_nav_buttons() -> void:
 # --- Мультиплеер ---
 
 func _setup_net() -> void:
-	var ui: Control = $UI
-
-	# Overlay настроек поверх UI, изначально скрыт.
-	_settings_overlay = SETTINGS_SCENE.instantiate()
-	ui.add_child(_settings_overlay)
 	# Закрытие настроек оставляет мышь свободной (UI-режим) — обратно в перемещение
 	# возвращает клик по 3D, а не само закрытие. Поэтому closed здесь ни к чему не цепляем.
 	# «Вернуться домой» с вкладки «Мир» — грузим домашний инстанс.
@@ -806,11 +1024,11 @@ func _setup_net() -> void:
 	_settings_overlay.space_requested.connect(_on_space_requested)
 	# Клик по странице в «Кто где сейчас» (presence.v1, docs/presence.md) — обычная навигация.
 	_settings_overlay.presence_url_requested.connect(_on_presence_url_requested)
+	_settings_overlay.closed.connect(_on_settings_closed)
 
 	_settings_btn.pressed.connect(_open_settings)
-	_settings_btn.focus_entered.connect(func(): _player.capture_mouse(false))
 
-	_build_chat_ui(ui)
+	_build_chat_ui()
 
 	Settings.changed.connect(_on_settings_changed)
 	# Discovery домашнего сервера завершился (в т.ч. после смены адреса в настройках) —
@@ -833,8 +1051,13 @@ func _setup_net() -> void:
 
 
 func _open_settings() -> void:
-	_player.capture_mouse(false)
+	if _settings_focus_token == 0:
+		_settings_focus_token = _player.claim_mouse_focus("settings")
 	_settings_overlay.open(_current_url, _page_meta)
+
+
+func _on_settings_closed() -> void:
+	_release_focus_token(&"_settings_focus_token")
 
 
 ## «Вернуться домой» из настроек: грузим ДОМАШНЮЮ СТРАНИЦУ (произвольная закладка старта —
@@ -915,47 +1138,23 @@ func _on_connection_changed(online: bool) -> void:
 
 # --- Чат ---
 
-func _build_chat_ui(ui: Control) -> void:
-	_chat_root = VBoxContainer.new()
-	_chat_root.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_chat_root.offset_left = 8
-	_chat_root.offset_right = 420
-	_chat_root.offset_top = -260
-	_chat_root.offset_bottom = -40   # над строкой статуса
-	_chat_root.add_theme_constant_override("separation", 4)
-
-	_chat_log = RichTextLabel.new()
-	_chat_log.bbcode_enabled = true
-	_chat_log.scroll_active = true
-	_chat_log.scroll_following = true
-	_chat_log.custom_minimum_size = Vector2(400, 170)
+func _build_chat_ui() -> void:
 	# Текст можно выделять мышью и копировать (Ctrl/Cmd+C). Для этого лог должен принимать
 	# события мыши (не IGNORE) — заодно это включает клики по ссылкам ниже.
-	_chat_log.selection_enabled = true
 	# Ссылки в сообщениях ([url]…[/url], см. _linkify) подчёркиваем и делаем кликабельными;
 	# meta_clicked отдаёт href в _on_chat_meta_clicked для перехода/внешнего открытия.
 	_chat_log.meta_underlined = true
 	_chat_log.meta_clicked.connect(_on_chat_meta_clicked)
-	_chat_root.add_child(_chat_log)
-
-	_chat_input = LineEdit.new()
-	_chat_input.placeholder_text = "Сообщение… (Enter)"
-	_chat_input.custom_minimum_size = Vector2(400, 0)
 	_chat_input.max_length = NetworkManager.MAX_CHAT_CHARS   # не ввести больше лимита
 	_chat_input.text_submitted.connect(_on_chat_submitted)
-	_chat_input.focus_entered.connect(func(): _player.capture_mouse(false))
-	_chat_root.add_child(_chat_input)
-
-	ui.add_child(_chat_root)
-	_chat_root.visible = false
+	_chat_input.focus_entered.connect(func():
+		if _chat_focus_token == 0:
+			_chat_focus_token = _player.claim_mouse_focus("chat_input"))
+	_chat_input.focus_exited.connect(func(): _release_focus_token(&"_chat_focus_token"))
 
 	# Таймер бездействия: в режиме перемещения через 30с после последнего сообщения лог
 	# плавно угасает до 10% непрозрачности, чтобы не мешать обзору (см. _on_chat_idle_timeout).
-	_chat_idle_timer = Timer.new()
-	_chat_idle_timer.one_shot = true
-	_chat_idle_timer.wait_time = 30.0
 	_chat_idle_timer.timeout.connect(_on_chat_idle_timeout)
-	add_child(_chat_idle_timer)
 
 
 func _on_chat_submitted(text: String) -> void:
@@ -965,6 +1164,7 @@ func _on_chat_submitted(text: String) -> void:
 		NetworkManager.send_chat(text)
 		_append_chat(Settings.nick, text)   # локальное эхо
 	# Enter всегда возвращает в браузинг — даже на пустом сообщении (round-trip с chat_requested).
+	_release_focus_token(&"_chat_focus_token")
 	_player.capture_mouse(true)
 
 
@@ -1129,7 +1329,6 @@ func _setup_environment() -> void:
 
 
 func _setup_ui_extras() -> void:
-	var ui: Control = $UI
 	# Прицел по центру экрана. В сцене лежат две готовые картинки: пассивная и активная.
 	_passive_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_active_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1137,67 +1336,24 @@ func _setup_ui_extras() -> void:
 
 	# «Светофор» связи — маленький кружок слева от строки статуса. MOUSE_FILTER_PASS, чтобы
 	# показывался тултип с развёрнутым статусом, но клики уходили сквозь него.
-	_conn_dot = Panel.new()
-	_conn_dot_style = StyleBoxFlat.new()
-	_conn_dot_style.set_corner_radius_all(6)
+	_conn_dot_style = _conn_dot.get_theme_stylebox("panel").duplicate()
 	_conn_dot.add_theme_stylebox_override("panel", _conn_dot_style)
-	_conn_dot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_conn_dot.offset_left = 8
-	_conn_dot.offset_right = 20
-	_conn_dot.offset_top = -26
-	_conn_dot.offset_bottom = -14
-	_conn_dot.mouse_filter = Control.MOUSE_FILTER_PASS
-	ui.add_child(_conn_dot)
-
-	# Строка статуса внизу (сдвинута вправо, чтобы освободить место под «светофор»).
-	_status = Label.new()
-	_status.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_status.offset_left = 28
-	_status.offset_bottom = -8
-	_status.offset_top = -32
-	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(_status)
 
 	NetworkManager.net_status_changed.connect(_update_conn_indicator)
 	_update_conn_indicator()
 
-	_build_debug_overlay(ui)
-
 	# Консоль пространства (`~`, см. docs/space-console.md): read-only часть — хранимое дерево
-	# страницы БЕЗ блока <vrweb>; редактируемая — единый слитый слой сцены, который консоль
+	# страницы БЕЗ блока <vrwml>; редактируемая — единый слитый слой сцены, который консоль
 	# собирает сама из индекса vrweb и эфемерного состояния NetworkManager.
-	_console = SPACE_CONSOLE_SCRIPT.new()
 	_console.setup(_page_html_sans_vrweb, func() -> Dictionary: return _vrweb_index,
 		func() -> String: return _current_url)
-	ui.add_child(_console)
+	NetworkManager.scene_config_changed.connect(func(_config): _apply_instance_scene_config())
+	# Snapshot/выход из комнаты заменяет config целиком без granular event.
+	NetworkManager.scene_reset.connect(_apply_instance_scene_config)
 
 
 ## Оверлей инспектора провенанса (F3): панель в правом верхнем углу с типом топологии и
 ## исходным HTML узла под прицелом. Текст приходит от Player.debug_probed.
-func _build_debug_overlay(ui: Control) -> void:
-	_debug_panel = PanelContainer.new()
-	_debug_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_debug_panel.offset_left = -468
-	_debug_panel.offset_right = -8
-	_debug_panel.offset_top = 8
-	_debug_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_debug_panel.visible = false
-
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 8)
-	_debug_panel.add_child(margin)
-
-	_debug_label = Label.new()
-	_debug_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_debug_label.custom_minimum_size = Vector2(444, 0)
-	_debug_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_debug_label.add_theme_font_size_override("font_size", 13)
-	margin.add_child(_debug_label)
-
-	ui.add_child(_debug_panel)
-
-
 func _on_debug_toggled(on: bool) -> void:
 	if _debug_panel != null:
 		_debug_panel.visible = on
@@ -1223,33 +1379,21 @@ func _on_image_pick_requested(filters: PackedStringArray) -> void:
 	if _image_dialog_open:
 		return   # диалог уже открыт; его колбэк и завершит ожидание инструмента (provide_file)
 	_image_dialog_open = true
-	_player.capture_mouse(false)
+	_image_dialog_focus_token = _player.claim_mouse_focus("image_file_dialog")
 	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
 		DisplayServer.file_dialog_show("Разместить изображение", "", "", false,
 			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters,
 			func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
 				_image_file_chosen(ok and not paths.is_empty(), paths[0] if not paths.is_empty() else ""))
 		return
-	# Fallback без нативного диалога ОС: встроенный FileDialog с доступом к ФС.
-	var dlg := FileDialog.new()
-	dlg.access = FileDialog.ACCESS_FILESYSTEM
-	dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dlg.filters = filters
-	dlg.title = "Разместить изображение"
-	dlg.file_selected.connect(func(path: String) -> void:
-		_image_file_chosen(true, path))
-	dlg.canceled.connect(func() -> void:
-		_image_file_chosen(false, ""))
-	dlg.visibility_changed.connect(func() -> void:
-		if not dlg.visible:
-			dlg.queue_free())
-	add_child(dlg)
-	dlg.popup_centered_ratio(0.6)
+	# Fallback без нативного диалога ОС принадлежит MainUI, а не сцене мира.
+	_ui.open_image_dialog(filters)
 
 
 ## Файл выбран (или диалог отменён): вернуть захват мыши и отдать результат инструменту.
 func _image_file_chosen(ok: bool, path: String) -> void:
 	_image_dialog_open = false
+	_release_focus_token(&"_image_dialog_focus_token")
 	_player.capture_mouse(true)
 	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
 	image_tool.provide_file(ok, path)
@@ -1271,6 +1415,8 @@ func _on_aim_target_changed(active: bool, hint: String) -> void:
 func _set_status(text: String) -> void:
 	if _status != null:
 		_status.text = text
+	if _loading_hub != null and _loading_hub.visible:
+		_loading_hub.set_status(text)
 	Log.info("main", text)
 
 
@@ -1287,7 +1433,7 @@ func _update_conn_indicator(status: Dictionary = {}) -> void:
 		+ ("\n" + detail if detail != "" else "")
 
 
-## Сериализация хранимого документа страницы БЕЗ блока <vrweb> — read-only часть консоли
+## Сериализация хранимого документа страницы БЕЗ блока <vrwml> — read-only часть консоли
 ## (сам vrweb показывается там слитым с эфемерным оверлеем). Блок на время сериализации
 ## временно вынимается из дерева и возвращается на место (синхронно, дерево общее).
 func _page_html_sans_vrweb() -> String:

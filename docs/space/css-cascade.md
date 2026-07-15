@@ -45,7 +45,7 @@ HTML ──HtmlParser──> дерево HtmlNode
 | `scripts/css_parser.gd` | `CssParser` — таблица → плоский список правил; вайтлист свойств, @media/@supports/@import, цвета, токенизация с учётом вложенности |
 | `scripts/style_resolver.gd` | `StyleResolver` — индекс правил, матчинг селекторов, каскад, наследование, вычисление значений → `node.computed` |
 | `scripts/css_fetcher.gd` | `CssFetcher` — пул HTTPRequest + кэш (постоянный узел в main, переживает навигацию), разворачивание @import |
-| `scripts/html_node.gd` | поле `computed: Dictionary` (пусто = каскад не бежал) |
+| `addons/vrweb_tools/html_node.gd` | поле `computed: Dictionary` (пусто = каскад не бежал) |
 
 `TopologyBuilder` и `StyleResolver` остаются чистыми (без I/O): вся сеть — в `CssFetcher`
 до фазы топологии. Контракт артефакта `Space` **не менялся**: `hints.css {bg, fg, border}`,

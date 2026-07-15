@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb package LightSwitch</title>
+  <VRWebModule id="demo.lights" src="lights.vrmod" mode="trusted-gdscript"
+               integrity="sha256-OWThVNPjw8KyODFORe1BvONJzmkYzGORUK8lBmZNsGM="/>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <VRWebComponent module="#demo.lights" class="default" name="PackageLightSwitch"
+                    position="Vector3(0,1.4,-3)"/>
+    <Node3D name="Ground" position="Vector3(0,-0.1,0)">
+      <MeshInstance3D mesh="SubResource:::GroundMesh" material_override="SubResource:::GroundMaterial"/>
+      <StaticBody3D><CollisionShape3D shape="SubResource:::GroundShape"/></StaticBody3D>
+    </Node3D>
+    <Resource id="GroundMesh" type="BoxMesh" size="Vector3(14,0.2,14)"/>
+    <Resource id="GroundShape" type="BoxShape3D" size="Vector3(14,0.2,14)"/>
+    <Resource id="GroundMaterial" type="StandardMaterial3D" albedo_color="Color(0.08,0.10,0.16,1)"/>
+  </vrwml>
+</body>
+</html>

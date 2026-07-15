@@ -8,7 +8,7 @@ func _initialize() -> void:
 	var ok := true
 
 	# --- Собираем тестовую сцену ---
-	var root := Node3D.new()
+	var source_scene_root := Node3D.new()
 
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 1, 3)
@@ -23,12 +23,12 @@ func _initialize() -> void:
 	shape.shape = box_shape
 	body.add_child(shape)
 	mi.add_child(body)
-	root.add_child(mi)
+	source_scene_root.add_child(mi)
 
 	var light := OmniLight3D.new()
 	light.omni_range = 12.0
 	light.transform = Transform3D(Basis.IDENTITY, Vector3(-10, 4, 0))
-	root.add_child(light)
+	source_scene_root.add_child(light)
 
 	# Ext-привязка свойства: Sprite3D.texture из URL.
 	var sprite := Sprite3D.new()
@@ -36,7 +36,7 @@ func _initialize() -> void:
 	ext_tex.url = "https://godotengine.org/assets/press/icon_color.png"
 	ext_tex.type = "Texture2D"
 	sprite.set_meta(VrwebExtResource.META_BINDINGS, {"texture": ext_tex})
-	root.add_child(sprite)
+	source_scene_root.add_child(sprite)
 
 	# Ext-сцена (<ExtScene>).
 	var ext_scene_node := Node3D.new()
@@ -45,7 +45,7 @@ func _initialize() -> void:
 	ext_scene.url = "https://example.com/duck.glb"
 	ext_scene.type = "PackedScene"
 	ext_scene_node.set_meta(VrwebExtResource.META_SCENE, ext_scene)
-	root.add_child(ext_scene_node)
+	source_scene_root.add_child(ext_scene_node)
 
 	# Спавнер с двумя точками.
 	var spawner := VrwebSpawner.new()
@@ -56,13 +56,16 @@ func _initialize() -> void:
 	p2.transform = Transform3D(Basis.IDENTITY, Vector3(-13, 1.6, -3))
 	spawner.add_child(p1)
 	spawner.add_child(p2)
-	root.add_child(spawner)
+	source_scene_root.add_child(spawner)
 
 	# --- Экспорт ---
-	var html := VrwebExporter.export_scene(root, VrwebBuilder.MODE_EXCLUSIVE)
+	var html := VrwebExporter.export_scene(source_scene_root, VrwebFormat.MODE_EXCLUSIVE)
 	print("=== EXPORTED HTML ===")
 	print(html)
-	root.free()
+	var golden := FileAccess.get_file_as_string(
+			"res://tests/fixtures/export_core/export_core_expected.html")
+	ok = _check(html == golden, "export matches byte-for-byte golden fixture") and ok
+	source_scene_root.free()
 
 	# --- Чтение обратно ---
 	var doc := HtmlParser.parse(html)

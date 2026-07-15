@@ -1,46 +1,9 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scenes/loading_screen.gd" id="1_loading"]
+[ext_resource type="PackedScene" path="res://scenes/ui/loading_hub.tscn" id="2_hub"]
 
-[node name="loading_screen" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+[node name="loading_screen" type="Node"]
 script = ExtResource("1_loading")
 
-[node name="Background" type="ColorRect" parent="."]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-color = Color(0.07, 0.07, 0.09, 1)
-
-[node name="Center" type="CenterContainer" parent="."]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="VBox" type="VBoxContainer" parent="Center"]
-layout_mode = 2
-theme_override_constants/separation = 12
-alignment = 1
-
-[node name="Title" type="Label" parent="Center/VBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 40
-horizontal_alignment = 1
-text = "VRWeb"
-
-[node name="Status" type="Label" parent="Center/VBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.7, 0.7, 0.75, 1)
-horizontal_alignment = 1
-text = "Загрузка..."
+[node name="LoadingHub" parent="." instance=ExtResource("2_hub")]

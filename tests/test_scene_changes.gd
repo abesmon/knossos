@@ -24,7 +24,40 @@ func _initialize() -> void:
 	_test_snapshot_roundtrip()
 	_test_props_size_limit()
 	_test_reserved_ids()
+	_test_instance_config()
 	quit(1 if _failed else 0)
+
+
+# --- config-state: отдельная ACL, allowlist/schema, snapshot и снятие override ---
+func _test_instance_config() -> void:
+	var sc := SceneChanges.new()
+	sc.begin_authority()
+	var set_exclusive := {"op": SceneChanges.OP_UPDATE_CONFIG, "set": {"mode": "exclusive"}}
+	_eq(sc.authority_commit(set_exclusive, ALICE, true, 100.0, false).size(), 0,
+		"object-admin без config-права не меняет mode")
+	var events := sc.authority_commit(set_exclusive, ALICE, false, 100.0, true)
+	_eq(events.size(), 1, "config-право меняет mode")
+	_eq(str(sc.config_attrs().get("mode", "")), "exclusive", "override хранится отдельно")
+	_eq(str(sc.config().get("by", "")), ALICE, "инициатор сохранён для диагностики")
+	_eq(sc.authority_commit(set_exclusive, ALICE, false, 101.0, true).size(), 0,
+		"config no-op не расходует seq")
+	_eq(sc.authority_commit({"op": SceneChanges.OP_UPDATE_CONFIG, "set": {"persist": "x"}},
+		ALICE, false, 101.0, true).size(), 0, "неизвестный root key отклонён")
+	_eq(sc.authority_commit({"op": SceneChanges.OP_UPDATE_CONFIG, "set": {"mode": "broken"}},
+		ALICE, false, 101.0, true).size(), 0, "неверный mode отклонён")
+
+	var follower := SceneChanges.new()
+	follower.load_snapshot(sc.snapshot())
+	_eq(str(follower.config_attrs().get("mode", "")), "exclusive", "snapshot переносит config")
+	var clear_events := sc.authority_commit(
+		{"op": SceneChanges.OP_UPDATE_CONFIG, "set": {"mode": null}}, BOB, false, 102.0, true)
+	_eq(follower.apply_event(clear_events[0]), SceneChanges.Apply.APPLIED, "follower применил clear")
+	_eq(follower.config_attrs().has("mode"), false, "null возвращает base mode")
+
+	var poisoned := sc.snapshot()
+	poisoned["config"] = {"attrs": {"mode": "invalid"}, "by": "mallory"}
+	follower.load_snapshot(poisoned)
+	_eq(follower.config_attrs().is_empty(), true, "невалидный snapshot config fail-closed")
 
 
 # --- reserved_ids: id узлов базы страницы занять нельзя (анти-коллизия дедупа персистенции,

@@ -1,0 +1,29 @@
+<vrwml>
+  <Avatar name="HeadAvatar" nameplate_height="2.0">
+    <Node3D name="Body">
+      <MeshInstance3D name="Mesh" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)" mesh="SubResource:::r0" surface_material_override/0="SubResource:::r1"/>
+    </Node3D>
+    <Node3D name="Head" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.55, 0)">
+      <MeshInstance3D name="Mesh" mesh="SubResource:::r2" surface_material_override/0="SubResource:::r3"/>
+      <MeshInstance3D name="Nose" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.3)" mesh="SubResource:::r4" surface_material_override/0="SubResource:::r5"/>
+      <MeshInstance3D name="Face" transform="Transform3D(-0.86, 0, 1.29856e-07, 0, 0.86, 0, -1.29856e-07, 0, -0.86, 0, 0, -0.254299)" mesh="SubResource:::r6" surface_material_override/0="SubResource:::r7"/>
+      <Node3D name="MouthObject" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.11437106, -0.25397265)">
+        <MeshInstance3D name="MeshInstance3D" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 0.1, 0, 0, 0)" mesh="SubResource:::r8"/>
+      </Node3D>
+    </Node3D>
+    <LookPitchApplier name="LookPitchApplier" target_path="NodePath(&quot;../Head&quot;)"/>
+    <UserTextureApplier name="UserTextureApplier"/>
+    <VoiceScaleApplier name="VoiceScaleApplier" target_path="NodePath(&quot;../Head/MouthObject&quot;)"/>
+  </Avatar>
+  <Resource id="r0" type="CapsuleMesh" radius="0.4" height="1.4"/>
+  <Resource id="r1" type="StandardMaterial3D" albedo_color="Color(0.4, 0.85, 0.45, 1)"/>
+  <Resource id="r2" type="BoxMesh" size="Vector3(0.5, 0.5, 0.5)"/>
+  <Resource id="r3" type="StandardMaterial3D" albedo_color="Color(0.95, 0.8, 0.35, 1)"/>
+  <Resource id="r4" type="BoxMesh" size="Vector3(0.12, 0.12, 0.2)"/>
+  <Resource id="r5" type="StandardMaterial3D" albedo_color="Color(0.9, 0.3, 0.25, 1)"/>
+  <Resource id="r6" type="QuadMesh" size="Vector2(0.55, 0.55)"/>
+  <Resource id="r7" type="StandardMaterial3D" resource_local_to_scene="true" transparency="1" cull_mode="2" albedo_texture="SubResource:::r9"/>
+  <Resource id="r8" type="SphereMesh" material="SubResource:::r10" radius="0.07" height="0.1" radial_segments="5" rings="4"/>
+  <Resource id="r9" type="UserSettingsAvatarTexture"/>
+  <Resource id="r10" type="StandardMaterial3D" albedo_color="Color(1, 0.18431373, 0, 1)"/>
+</vrwml>

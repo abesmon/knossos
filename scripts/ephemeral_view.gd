@@ -27,6 +27,7 @@ var _nodes := {}           # id (String) -> Node (объектные kind'ы; п
 var _targets := {}         # node_id страницы -> Object (узлы/ресурсы vrweb; реестр из main)
 var _resources := {}       # id -> Resource (суб-ресурсы страницы для резолва ссылок)
 var _base_url := ""
+var _content_policy: VrwebContentPolicy
 var _patched := {}         # patch id -> { target: Object, originals: {prop: Variant} }
 
 
@@ -38,6 +39,9 @@ func setup(activate_cb: Callable, vrweb: Dictionary = {}) -> void:
 	_targets = vrweb.get("targets", {})
 	_resources = vrweb.get("resources", {})
 	_base_url = str(vrweb.get("base_url", ""))
+	_content_policy = vrweb.get("content_policy") as VrwebContentPolicy
+	if _content_policy == null:
+		_content_policy = VrwebContentPolicy.new()
 	NetworkManager.scene_object_added.connect(_on_added)
 	NetworkManager.scene_object_updated.connect(_on_updated)
 	NetworkManager.scene_object_removed.connect(_on_removed)
@@ -56,6 +60,8 @@ func _exit_tree() -> void:
 # --- Реакция на сигналы транспорта ---
 
 func _on_added(id: String, object: Dictionary) -> void:
+	if not _live_operation_allowed(id, object):
+		return
 	if str(object.get("kind", "")) == SceneHtml.KIND_PATCH:
 		_apply_patch(id, object)
 		return
@@ -63,6 +69,8 @@ func _on_added(id: String, object: Dictionary) -> void:
 
 
 func _on_updated(id: String, object: Dictionary) -> void:
+	if not _live_operation_allowed(id, object):
+		return
 	if str(object.get("kind", "")) == SceneHtml.KIND_PATCH:
 		_apply_patch(id, object)
 		return
@@ -74,6 +82,13 @@ func _on_updated(id: String, object: Dictionary) -> void:
 	if node.get_meta("parent_ref", "") != str(object.get("parent", "")):
 		_reparent(node, object)
 	_apply(node, object)
+
+
+func _live_operation_allowed(id: String, object: Dictionary) -> bool:
+	return VrwebContentPolicy.allowed(_content_policy.evaluate_operation(
+			str(object.get("kind", "")), object,
+			{"source": VrwebContentPolicy.SOURCE_LIVE_PEER, "object_id": id,
+			"author": str(object.get("author", ""))}))
 
 
 func _on_removed(id: String) -> void:
@@ -106,6 +121,8 @@ func _rebuild_all() -> void:
 	var objects := NetworkManager.scene_objects()
 	for id in _ordered_by_depth(objects):
 		var object: Dictionary = objects[id]
+		if not _live_operation_allowed(str(id), object):
+			continue
 		if str(object.get("kind", "")) == SceneHtml.KIND_PATCH:
 			_apply_patch(str(id), object)
 		else:
@@ -177,6 +194,11 @@ func _apply(node: Node, object: Dictionary) -> void:
 	if str(object.get("kind", "")) == SceneHtml.KIND_NODE:
 		var attrs: Dictionary = props.get("attrs", {})
 		for k in attrs:
+			var decision := _content_policy.evaluate_property(node.get_class(), str(k), str(attrs[k]),
+					{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
+					"object_id": str(object.get("id", "")), "author": str(object.get("author", ""))})
+			if not VrwebContentPolicy.allowed(decision):
+				continue
 			node.set(str(k), VrwebBuilder.resolve_attr_value(str(attrs[k]), _resources))
 		return
 	if props.has("position") and node is Node3D:
@@ -198,11 +220,13 @@ func _make_node(object: Dictionary) -> Node:
 			return STROKE.instantiate()
 		SceneHtml.KIND_NODE:
 			# Добавленный узел vrweb-слоя: строится тем же путём, что узлы страницы
-			# (тот же принятый ClassDB-риск, см. docs/vrweb-tags.md). Дети приходят
+			# (тот же принятый ClassDB-риск, см. docs/vrwml-tags.md). Дети приходят
 			# отдельными объектами и монтируются обычной вложенностью.
 			var props: Dictionary = object.get("props", {})
 			return VrwebBuilder.build_element(str(props.get("tag", "")),
-				props.get("attrs", {}), _resources, _base_url)
+				props.get("attrs", {}), _resources, _base_url, _content_policy,
+				{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
+				"object_id": str(object.get("id", "")), "author": str(object.get("author", ""))})
 	return null
 
 
@@ -226,6 +250,11 @@ func _apply_patch(id: String, object: Dictionary) -> void:
 			originals.erase(prop)
 	for k in set_map:
 		var prop := str(k)
+		var decision := _content_policy.evaluate_property(target.get_class(), prop, str(set_map[k]),
+				{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
+				"object_id": str(object.get("id", id)), "author": str(object.get("author", ""))})
+		if not VrwebContentPolicy.allowed(decision):
+			continue
 		if not originals.has(prop):
 			originals[prop] = target.get(prop)
 		target.set(prop, VrwebBuilder.resolve_attr_value(str(set_map[k]), _resources))

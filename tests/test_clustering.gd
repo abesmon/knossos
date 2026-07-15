@@ -145,9 +145,6 @@ func _initialize() -> void:
 func _process(_delta: float) -> bool:
 	if _gen == null or not _gen.build_complete:
 		return false
-	var total := 1
-	for c in _holder.get_children():
-		total += 1
 	print("\n========== GEOMETRY SMOKE (BLOCKS) ==========")
 	print("build_complete=%s child_nodes=%d" % [str(_gen.build_complete), _holder.get_child_count()])
 	_holder.queue_free()

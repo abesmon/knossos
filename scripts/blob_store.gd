@@ -165,14 +165,14 @@ func _evict_disk(dir: String) -> void:
 	if da == null:
 		return
 	da.list_dir_begin()
-	var name := da.get_next()
-	while name != "":
+	var entry_name := da.get_next()
+	while entry_name != "":
 		if not da.current_is_dir():
-			var full := dir.path_join(name)
+			var full := dir.path_join(entry_name)
 			var size := _file_size(full)
 			total += size
 			files.append({"path": full, "size": size, "mtime": FileAccess.get_modified_time(full)})
-		name = da.get_next()
+		entry_name = da.get_next()
 	da.list_dir_end()
 	if total <= MAX_DISK_BYTES:
 		return
@@ -222,7 +222,7 @@ func import_image(bytes: PackedByteArray) -> String:
 	var packed := img.save_webp_to_buffer(true, IMPORT_WEBP_QUALITY)
 	var guard := 0
 	while packed.size() > BlobProtocol.MAX_BLOB_BYTES and guard < 4 and img.get_width() > 64:
-		_shrink(img, maxi(64, img.get_width() / 2))
+		_shrink(img, maxi(64, floori(img.get_width() / 2.0)))
 		packed = img.save_webp_to_buffer(true, IMPORT_WEBP_QUALITY)
 		guard += 1
 	if packed.is_empty() or packed.size() > BlobProtocol.MAX_BLOB_BYTES:

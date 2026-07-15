@@ -1,35 +1,66 @@
 class_name VrwebVideoManager
 extends Node
 
-## Связывает видео-плееры (VrwebVideoPlayer) и поверхности (VrwebVideoScreen) одной страницы
-## и синхронизирует воспроизведение между клиентами поверх NetworkManager.
-##
-## Живёт в _world (создаётся в scenes/main.gd рядом с ImageLoader/RemotePlayersView): при
-## навигации мир сносится вместе с менеджером — это и есть «выход из комнаты». Комната = URL
-## страницы, поэтому player_id (из тега) совпадает у всех на одной странице.
-##
-## Sync-модель — shared (см. docs/video-player.md): любой может play/pause/seek; кто последним
-## действовал, тот «контроллер» — он шлёт heartbeat-таймкод (~1.5 Гц), остальные дрейф-
-## корректируются. Покадровый стрим невозможен — каждый клиент сам грузит тот же URL.
+## Связывает плееры и экраны страницы. Сетевой транспорт реализован через общий
+## Replicated State: COMMAND/DELTA/SNAPSHOT для канонического транспорта и SAMPLE для drift.
 
-const HB_INTERVAL := 0.66   # период heartbeat от таймкипера, с
+const SCHEMA_ID := VideoStateSchema.ID
+const SCHEMA_VERSION := VideoStateSchema.VERSION
+const HB_INTERVAL := 0.66
 
-var _players: Dictionary = {}   # id -> VrwebVideoPlayer
+var _players: Dictionary = {} # id -> VrwebVideoPlayer
+var _revisions: Dictionary = {} # id -> canonical revision
+var _pending_commands: Dictionary = {} # request_id -> player id (для rollback по ACK)
 var _hb_accum := 0.0
 
 
 func _ready() -> void:
-	NetworkManager.video_state_received.connect(_on_remote_video)
+	NetworkManager.register_replicated_schema(SCHEMA_ID,
+			VideoStateSchema.definition(NetworkManager.DEFAULT_RANK))
+	NetworkManager.replicated_state_received.connect(_on_replicated_state)
+	NetworkManager.replicated_sample_received.connect(_on_replicated_sample)
+	NetworkManager.replicated_command_result.connect(_on_command_result)
+	NetworkManager.authority_changed.connect(_on_authority_changed)
 
 
-## Регистрирует плееры и привязывает к ним экраны во всём поддереве vrweb. Зовётся из
-## main._rebuild_world ПОСЛЕ добавления корня vrweb в дерево. Два прохода снимают зависимость
-## от порядка тегов: сначала собираем все <VRWebVideoPlayer>, потом привязываем экраны.
 func scan(root: Node) -> void:
 	if root == null:
 		return
 	_collect_players(root)
 	_bind_screens(root)
+
+
+## Повторное сканирование после замены процедурного HtmlLayer. Удалённые вместе со слоем
+## declarative players снимаем из registry/Replicated State; синтетические src-плееры,
+## живущие детьми самого manager, сохраняем и переиспользуем новыми экранами.
+func rescan(root: Node) -> void:
+	var referenced := {}
+	_collect_screen_player_ids(root, referenced)
+	for id in _players.keys():
+		var player: VrwebVideoPlayer = _players[id]
+		var synthetic_needed := is_instance_valid(player) and player.get_parent() == self \
+			and referenced.has(id)
+		if synthetic_needed or (is_instance_valid(player) and player.get_parent() != self \
+			and player.is_inside_tree()):
+			continue
+		_players.erase(id)
+		_revisions.erase(id)
+		NetworkManager.unregister_replicated_object(id, SCHEMA_ID)
+		if is_instance_valid(player) and player.get_parent() == self:
+			remove_child(player) # scan(root) ниже не должен немедленно зарегистрировать его снова
+			player.queue_free()
+	scan(root)
+
+
+func _collect_screen_player_ids(node: Node, out: Dictionary) -> void:
+	if node is VrwebVideoScreen:
+		var screen := node as VrwebVideoScreen
+		if screen.player_id != "":
+			out[screen.player_id] = true
+		elif screen.src != "":
+			out["src:" + screen.src] = true
+	for child in node.get_children():
+		_collect_screen_player_ids(child, out)
 
 
 func _collect_players(node: Node) -> void:
@@ -41,11 +72,21 @@ func _collect_players(node: Node) -> void:
 
 func _register(player: VrwebVideoPlayer) -> void:
 	if player.id == "":
-		player.id = "player:%d" % _players.size()   # детерминированный fallback по порядку
+		player.id = "player:%d" % _players.size()
 	if _players.has(player.id):
 		return
 	_players[player.id] = player
 	player.transport_changed.connect(_on_local_transport.bind(player.id))
+	_register_state_object(player.id, player)
+
+
+func _register_state_object(id: String, player: VrwebVideoPlayer) -> void:
+	NetworkManager.register_replicated_object(id, SCHEMA_ID, {
+		"playing": player.wants_playing(),
+		"anchor_position": player.position(),
+		"anchor_authority_msec": Time.get_ticks_msec(),
+		"media_revision": 0,
+	})
 
 
 func _bind_screens(node: Node) -> void:
@@ -56,11 +97,9 @@ func _bind_screens(node: Node) -> void:
 
 
 func _bind_screen(screen: VrwebVideoScreen) -> void:
-	# Явная ссылка на общий плеер.
 	if screen.player_id != "" and _players.has(screen.player_id):
 		screen.bind(_players[screen.player_id])
 		return
-	# Свой источник: создаём неявный плеер (ключ по url — одинаковый src = общий плеер).
 	if screen.src != "":
 		var pid := "src:" + screen.src
 		if not _players.has(pid):
@@ -73,33 +112,72 @@ func _bind_screen(screen: VrwebVideoScreen) -> void:
 	Log.warn("video", "<VRWebVideoScreen> без player/src — не к чему привязать")
 
 
-# --- Синхронизация ---
-
-## Локальное транспортное действие (клик по экрану) — рассылаем событие всем (last-writer-wins).
 func _on_local_transport(action: String, position: float, id: String) -> void:
-	NetworkManager.send_video_event(id, action, position)
+	match action:
+		"play", "pause":
+			var request_id := NetworkManager.request_replicated_command(id, SCHEMA_ID, SCHEMA_VERSION,
+					"set_playing", {"playing": action == "play", "position": position})
+			if NetworkManager.in_room(): _pending_commands[request_id] = id
+		"seek":
+			var request_id := NetworkManager.request_replicated_command(id, SCHEMA_ID, SCHEMA_VERSION,
+					"seek", {"position": position})
+			if NetworkManager.in_room(): _pending_commands[request_id] = id
 
 
-## Состояние от пира (явное событие play/pause/seek ИЛИ heartbeat sync_*): применяем к плееру
-## с тем же id. Логику (grace-окно, дрейф-порог) держит сам плеер в apply_remote.
-func _on_remote_video(_sender: int, player_id: String, action: String, position: float) -> void:
-	var p: VrwebVideoPlayer = _players.get(player_id)
-	if p != null:
-		p.apply_remote(action, position)
+func _on_command_result(request_id: int, accepted: bool, code: String, _revision: int) -> void:
+	if not _pending_commands.has(request_id):
+		return
+	var id: String = _pending_commands[request_id]
+	_pending_commands.erase(request_id)
+	if accepted:
+		return
+	Log.warn("video", "команда транспорта %s отклонена: %s" % [id, code])
+	# UI применяет действие optimistic. При отказе возвращаем плеер к canonical Store.
+	var state := NetworkManager.replicated_state(id, SCHEMA_ID)
+	var player: VrwebVideoPlayer = _players.get(id)
+	if player != null and not state.is_empty():
+		player.apply_remote("play" if bool(state.get("playing", false)) else "pause",
+				float(state.get("anchor_position", 0.0)))
 
 
-## Heartbeat: таймкипер комнаты (пир с наименьшим id) непрерывно рассылает по каждому
-## запущенному плееру позицию + состояние play/pause. Так зашедший позже синхронизируется
-## автоматически в течение HB_INTERVAL (и при autoplay, где явного контроллера нет), а не
-## только при следующем ручном play/pause. Остальные подтягиваются дрейф-коррекцией.
+func _on_replicated_state(object_id: String, schema_id: String, state: Dictionary,
+		_changed: Dictionary, revision: int) -> void:
+	if schema_id != SCHEMA_ID:
+		return
+	_revisions[object_id] = revision
+	var player: VrwebVideoPlayer = _players.get(object_id)
+	if player != null:
+		player.apply_remote("play" if bool(state.get("playing", false)) else "pause",
+				float(state.get("anchor_position", 0.0)))
+
+
+func _on_replicated_sample(_sender: int, object_id: String, schema_id: String, sample: Dictionary) -> void:
+	if schema_id != SCHEMA_ID or int(sample.get("revision", -1)) != int(_revisions.get(object_id, 0)):
+		return
+	var player: VrwebVideoPlayer = _players.get(object_id)
+	if player != null:
+		player.apply_remote("sync_play" if bool(sample.get("playing", false)) else "sync_pause",
+				float(sample.get("position", 0.0)))
+
+
+func _on_authority_changed(_authority: int, _is_me: bool) -> void:
+	# reset_session при смене mesh удаляет объекты, но схемы живут; восстанавливаем декларации.
+	for id in _players:
+		_register_state_object(id, _players[id])
+
+
 func _process(delta: float) -> void:
 	_hb_accum += delta
 	if _hb_accum < HB_INTERVAL:
 		return
 	_hb_accum = 0.0
-	if not NetworkManager.is_timekeeper():
+	if not NetworkManager.has_authority():
 		return
 	for id in _players:
-		var p: VrwebVideoPlayer = _players[id]
-		if p.has_started():
-			NetworkManager.send_video_sync(id, p.position(), p.is_playing())
+		var player: VrwebVideoPlayer = _players[id]
+		if player.has_started():
+			NetworkManager.send_replicated_sample(id, SCHEMA_ID, SCHEMA_VERSION, {
+				"position": player.position(),
+				"playing": player.is_playing(),
+				"revision": int(_revisions.get(id, 0)),
+			})

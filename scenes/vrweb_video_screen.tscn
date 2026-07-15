@@ -1,0 +1,93 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/vrweb_video_screen.gd" id="1"]
+
+[sub_resource type="QuadMesh" id="ScreenQuad"]
+resource_local_to_scene = true
+size = Vector2(3.2, 1.8)
+
+[sub_resource type="StandardMaterial3D" id="ScreenMaterial"]
+resource_local_to_scene = true
+shading_mode = 0
+cull_mode = 2
+albedo_color = Color(0.05, 0.05, 0.07, 1)
+
+[sub_resource type="BoxShape3D" id="ScreenShape"]
+resource_local_to_scene = true
+size = Vector3(3.2, 1.8, 0.05)
+
+[sub_resource type="QuadMesh" id="TrackQuad"]
+resource_local_to_scene = true
+size = Vector2(0.001, 0.001)
+
+[sub_resource type="StandardMaterial3D" id="TrackMaterial"]
+resource_local_to_scene = true
+shading_mode = 0
+transparency = 1
+cull_mode = 2
+albedo_color = Color(0, 0, 0, 0.55)
+
+[sub_resource type="QuadMesh" id="BufferQuad"]
+resource_local_to_scene = true
+size = Vector2(0.001, 0.001)
+
+[sub_resource type="StandardMaterial3D" id="BufferMaterial"]
+resource_local_to_scene = true
+shading_mode = 0
+transparency = 1
+cull_mode = 2
+albedo_color = Color(0.55, 0.57, 0.62, 0.7)
+
+[sub_resource type="QuadMesh" id="ProgressQuad"]
+resource_local_to_scene = true
+size = Vector2(0.001, 0.001)
+
+[sub_resource type="StandardMaterial3D" id="ProgressMaterial"]
+resource_local_to_scene = true
+shading_mode = 0
+transparency = 1
+cull_mode = 2
+albedo_color = Color(0.95, 0.25, 0.25, 0.95)
+
+[node name="VideoScreen" type="StaticBody3D"]
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("1")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("ScreenQuad")
+material_override = SubResource("ScreenMaterial")
+
+[node name="Placeholder" type="Label3D" parent="."]
+modulate = Color(0.8, 0.85, 1, 1)
+pixel_size = 0.006
+text = "▶ video"
+font_size = 48
+outline_size = 12
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+shape = SubResource("ScreenShape")
+
+[node name="PlaybackUI" type="Node3D" parent="."]
+visible = false
+
+[node name="Track" type="MeshInstance3D" parent="PlaybackUI"]
+mesh = SubResource("TrackQuad")
+material_override = SubResource("TrackMaterial")
+metadata/base_color = Color(0, 0, 0, 0.55)
+
+[node name="Buffer" type="MeshInstance3D" parent="PlaybackUI"]
+mesh = SubResource("BufferQuad")
+material_override = SubResource("BufferMaterial")
+metadata/base_color = Color(0.55, 0.57, 0.62, 0.7)
+
+[node name="Progress" type="MeshInstance3D" parent="PlaybackUI"]
+mesh = SubResource("ProgressQuad")
+material_override = SubResource("ProgressMaterial")
+metadata/base_color = Color(0.95, 0.25, 0.25, 0.95)
+
+[node name="Time" type="Label3D" parent="PlaybackUI"]
+modulate = Color(0.9, 0.93, 1, 1)
+pixel_size = 0.0016
+font_size = 28
+outline_size = 8

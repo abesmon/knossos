@@ -14,7 +14,7 @@ extends Texture2D
 ## пустой. Сам маркер делегирует всё рисование default_texture — для рендера это обычная
 ## текстура.
 
-@export var default_texture: Texture2D:
+@export var default_texture: Texture2D = preload("res://resources/default_face.png"):
 	set(value):
 		default_texture = value
 		emit_changed()

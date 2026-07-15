@@ -8,12 +8,17 @@ extends AvatarApplier
 ## править скрипт.
 
 @export var animation_tree: AnimationTree
+## Публичное VRWML-представление ссылки. Authoring `.tscn` может по-прежнему хранить прямую
+## ссылку `animation_tree`; exporter преобразует её в относительный NodePath.
+@export var animation_tree_path: NodePath
 @export var bindings: Array[AvatarParamBinding] = []
 
 var _map: Dictionary = {}   # StringName -> String (путь свойства в дереве)
 
 
 func _ready() -> void:
+	if animation_tree == null and not animation_tree_path.is_empty():
+		animation_tree = get_node_or_null(animation_tree_path) as AnimationTree
 	for b in bindings:
 		if b != null and b.param != &"":
 			_map[b.param] = b.tree_path

@@ -1,0 +1,76 @@
+name: Maker Kit portability
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/maker-kit.yml"
+      - "addons/vrweb_tools/**"
+      - "schemas/**"
+      - "templates/vrweb_maker_starter/**"
+      - "tests/fixtures/maker_clean_project/**"
+      - "tests/run_maker_portability.py"
+  push:
+    paths:
+      - ".github/workflows/maker-kit.yml"
+      - "addons/vrweb_tools/**"
+      - "schemas/**"
+      - "templates/vrweb_maker_starter/**"
+      - "tests/fixtures/maker_clean_project/**"
+      - "tests/run_maker_portability.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.6.3-stable
+
+jobs:
+  portability:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: Godot_v4.6.3-stable_linux.x86_64.zip
+            binary: Godot_v4.6.3-stable_linux.x86_64
+          - os: macos-latest
+            asset: Godot_v4.6.3-stable_macos.universal.zip
+            binary: Godot.app/Contents/MacOS/Godot
+          - os: windows-latest
+            asset: Godot_v4.6.3-stable_win64.exe.zip
+            binary: Godot_v4.6.3-stable_win64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download official Godot editor
+        shell: python
+        env:
+          GODOT_ASSET: ${{ matrix.asset }}
+          GODOT_BINARY: ${{ matrix.binary }}
+        run: |
+          import os
+          from pathlib import Path
+          from urllib.request import urlretrieve
+          from zipfile import ZipFile
+
+          root = Path.cwd()
+          install = root / ".ci-godot"
+          archive = install / os.environ["GODOT_ASSET"]
+          install.mkdir()
+          url = (
+              "https://github.com/godotengine/godot/releases/download/"
+              f"{os.environ['GODOT_VERSION']}/{os.environ['GODOT_ASSET']}"
+          )
+          urlretrieve(url, archive)
+          with ZipFile(archive) as bundle:
+              bundle.extractall(install)
+          binary = (install / os.environ["GODOT_BINARY"]).resolve()
+          binary.chmod(0o755)
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env:
+              env.write(f"GODOT={binary}\n")
+
+      - name: Verify schema, asset paths and deterministic dist
+        run: python tests/run_maker_portability.py

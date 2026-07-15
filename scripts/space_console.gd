@@ -4,9 +4,9 @@ extends PanelContainer
 ## Консоль пространства (клавиша `~`, как DevTools в браузере): показывает HTML-репрезентацию
 ## текущего пространства. Два редактора — ничего не реконструируется из геометрии
 ## (см. docs/space-console.md):
-##   • страница (процедурный HTML, без <vrweb>) — сериализация ХРАНИМОГО дерева HtmlNode.
+##   • страница (процедурный HTML, без <vrwml>) — сериализация ХРАНИМОГО дерева HtmlNode.
 ##     Read-only ФИЗИЧЕСКИ: процедурную часть править бессмысленно;
-##   • СЦЕНА — единый СЛИТЫЙ блок <vrweb>: узлы страницы с применёнными эфемерными патчами +
+##   • СЦЕНА — единый СЛИТЫЙ блок <vrwml>: узлы страницы с применёнными эфемерными патчами +
 ##     добавленные узлы + мировые объекты (пузыри/штрихи). Пользователь редактирует его как
 ##     одну сущность, не думая, что запечено в страницу, а что — эфемерная дельта.
 ## «Сохранить» пересчитывает правку В ДЕЛЬТУ (SceneHtml.diff_scene: vrweb-patch/vrweb-node/
@@ -17,15 +17,15 @@ extends PanelContainer
 ## Ожидание ack от авторитета: не ответил (ушёл/потеря) — считаем правку отклонённой.
 const ACK_TIMEOUT_SEC := 5.0
 ## Подсказка по умолчанию в строке статуса.
-const HINT := "Правьте блок <vrweb> — наружу уйдёт только дельта · Ctrl/Cmd+S — сохранить · ~ — закрыть"
+const HINT := "Правьте блок <vrwml> — наружу уйдёт только дельта · Ctrl/Cmd+S — сохранить · ~ — закрыть"
 
-var _page_view: CodeEdit       # страница: только чтение (контекст пространства)
-var _editor: CodeEdit          # слитый блок <vrweb>: единственная редактируемая область
-var _status: Label
-var _save_btn: Button
-var _cancel_btn: Button
-var _flush_btn: Button         # «В страницу»: флаш дельты на сервер (docs/page-persistence.md)
-var _get_page_html: Callable   # () -> String — хранимое дерево страницы БЕЗ <vrweb> (main)
+@onready var _page_view: CodeEdit = $Margin/VBox/Split/PageSection/PageView
+@onready var _editor: CodeEdit = $Margin/VBox/Split/SceneSection/Editor
+@onready var _status: Label = $Margin/VBox/Header/Status
+@onready var _save_btn: Button = $Margin/VBox/Header/Save
+@onready var _cancel_btn: Button = $Margin/VBox/Header/Cancel
+@onready var _flush_btn: Button = $Margin/VBox/Header/Flush
+var _get_page_html: Callable   # () -> String — хранимое дерево страницы БЕЗ <vrwml> (main)
 var _get_page_index: Callable  # () -> Dictionary — индекс vrweb-узлов страницы (main)
 var _get_page_url: Callable    # () -> String — URL текущей страницы (main._current_url)
 var _pristine := ""            # последний отрендеренный блок: text == _pristine → правок нет
@@ -40,7 +40,7 @@ var _style_error: StyleBoxFlat
 var _crypto := Crypto.new()    # nonce для payload флаша
 
 
-## Колбэки main: get_page_html — сериализация документа страницы без <vrweb>;
+## Колбэки main: get_page_html — сериализация документа страницы без <vrwml>;
 ## get_page_index — индекс vrweb-узлов страницы (SceneHtml.build_page_index);
 ## get_page_url — URL текущей страницы (для payload флаша и same-origin проверки).
 func setup(get_page_html: Callable, get_page_index: Callable, get_page_url: Callable) -> void:
@@ -50,124 +50,22 @@ func setup(get_page_html: Callable, get_page_index: Callable, get_page_url: Call
 
 
 func _ready() -> void:
-	visible = false
-	_build_ui()
+	_style_normal = get_theme_stylebox("panel").duplicate()
+	_style_error = _style_normal.duplicate()
+	_style_error.border_color = Color(0.9, 0.2, 0.2)
+	_cancel_btn.pressed.connect(_on_cancel)
+	_save_btn.pressed.connect(_on_save)
+	_flush_btn.pressed.connect(_on_flush)
+	_editor.gui_input.connect(_on_editor_input)
 	NetworkManager.scene_object_added.connect(func(_id, _o): _on_scene_changed())
 	NetworkManager.scene_object_updated.connect(func(_id, _o): _on_scene_changed())
 	NetworkManager.scene_object_removed.connect(func(_id): _on_scene_changed())
+	NetworkManager.scene_config_changed.connect(func(_config): _on_scene_changed())
 	NetworkManager.scene_reset.connect(_on_scene_changed)
 	NetworkManager.scene_action_acked.connect(_on_acked)
 
-	_timeout = Timer.new()
-	_timeout.one_shot = true
-	_timeout.wait_time = ACK_TIMEOUT_SEC
+	_timeout = $AckTimeout
 	_timeout.timeout.connect(_on_ack_timeout)
-	add_child(_timeout)
-
-
-func _build_ui() -> void:
-	# Нижняя половина экрана, во всю ширину (как панель DevTools).
-	anchor_left = 0.0
-	anchor_right = 1.0
-	anchor_top = 0.52
-	anchor_bottom = 1.0
-	offset_left = 0
-	offset_right = 0
-	offset_top = 0
-	offset_bottom = 0
-
-	# Красная обводка отклонённой правки — сменой стиля панели.
-	_style_normal = StyleBoxFlat.new()
-	_style_normal.bg_color = Color(0.09, 0.1, 0.12, 0.97)
-	_style_normal.set_border_width_all(2)
-	_style_normal.border_color = Color(0.25, 0.27, 0.32)
-	_style_error = _style_normal.duplicate()
-	_style_error.border_color = Color(0.9, 0.2, 0.2)
-	add_theme_stylebox_override("panel", _style_normal)
-
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 8)
-	add_child(margin)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 6)
-	margin.add_child(vbox)
-
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 8)
-	vbox.add_child(header)
-
-	var title := Label.new()
-	title.text = "Консоль пространства"
-	header.add_child(title)
-
-	_status = Label.new()
-	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_status.clip_text = true
-	_status.add_theme_color_override("font_color", Color(0.62, 0.65, 0.7))
-	_status.text = HINT
-	header.add_child(_status)
-
-	_cancel_btn = Button.new()
-	_cancel_btn.text = "Отменить"
-	_cancel_btn.pressed.connect(_on_cancel)
-	header.add_child(_cancel_btn)
-
-	_save_btn = Button.new()
-	_save_btn.text = "Сохранить"
-	_save_btn.pressed.connect(_on_save)
-	header.add_child(_save_btn)
-
-	# Флаш дельты в страницу (persist-атрибут блока <vrweb>): видна только на страницах,
-	# анонсирующих персистенцию. См. docs/page-persistence.md.
-	_flush_btn = Button.new()
-	_flush_btn.text = "В страницу"
-	_flush_btn.tooltip_text = "Сохранить накопленную дельту оверлея в саму страницу на её сервере"
-	_flush_btn.pressed.connect(_on_flush)
-	header.add_child(_flush_btn)
-
-	# Две области с перетаскиваемым разделителем: страница (read-only) и <ephemeral>.
-	var split := VSplitContainer.new()
-	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(split)
-
-	_page_view = _make_code_edit()
-	_page_view.editable = false
-	# Приглушаем read-only текст, чтобы редактируемая область читалась как «рабочая».
-	_page_view.add_theme_color_override("font_readonly_color", Color(0.55, 0.58, 0.63))
-	split.add_child(_section("Страница (процедурный HTML) — только чтение", _page_view))
-
-	_editor = _make_code_edit()
-	# Ctrl/Cmd+S внутри редактора — «Сохранить».
-	_editor.gui_input.connect(_on_editor_input)
-	split.add_child(_section("Сцена <vrweb> — страница + эфемерные изменения (единый слой)", _editor))
-
-
-func _make_code_edit() -> CodeEdit:
-	var edit := CodeEdit.new()
-	edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	edit.gutters_draw_line_numbers = true
-	edit.indent_size = 2
-	edit.scroll_smooth = true
-	var mono := SystemFont.new()
-	mono.font_names = PackedStringArray(["Menlo", "Consolas", "DejaVu Sans Mono", "monospace"])
-	edit.add_theme_font_override("font", mono)
-	edit.add_theme_font_size_override("font_size", 13)
-	return edit
-
-
-## Секция сплита: подпись + редактор.
-func _section(caption: String, edit: CodeEdit) -> Control:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 2)
-	var label := Label.new()
-	label.text = caption
-	label.add_theme_color_override("font_color", Color(0.5, 0.53, 0.58))
-	label.add_theme_font_size_override("font_size", 11)
-	box.add_child(label)
-	box.add_child(edit)
-	return box
 
 
 # --- Открытие/закрытие ---
@@ -209,9 +107,10 @@ func on_navigated() -> void:
 ## открытии не нужно — там документ другой.
 func _refresh(preserve := true) -> void:
 	_page_view.text = str(_get_page_html.call()) if _get_page_html.is_valid() else ""
-	_pristine = SceneHtml.serialize_scene(_page_index(), NetworkManager.scene_objects()) + "\n"
+	_pristine = SceneHtml.serialize_scene(_page_index(), NetworkManager.scene_objects(), true,
+		NetworkManager.scene_config_attrs()) + "\n"
 	_apply_editor_text(_pristine, preserve)
-	# «В страницу» — только на страницах, анонсирующих персистенцию (persist на блоке <vrweb>).
+	# «В страницу» — только на страницах, анонсирующих персистенцию (persist на блоке <vrwml>).
 	if _flush_btn != null:
 		_flush_btn.visible = _persist_endpoint() != ""
 	_mark_error(false)
@@ -273,7 +172,7 @@ func _on_save() -> void:
 		return
 	# Дельта: правки узлов страницы -> vrweb-patch, новые узлы -> vrweb-node, мировые -> kind.
 	var d := SceneHtml.diff_scene(_page_index(), NetworkManager.scene_objects(),
-		parsed, NetworkManager.new_object_id)
+		parsed, NetworkManager.new_object_id, NetworkManager.scene_config_attrs())
 	if not d["ok"]:
 		_reject("Не сохранено: %s" % d["error"])
 		return
@@ -285,6 +184,11 @@ func _on_save() -> void:
 	if not NetworkManager.in_room():
 		_reject("Не сохранено: вне комнаты, изменения некуда отправить")
 		return
+	for action in actions:
+		if str(action.get("op", "")) == SceneChanges.OP_UPDATE_CONFIG \
+				and NetworkManager.my_rank() > NetworkManager.INSTANCE_CONFIG_RANK:
+			_reject("Не сохранено: для смены конфигурации инстанса нужен ранг 0")
+			return
 	# Блокируем документ и шлём ТОЛЬКО изменения (не весь документ) — каждое действие
 	# отслеживается токеном, исход соберут _on_acked/_on_ack_timeout.
 	_sent_total = actions.size()
@@ -343,7 +247,7 @@ func _on_cancel() -> void:
 
 # --- Флаш: сохранить дельту оверлея В СТРАНИЦУ (docs/page-persistence.md) ---
 
-## Endpoint персистенции с блока <vrweb> ("" — страница read-only). Принимаем только
+## Endpoint персистенции с блока <vrwml> ("" — страница read-only). Принимаем только
 ## same-origin с самой страницей: чужому origin подписанные дельты не отправляем.
 func _persist_endpoint() -> String:
 	var attrs: Dictionary = _page_index().get("attrs", {})
@@ -610,7 +514,7 @@ func _on_editor_input(event: InputEvent) -> void:
 		_on_save()
 
 
-## Есть ли в разобранном тексте редактора что-то, кроме одного блока <vrweb>
+## Есть ли в разобранном тексте редактора что-то, кроме одного блока <vrwml>
 ## (страница правится не здесь). Возвращает описание находки или "" (всё чисто).
 static func _stray_content(root: HtmlNode) -> String:
 	var blocks := 0

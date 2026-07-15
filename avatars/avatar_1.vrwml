@@ -1,0 +1,20 @@
+<vrwml>
+  <Avatar name="DefaultAvatar">
+    <MeshInstance3D name="Mesh" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)" mesh="SubResource:::r0" surface_material_override/0="SubResource:::r1"/>
+    <MeshInstance3D name="Face" transform="Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 1.45, -0.42)" mesh="SubResource:::r2" surface_material_override/0="SubResource:::r3">
+      <Node3D name="MouthObject" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.11437106, 0)">
+        <MeshInstance3D name="MeshInstance3D" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 0.1, 0, 0, 0)" mesh="SubResource:::r4"/>
+      </Node3D>
+    </MeshInstance3D>
+    <LookPitchApplier name="LookPitchApplier" target_path="NodePath(&quot;../Face&quot;)" pitch_factor="0.35"/>
+    <UserTextureApplier name="UserTextureApplier"/>
+    <VoiceScaleApplier name="VoiceScaleApplier" target_path="NodePath(&quot;../Face/MouthObject&quot;)"/>
+  </Avatar>
+  <Resource id="r0" type="CapsuleMesh" radius="0.4" height="1.8"/>
+  <Resource id="r1" type="StandardMaterial3D" albedo_color="Color(0.3, 0.65, 1, 1)"/>
+  <Resource id="r2" type="QuadMesh" size="Vector2(0.55, 0.55)"/>
+  <Resource id="r3" type="StandardMaterial3D" transparency="1" cull_mode="2" albedo_texture="SubResource:::r5"/>
+  <Resource id="r4" type="SphereMesh" material="SubResource:::r6" radius="0.07" height="0.1" radial_segments="5" rings="4"/>
+  <Resource id="r5" type="UserSettingsAvatarTexture"/>
+  <Resource id="r6" type="StandardMaterial3D" albedo_color="Color(1, 0.18431373, 0, 1)"/>
+</vrwml>

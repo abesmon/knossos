@@ -66,4 +66,4 @@ func _physics_process(delta: float) -> void:
 
 ## Снимок текущих параметров для отправки по сети.
 func snapshot() -> Dictionary:
-	return params.snapshot()
+	return AvatarParams.network_snapshot(params.snapshot())

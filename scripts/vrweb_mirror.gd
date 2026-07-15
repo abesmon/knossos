@@ -2,8 +2,8 @@ class_name VrwebMirror
 extends MeshInstance3D
 
 ## Зеркало в духе VRChat (VRC_MirrorReflection): плоскость, которая в реальном времени
-## показывает отражение сцены. Размещается кастомным VRWeb-тегом <VRWebMirror> (см.
-## scripts/vrweb_builder.gd и docs/vrweb-tags.md).
+## показывает отражение сцены. Размещается стандартным тегом VRWML <VRWebMirror> (см.
+## scripts/vrweb_builder.gd и docs/space/vrwml-tags.md).
 ##
 ## Техника — планарное отражение (работает и в GL Compatibility, в отличие от
 ## ReflectionProbe): отдельная камера в SubViewport ставится в зеркальное отражение
@@ -14,8 +14,6 @@ extends MeshInstance3D
 ## Плоскость лежит в локальной XY (как QuadMesh), отражающая сторона смотрит по +Z.
 ## Чтобы поставить зеркало — задайте transform узла (origin + поворот). Размер задаётся
 ## атрибутом size="ширина:высота" в метрах.
-
-const SHADER := preload("res://resources/mirror_reflection.gdshader")
 
 ## Слой видимости только для зеркал. Камера отражения его НЕ снимает — так зеркало не
 ## отражает само себя (и другие зеркала), без бесконечной обратной связи. Основная камера
@@ -31,9 +29,9 @@ var resolution_scale: float = 1.0
 ## зеркала под Compatibility-рендерер; см. resources/mirror_reflection.gdshader.
 var srgb_decode: float = 0.5
 
-var _sub_viewport: SubViewport
-var _refl_cam: Camera3D
-var _material: ShaderMaterial
+@onready var _sub_viewport: SubViewport = $ReflectionViewport
+@onready var _refl_cam: Camera3D = $ReflectionViewport/ReflectionCamera
+@onready var _material: ShaderMaterial = material_override
 
 
 ## Параметры из тега. Зовётся билдером до добавления в дерево (до _ready).
@@ -53,26 +51,9 @@ func _ready() -> void:
 	# Зеркало живёт только на своём слое, чтобы камера отражения его не снимала.
 	layers = 1 << (MIRROR_LAYER - 1)
 
-	_material = ShaderMaterial.new()
-	_material.shader = SHADER
 	_material.set_shader_parameter("srgb_decode", srgb_decode)
-	material_override = _material
-
-	# SubViewport использует мир родительского окна (own_world_3d = false по умолчанию),
-	# поэтому камера отражения видит ту же сцену.
-	_sub_viewport = SubViewport.new()
-	_sub_viewport.name = "ReflectionViewport"
-	_sub_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	_sub_viewport.handle_input_locally = false
-	_sub_viewport.audio_listener_enable_3d = false
-	add_child(_sub_viewport)
-
-	_refl_cam = Camera3D.new()
-	_refl_cam.name = "ReflectionCamera"
 	# Камера отражения не снимает слой зеркал — иначе зеркало отразило бы само себя.
 	_refl_cam.cull_mask = 0xFFFFF & ~(1 << (MIRROR_LAYER - 1))
-	_refl_cam.current = true
-	_sub_viewport.add_child(_refl_cam)
 
 	_material.set_shader_parameter("reflection_tex", _sub_viewport.get_texture())
 	set_process(true)

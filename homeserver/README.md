@@ -26,7 +26,8 @@ discovery — `/.well-known/vrweb`, сигналинг — `ws://host:8080/signa
 `PORT`. Данные (SQLite + подписывающий ключ) — в `data/`; бэкапить целиком.
 
 Помимо идентичности сервер хостит **персональные пространства** пользователей
-(`/s/<slug>`, управление — `/space` на веб-морде) и принимает флаш дельты эфемерного
+(`/s/<slug>`, управление — `/space`, владельческий редактор кода — `/space/code` на
+веб-морде) и принимает флаш дельты эфемерного
 слоя (`/api/v1/spaces/flush`) — см. [docs/personal-spaces.md](../docs/network/personal-spaces.md)
 и [docs/page-persistence.md](../docs/network/page-persistence.md). Ещё сервер отдаёт
 **presence** «где люди» (`/api/v1/presence`, веб-версия — `/presence`) —

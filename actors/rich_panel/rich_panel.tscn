@@ -22,6 +22,14 @@ offset_right = 760.0
 offset_bottom = 120.0
 bbcode_enabled = true
 
+[node name="ScrollThumb" type="ColorRect" parent="SubViewport"]
+visible = false
+mouse_filter = 2
+color = Color(0.45, 0.78, 1, 0.95)
+
 [node name="Mesh" type="MeshInstance3D" parent="."]
+
+[node name="Back" type="MeshInstance3D" parent="Mesh"]
+rotation = Vector3(0, 3.14159, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]

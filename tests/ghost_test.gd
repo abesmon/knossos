@@ -21,7 +21,6 @@ var _saw_left_early := false
 var _got_ghosted := false
 var _got_reclaimed := false
 var _got_expired := false
-var _flapper_quit_at := 0.0
 
 
 func _ready() -> void:

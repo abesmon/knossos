@@ -416,13 +416,17 @@ static func parse_color(token: String) -> Variant:
 		"transparent", "inherit", "initial", "unset", "revert", "currentcolor", "none":
 			return null
 	if token.begins_with("#"):
-		return Color.html(token) if Color.html_is_valid(token) else null
+		if not Color.html_is_valid(token):
+			return null
+		return Color.html(token)
 	if low.begins_with("rgb"):
 		return _parse_rgb_func(low)
 	if low.begins_with("hsl"):
 		return _parse_hsl_func(low)
 	var c := Color.from_string(low, Color(-1.0, -1.0, -1.0))
-	return c if c.r >= 0.0 else null
+	if c.r < 0.0:
+		return null
+	return c
 
 
 static func _parse_rgb_func(v: String) -> Variant:

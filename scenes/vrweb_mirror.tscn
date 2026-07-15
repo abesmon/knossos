@@ -1,0 +1,21 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/vrweb_mirror.gd" id="1"]
+[ext_resource type="Shader" path="res://resources/mirror_reflection.gdshader" id="2"]
+
+[sub_resource type="ShaderMaterial" id="MirrorMaterial"]
+resource_local_to_scene = true
+shader = ExtResource("2")
+
+[node name="VRWebMirror" type="MeshInstance3D"]
+script = ExtResource("1")
+material_override = SubResource("MirrorMaterial")
+
+[node name="ReflectionViewport" type="SubViewport" parent="."]
+render_target_update_mode = 4
+handle_input_locally = false
+audio_listener_enable_3d = false
+
+[node name="ReflectionCamera" type="Camera3D" parent="ReflectionViewport"]
+current = true
+cull_mask = 524287

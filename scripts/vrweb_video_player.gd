@@ -337,6 +337,11 @@ func is_playing() -> bool:
 	return _vsp != null and _vsp.is_playing() and not _vsp.paused
 
 
+## Каноническое намерение доступно и до открытия декодера (нужно initial state адаптера).
+func wants_playing() -> bool:
+	return _want_playing
+
+
 func position() -> float:
 	return _vsp.stream_position if _vsp != null else 0.0
 

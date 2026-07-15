@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 #
-# build.sh — собирает релизные билды knossos для Windows, macOS и Linux.
+# build.sh — собирает релизные билды Knossos и связанный VRWeb Maker Kit.
 #
 #   ./build.sh all       собрать все платформы (по умолчанию)
 #   ./build.sh mac       только macOS
 #   ./build.sh win       только Windows
 #   ./build.sh linux     только Linux x86_64
+#   ./build.sh kit       только Maker Kit (локальная быстрая проверка)
 #   ./build.sh --clean   удалить каталог build/ (кэш шаблонов сохраняется)
 #   ./build.sh --help
 #
 # Скрипт сам доустанавливает export templates нужной версии, если их нет,
-# подписывает macOS .app ad-hoc подписью и пакует результат в .zip.
+# подписывает macOS .app ad-hoc подписью и пакует клиент и Maker Kit в отдельные .zip.
 #
 # Переопределяемые переменные окружения:
 #   GODOT   — путь к бинарю Godot (по умолчанию ищется автоматически)
@@ -23,7 +24,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD="$ROOT/build"
 CACHE="$BUILD/.cache"
 NAME="knossos"
+MAKER_NAME="vrweb-maker-kit"
 PRESETS="$ROOT/export_presets.cfg"
+MACOS_PACKAGE_FILES="$ROOT/packaging/macos"
 BUILD_NUMBER_FILE="$BUILD/.build_number"   # локальный счётчик, не в гите (весь build/ в .gitignore)
 
 cd "$ROOT"
@@ -194,10 +197,15 @@ build_mac() {
     warn "Не нашёл libgdffmpeg в .app — видеоплеер может не работать"
   fi
 
+  step "Добавляю helper и инструкцию для первого запуска"
+  cp "$MACOS_PACKAGE_FILES/Open Knossos.command" "$dir/"
+  cp "$MACOS_PACKAGE_FILES/README - macOS.txt" "$dir/"
+  chmod +x "$dir/Open Knossos.command"
+
   step "Упаковка в zip (ditto, чтобы сохранить структуру бандла)"
   local zip="$BUILD/$NAME-$ARCHIVE_TAG-macos.zip"
   rm -f "$zip"
-  ( cd "$dir" && ditto -c -k --sequesterRsrc --keepParent "$NAME.app" "$zip" )
+  ditto -c -k --sequesterRsrc "$dir/" "$zip"
   ok "macOS готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
 }
 
@@ -255,13 +263,121 @@ build_linux() {
   ok "Linux готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
 }
 
+# --- связанный Maker Kit artifact ------------------------------------------
+# Maker Kit устанавливается независимо, но выпускается тем же release train, с теми же
+# semver/build number. Корень архива одновременно является готовым starter Godot project.
+build_maker_kit() {
+  local stage_parent="$BUILD/maker-kit-stage"
+  local stage="$stage_parent/$MAKER_NAME-$SEMVER"
+  local zip="$BUILD/$MAKER_NAME-$ARCHIVE_TAG.zip"
+  local catalog godot_compat
+
+  step "Сборка связанного VRWeb Maker Kit -> $(basename "$zip")"
+  verify_maker_schema
+  rm -rf "$stage_parent"
+  mkdir -p "$stage/addons" "$stage/schemas" "$stage/.vscode"
+  cp -R "$ROOT/templates/vrweb_maker_starter/." "$stage/"
+  rm -rf "$stage/.godot" "$stage/dist"
+  cp -R "$ROOT/addons/vrweb_tools" "$stage/addons/vrweb_tools"
+  cp "$ROOT/packaging/maker-kit/README.md" "$stage/README.md"
+  cp "$ROOT/packaging/maker-kit/vscode-settings.json" "$stage/.vscode/settings.json"
+  cp "$ROOT/schemas/vrweb-html-data.json" "$stage/schemas/vrweb-html-data.json"
+  stage_maker_changelog "$stage/CHANGELOG.md"
+
+  # project.godot — единственный source of truth; plugin manifest в артефакте получает тот же
+  # semver. Исходный manifest также держим синхронным для установки прямо из checkout.
+  sed -E "s/^version=.*/version=\"$SEMVER\"/" \
+    "$stage/addons/vrweb_tools/plugin.cfg" > "$stage/addons/vrweb_tools/plugin.cfg.tmp"
+  mv "$stage/addons/vrweb_tools/plugin.cfg.tmp" "$stage/addons/vrweb_tools/plugin.cfg"
+
+  policy="$(sed -nE 's/^const POLICY_VERSION := "([^"]+)".*/\1/p' \
+    "$ROOT/addons/vrweb_tools/vrweb_compatibility.gd" | head -1)"
+  godot_compat="$(printf '%s' "$VERSION_FULL" | awk -F. '{printf "%s.%s.x", $1, $2}')"
+  printf '{\n  "maker_kit": "%s",\n  "knossos": "%s",\n  "build": %s,\n  "godot": "%s",\n  "vrwml_policy": "%s"\n}\n' \
+    "$SEMVER" "$SEMVER" "$BUILD_NUMBER" "$godot_compat" "$policy" \
+    > "$stage/compatibility.json"
+
+  # Fail closed if the distributable addon regains a compile-time Knossos dependency.
+  if rg -n 'res://(scripts|actors|integrations/knossos)' "$stage/addons/vrweb_tools" \
+      -g '*.gd' | rg -v '^.*##' >/dev/null; then
+    die "Maker Kit addon снова содержит compile-time путь к Knossos"
+  fi
+
+  rm -f "$zip"
+  ( cd "$stage_parent" && zip -qr "$zip" "$(basename "$stage")" )
+  [[ -s "$zip" ]] || die "Maker Kit archive не создан"
+  unzip -tq "$zip" >/dev/null || die "Maker Kit archive повреждён"
+
+  verify_maker_kit_archive "$zip"
+  ok "Maker Kit готов: build/$(basename "$zip") ($(du -h "$zip" | cut -f1))"
+}
+
+verify_maker_schema() {
+  local log="$BUILD/maker-schema-check.log"
+  if ! "$GODOT" --headless --quiet --log-file "$log" --path "$ROOT" \
+      --script res://addons/vrweb_tools/vrweb_schema_cli.gd -- \
+      --output=res://schemas/vrweb-html-data.json --check >/dev/null 2>&1; then
+    tail -30 "$log" >&2
+    die "VRWML HTML completion schema отстала от strict policy Maker Kit"
+  fi
+  ok "HTML completion schema синхронна с strict policy Maker Kit"
+}
+
+stage_maker_changelog() {
+  local destination="$1"
+  if [[ -f "$ROOT/CHANGELOG.md" ]]; then
+    cp "$ROOT/CHANGELOG.md" "$destination"
+    return
+  fi
+
+  warn "Нет CHANGELOG.md — добавляю в Maker Kit служебную заметку вместо остановки сборки"
+  printf '# Changelog\n\nRelease notes for VRWeb Maker Kit %s were not included in this source checkout.\n' \
+    "$SEMVER" > "$destination"
+}
+
+verify_maker_kit_archive() {
+  local zip="$1" work project log
+  work="$(mktemp -d "${TMPDIR:-/tmp}/vrweb-maker-release.XXXXXX")"
+  log="$work/verify.log"
+  unzip -q "$zip" -d "$work/unpacked"
+  project="$work/unpacked/$MAKER_NAME-$SEMVER"
+  mkdir -p "$work/home"
+
+  step "Smoke-test Maker Kit из распакованного архива"
+  if ! HOME="$work/home" "$GODOT" --headless --quiet --path "$project" --import \
+      >"$log" 2>&1; then
+    tail -30 "$log" >&2
+    rm -rf "$work"
+    die "Maker Kit archive не импортируется как чистый Godot project"
+  fi
+  if ! HOME="$work/home" "$GODOT" --headless --quiet --path "$project" \
+      --script res://addons/vrweb_tools/vrweb_cli.gd -- \
+      --scene=res://world.tscn --output=res://dist/world.html --profile=strict \
+      --mode=exclusive --report=res://dist/report.json >>"$log" 2>&1; then
+    tail -30 "$log" >&2
+    rm -rf "$work"
+    die "Maker Kit archive не прошёл strict CLI smoke-test"
+  fi
+  [[ -s "$project/dist/world.html" && -s "$project/dist/report.json" \
+      && -s "$project/compatibility.json" \
+      && -s "$project/schemas/vrweb-html-data.json" ]] || {
+    tail -30 "$log" >&2
+    rm -rf "$work"
+    die "Maker Kit archive не создал ожидаемые strict build outputs"
+  }
+  rm -rf "$work"
+  ok "Maker Kit archive работает как чистый standalone project"
+}
+
 # --- main -------------------------------------------------------------------
 usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
 
 target="${1:-all}"
 case "$target" in
   -h|--help) usage; exit 0 ;;
-  --clean)   rm -rf "$BUILD/macos" "$BUILD/windows" "$BUILD/linux" "$BUILD/$NAME-"*.zip; ok "build/ очищен (кэш шаблонов сохранён)"; exit 0 ;;
+  --clean)   rm -rf "$BUILD/macos" "$BUILD/windows" "$BUILD/linux" \
+               "$BUILD/maker-kit-stage" "$BUILD/$NAME-"*.zip "$BUILD/$MAKER_NAME-"*.zip; \
+             ok "build/ очищен (кэш шаблонов сохранён)"; exit 0 ;;
 esac
 
 step "Godot: $GODOT ($VERSION_FULL)"
@@ -281,7 +397,10 @@ case "$target" in
   win|windows)      build_win ;;
   linux|lin)        build_linux ;;
   all)              build_mac; build_win; build_linux ;;
+  kit|maker-kit)    : ;;
   *)                die "Неизвестная цель: $target (см. --help)" ;;
 esac
+
+build_maker_kit
 
 ok "Сборка завершена."

@@ -123,12 +123,52 @@ def _space_page(request: Request, user: sqlite3.Row) -> HTMLResponse:
                  editors=spaces.editors(st.db, space["id"]))
 
 
+def _space_code_page(request: Request, user: sqlite3.Row, *, content: str | None = None,
+                     error: str | None = None, saved: bool = False,
+                     status_code: int = 200) -> HTMLResponse:
+    st = request.app.state
+    space = spaces.get_or_create_home(st.db, st.cfg, user)
+    response = _page(request, "space_code.html", user=user, space=space,
+                     content=str(space["content"]) if content is None else content,
+                     error=error, saved=saved)
+    response.status_code = status_code
+    return response
+
+
 @router.get("/space", response_class=HTMLResponse)
 def space_page(request: Request):
     user = _cookie_user(request)
     if user is None:
         return RedirectResponse("/login", status_code=303)
     return _space_page(request, user)
+
+
+@router.get("/space/code", response_class=HTMLResponse)
+def space_code_page(request: Request, saved: bool = False):
+    """Редактор всегда открывает пространство пользователя из HttpOnly-сессии.
+
+    В URL намеренно нет space id/slug: выбрать чужое пространство невозможно, а список
+    редакторов persistence не даёт доступа к этой владельческой веб-странице.
+    """
+    user = _cookie_user(request)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    return _space_code_page(request, user, saved=saved)
+
+
+@router.post("/space/code", response_class=HTMLResponse)
+def space_code_save(request: Request, content: str = Form("")):
+    user = _cookie_user(request)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    st = request.app.state
+    space = spaces.get_or_create_home(st.db, st.cfg, user)
+    try:
+        spaces.validate_content(content)
+    except spaces.ContentError as e:
+        return _space_code_page(request, user, content=content, error=str(e), status_code=400)
+    spaces.save_content(st.db, space["id"], content)
+    return RedirectResponse("/space/code?saved=true", status_code=303)
 
 
 @router.post("/space/settings")

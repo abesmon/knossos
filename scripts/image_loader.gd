@@ -10,7 +10,7 @@ extends Node
 ## незавершённые запросы умирают — нет смысла дотягивать картинки старой страницы.
 
 ## Группа для поиска лоадера текущего мира из узлов, которых строит не WorldGenerator
-## (PlacedImage из эфемерного слоя/vrweb-тега). Лоадер один на мир (см. main._rebuild_world).
+## (ImagePanel из эфемерного слоя/vrweb-тега). Лоадер один на мир (см. main._rebuild_world).
 const GROUP := "image_loader"
 
 const MAX_CONCURRENT := 6
@@ -49,8 +49,19 @@ func request_image(url: String, on_ready: Callable) -> void:
 	# блоба может не быть в комнате вовсе — очередь картинок страницы не должна встать.
 	# Колбэк — СВЯЗАННЫЙ метод (не лямбда): когда мир снесёт лоадер, Callable станет
 	# невалидным и BlobStore вычистит ожидание (перестанет качать ненужное).
-	if BlobStore.is_blob_url(url):
-		BlobStore.request(url, _on_blob_bytes.bind(url))
+	# URL classification belongs to the pure protocol, not to the runtime autoload. Editor
+	# previews instantiate this loader from a @tool plugin, where BlobStore is intentionally a
+	# placeholder; touching it for an ordinary https:// texture would fail before downloading.
+	if BlobProtocol.is_blob_url(url):
+		var blob_store := get_node_or_null("/root/BlobStore")
+		if blob_store == null or not blob_store.has_method("request"):
+			push_warning("ImageLoader: BlobStore unavailable for %s" % url)
+			# Blob requests do not reserve a queue slot while waiting. Reserve one only so the
+			# common failure path can balance it in _deliver().
+			_active += 1
+			_finish(url, PackedByteArray(), PackedStringArray())
+			return
+		blob_store.call("request", url, _on_blob_bytes.bind(url))
 		return
 	_queue.append(url)
 	_pump()

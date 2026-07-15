@@ -6,19 +6,27 @@ extends Node3D
 ## прокидывает их в шину, а аватар сам анимируется. Это узел, который делает аватар
 ## заменяемым независимо от того, кто его «носит» (RemotePlayer, будущий локальный mirror).
 
-## Сцена аватара по умолчанию (первый из бандл-пака res://avatars/). Корень сцены — Avatar.
-@export var avatar_scene: PackedScene = preload("res://avatars/avatar_1.tscn")
+## Опциональная явная сцена для служебных/тестовых хостов. Обычный runtime-дефолт резолвится
+## из vrwebavatar://1, чтобы exported build не зависел от authoring-файла avatar_1.tscn.
+@export var avatar_scene: PackedScene
 
 var params := AvatarParameters.new()
 
 var _avatar: Avatar
 var _nick := ""
 var _face: Texture2D
+var _default_resolver: AvatarResolver
 
 
 func _ready() -> void:
 	if _avatar == null and avatar_scene != null:
 		_mount(avatar_scene.instantiate())
+	elif _avatar == null:
+		_default_resolver = AvatarResolver.new()
+		add_child(_default_resolver)
+		_default_resolver.resolve(AvatarResolver.DEFAULT_URI, func(scene: PackedScene) -> void:
+			if _avatar == null and scene != null:
+				set_avatar(scene))
 
 
 ## Сменить аватар во время жизни (например, выбрать другую модель). Новый аватар сразу
