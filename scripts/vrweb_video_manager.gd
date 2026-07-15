@@ -30,6 +30,39 @@ func scan(root: Node) -> void:
 	_bind_screens(root)
 
 
+## Повторное сканирование после замены процедурного HtmlLayer. Удалённые вместе со слоем
+## declarative players снимаем из registry/Replicated State; синтетические src-плееры,
+## живущие детьми самого manager, сохраняем и переиспользуем новыми экранами.
+func rescan(root: Node) -> void:
+	var referenced := {}
+	_collect_screen_player_ids(root, referenced)
+	for id in _players.keys():
+		var player: VrwebVideoPlayer = _players[id]
+		var synthetic_needed := is_instance_valid(player) and player.get_parent() == self \
+			and referenced.has(id)
+		if synthetic_needed or (is_instance_valid(player) and player.get_parent() != self \
+			and player.is_inside_tree()):
+			continue
+		_players.erase(id)
+		_revisions.erase(id)
+		NetworkManager.unregister_replicated_object(id, SCHEMA_ID)
+		if is_instance_valid(player) and player.get_parent() == self:
+			remove_child(player) # scan(root) ниже не должен немедленно зарегистрировать его снова
+			player.queue_free()
+	scan(root)
+
+
+func _collect_screen_player_ids(node: Node, out: Dictionary) -> void:
+	if node is VrwebVideoScreen:
+		var screen := node as VrwebVideoScreen
+		if screen.player_id != "":
+			out[screen.player_id] = true
+		elif screen.src != "":
+			out["src:" + screen.src] = true
+	for child in node.get_children():
+		_collect_screen_player_ids(child, out)
+
+
 func _collect_players(node: Node) -> void:
 	if node is VrwebVideoPlayer:
 		_register(node as VrwebVideoPlayer)

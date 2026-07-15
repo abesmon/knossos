@@ -43,6 +43,15 @@ var _player: Player
 # после _rebuild_world и не возобновилась). Перезапись при следующей навигации освобождает
 # старый — его корутина увидит снесённый контейнер и сама прекратится.
 var _world_gen: WorldGenerator = null
+# Процедурный HTML живёт отдельно от VRWML/overlay/network views, чтобы instance config mode
+# мог снять/вернуть только его без навигации и пересборки комнаты.
+var _html_layer: Node3D = null
+var _page_space: Dictionary = {}
+var _page_seed := 0
+var _world_image_loader: ImageLoader = null
+var _video_manager: VrwebVideoManager = null
+var _base_scene_mode := VrwebBuilder.MODE_COMBINE
+var _effective_scene_mode := VrwebBuilder.MODE_COMBINE
 @onready var _status: Label = _ui.status
 # «Светофор» связи слева от строки статуса: цвет = агрегированное состояние WebRTC-связи
 # (NetworkManager.connection_status), тултип — развёрнутый текст. Кружок = Panel с круглым
@@ -756,6 +765,12 @@ func _leave_loading_hub() -> void:
 ## remove_child нужен сразу: queue_free удаляет из дерева только в конце кадра.
 func _clear_world() -> void:
 	_world_gen = null
+	_html_layer = null
+	_page_space = {}
+	_world_image_loader = null
+	_video_manager = null
+	_base_scene_mode = VrwebBuilder.MODE_COMBINE
+	_effective_scene_mode = VrwebBuilder.MODE_COMBINE
 	_remote_view = null
 	for child in _world.get_children():
 		if child == _player:
@@ -776,6 +791,7 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	var image_loader := ImageLoader.new()
 	image_loader.name = "ImageLoader"
 	_world.add_child(image_loader)
+	_world_image_loader = image_loader
 
 	# Капсулы других игроков живут в мире: при навигации мир сносится — старые капсулы
 	# исчезают (ушёл со страницы = вышел из комнаты), view пересоздаётся для новой.
@@ -810,24 +826,21 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 
 	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
 	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).
-	var video_manager := VrwebVideoManager.new()
-	video_manager.name = "VrwebVideoManager"
-	_world.add_child(video_manager)
+	_video_manager = VrwebVideoManager.new()
+	_video_manager.name = "VrwebVideoManager"
+	_world.add_child(_video_manager)
 
 	# mode="exclusive" — HTML-сцену не строим вовсе, в мире только узлы vrweb.
 	var exclusive: bool = vrweb.get("found", false) and vrweb.get("mode", "") == VrwebBuilder.MODE_EXCLUSIVE
+	_base_scene_mode = VrwebBuilder.MODE_EXCLUSIVE if exclusive else VrwebBuilder.MODE_COMBINE
+	_effective_scene_mode = _base_scene_mode
+	_page_space = space
+	_page_seed = PageFetcher.space_seed(url, TopologyBuilder.signature(space))
 	var gen: WorldGenerator = null
 	if exclusive:
 		_label_positions = {}
 	else:
-		# Сид пространства — от хоста (base_url) и ПОДПИСИ ТОПОЛОГИИ, а не от полного URL:
-		# топологически одинаковые страницы одного сайта дают идентичный мир. Инстанс
-		# мультиплеера остаётся по seed_key(url) — это отдельная ось (см. _join_current_room).
-		var seed_value := PageFetcher.space_seed(url, TopologyBuilder.signature(space))
-		gen = WorldGenerator.generate(space, _world, seed_value, _activate_transition, base_url, image_loader)
-		_label_positions = gen.label_positions
-	# Держим генератор живым на время потоковой достройки (см. поле _world_gen). exclusive — null.
-	_world_gen = gen
+		gen = _mount_html_layer()
 
 	# Спавн: приоритет у <VRWebSpawner>, затем спавн HTML-топологии «у первого объекта»,
 	# затем (exclusive без спавнера) дефолт у начала координат лицом к сцене.
@@ -850,17 +863,74 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	# достраивается порциями по кадрам (тайм-слайс), поэтому HTML-экраны появляются не сразу —
 	# сканируем после сигнала build_finished. Маленькие страницы строятся синхронно (build_complete
 	# уже true) — тогда сканируем тут же. В exclusive-режиме (gen == null) геометрии HTML нет.
-	if gen != null and not gen.build_complete:
-		gen.build_finished.connect(func():
-			if is_instance_valid(video_manager):
-				video_manager.scan(_world))
-	else:
-		video_manager.scan(_world)
+	# Для streaming callback уже подключён в _mount_html_layer; синхронный/exclusive сканируем сейчас.
+	if gen == null or gen.build_complete:
+		_video_manager.scan(_world)
 
 	# Внешние ресурсы (<ExtResource path="<url>">) качаются и вставляются асинхронно —
 	# прогрессивная подгрузка, как у картинок <img>. Общая логика с дебаг-превью редактора
 	# вынесена в VrwebExtInjector; оба лоадера живут в мире и сносятся при навигации.
 	VrwebExtInjector.inject(vrweb.get("ext", {}), image_loader, _world)
+
+
+## Создать только процедурный HTML-слой из сохранённой топологии. Не телепортирует игрока и
+## не касается VRWML/overlay/network views. Возвращённый генератор нужен начальному spawn.
+func _mount_html_layer() -> WorldGenerator:
+	if is_instance_valid(_html_layer) or _page_space.is_empty() or _world_image_loader == null:
+		return _world_gen
+	_html_layer = Node3D.new()
+	_html_layer.name = "HtmlLayer"
+	_world.add_child(_html_layer)
+	var gen := WorldGenerator.generate(_page_space, _html_layer, _page_seed,
+		_activate_transition, _base_url, _world_image_loader)
+	_world_gen = gen
+	_label_positions = gen.label_positions
+	if not gen.build_complete:
+		gen.build_finished.connect(_on_html_build_finished.bind(gen), CONNECT_ONE_SHOT)
+	return gen
+
+
+func _on_html_build_finished(gen: WorldGenerator) -> void:
+	# Старый генератор мог завершить callback уже после второго переключения режима.
+	if gen != _world_gen or not is_instance_valid(_html_layer):
+		return
+	if is_instance_valid(_video_manager):
+		_video_manager.rescan(_world)
+
+
+func _remove_html_layer() -> void:
+	_world_gen = null
+	_label_positions = {}
+	if is_instance_valid(_html_layer):
+		# Сразу исключаем слой из обходов/физики; queue_free завершит освобождение в конце кадра.
+		var parent := _html_layer.get_parent()
+		if parent != null:
+			parent.remove_child(_html_layer)
+		_html_layer.queue_free()
+	_html_layer = null
+	if is_instance_valid(_video_manager):
+		_video_manager.rescan(_world)
+
+
+## Применить effective instance mode без fetch/navigation/join_room и без смены позы.
+func _apply_instance_scene_config() -> void:
+	if _current_doc == null or _page_space.is_empty():
+		return
+	var mode := _base_scene_mode
+	var attrs := NetworkManager.scene_config_attrs()
+	if str(attrs.get("mode", "")).to_lower() == VrwebBuilder.MODE_EXCLUSIVE:
+		mode = VrwebBuilder.MODE_EXCLUSIVE
+	elif str(attrs.get("mode", "")).to_lower() == VrwebBuilder.MODE_COMBINE:
+		mode = VrwebBuilder.MODE_COMBINE
+	if mode == _effective_scene_mode:
+		return
+	_effective_scene_mode = mode
+	if mode == VrwebBuilder.MODE_EXCLUSIVE:
+		_remove_html_layer()
+	else:
+		var gen := _mount_html_layer()
+		if gen != null and gen.build_complete and is_instance_valid(_video_manager):
+			_video_manager.rescan(_world)
 
 
 ## Единый обработчик переходов от порталов и inline-ссылок RichPanel.
@@ -1277,6 +1347,9 @@ func _setup_ui_extras() -> void:
 	# собирает сама из индекса vrweb и эфемерного состояния NetworkManager.
 	_console.setup(_page_html_sans_vrweb, func() -> Dictionary: return _vrweb_index,
 		func() -> String: return _current_url)
+	NetworkManager.scene_config_changed.connect(func(_config): _apply_instance_scene_config())
+	# Snapshot/выход из комнаты заменяет config целиком без granular event.
+	NetworkManager.scene_reset.connect(_apply_instance_scene_config)
 
 
 ## Оверлей инспектора провенанса (F3): панель в правом верхнем углу с типом топологии и

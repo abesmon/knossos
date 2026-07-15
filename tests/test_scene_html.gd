@@ -27,6 +27,7 @@ func _initialize() -> void:
 	_test_scene_tombstone_page_node()
 	_test_scene_add_vrweb_node()
 	_test_scene_add_world_kind()
+	_test_scene_mode_config()
 	_test_scene_guards()
 	quit(1 if _failed else 0)
 
@@ -175,6 +176,39 @@ func _test_scene_add_world_kind() -> void:
 	_eq((a["props"]["position"] as Array).size(), 3, "props типизированы")
 
 
+## mode корня — allowlisted instance config, а не vrweb-patch/объектная дельта.
+func _test_scene_mode_config() -> void:
+	var index := _page_index() # base mode опущен => combine
+	var merged := SceneHtml.serialize_scene(index, {})
+	_ok(merged.begins_with("<vrwml mode=\"combine\">"), "console явно показывает base mode")
+	var edited := merged.replace("mode=\"combine\"", "mode=\"exclusive\"")
+	var parsed := SceneHtml.parse_scene(HtmlParser.parse(edited))
+	var d := SceneHtml.diff_scene(index, {}, parsed, func(): return "g")
+	_ok(d["ok"], "смена mode разрешена")
+	_eq(d["actions"].size(), 1, "смена mode → одно config-действие")
+	_eq(str(d["actions"][0]["op"]), SceneChanges.OP_UPDATE_CONFIG, "op=update-config")
+	_eq(str(d["actions"][0]["set"]["mode"]), "exclusive", "override=exclusive")
+
+	var config := {"mode": "exclusive"}
+	var effective := SceneHtml.serialize_scene(index, {}, true, config)
+	var persistence_view := SceneHtml.serialize_scene(index, {}, false, config)
+	_ok(persistence_view.begins_with("<vrwml mode=\"combine\">"),
+		"instance config не протекает в include_world=false persistence view")
+	parsed = SceneHtml.parse_scene(HtmlParser.parse(effective))
+	d = SceneHtml.diff_scene(index, {}, parsed, func(): return "g", config)
+	_eq(d["actions"].size(), 0, "effective config round-trip без фантомных действий")
+	parsed = SceneHtml.parse_scene(HtmlParser.parse(effective.replace(
+		"mode=\"exclusive\"", "mode=\"combine\"")))
+	d = SceneHtml.diff_scene(index, {}, parsed, func(): return "g", config)
+	_ok(d["actions"][0]["set"].has("mode") and d["actions"][0]["set"]["mode"] == null,
+		"возврат к base снимает override")
+
+	parsed = SceneHtml.parse_scene(HtmlParser.parse(merged.replace(
+		"mode=\"combine\"", "mode=\"broken\"")))
+	d = SceneHtml.diff_scene(index, {}, parsed, func(): return "g")
+	_ok(not d["ok"], "неизвестный mode отклонён")
+
+
 ## Запреты: перемещение узла страницы, удаление базового атрибута, смена класса.
 func _test_scene_guards() -> void:
 	var index := _page_index()
@@ -187,10 +221,10 @@ func _test_scene_guards() -> void:
 	var re_class := merged.replace("<StaticBody3D id=\"n0-0\" />", "<RigidBody3D id=\"n0-0\" />")
 	d = SceneHtml.diff_scene(index, {}, SceneHtml.parse_scene(HtmlParser.parse(re_class)), func(): return "g")
 	_ok(not d["ok"], "смена класса узла страницы → ошибка")
-	# Правка атрибутов самого блока <vrwml>.
-	var re_block := merged.replace("<vrwml>", "<vrwml mode=\"exclusive\">")
+	# Остальные атрибуты самого блока <vrwml> immutable (mode проверен отдельно выше).
+	var re_block := merged.replace("mode=\"combine\"", "mode=\"combine\" unexpected=\"x\"")
 	d = SceneHtml.diff_scene(index, {}, SceneHtml.parse_scene(HtmlParser.parse(re_block)), func(): return "g")
-	_ok(not d["ok"], "правка атрибутов блока → ошибка")
+	_ok(not d["ok"], "правка не-allowlisted атрибута блока → ошибка")
 
 
 ## Снимок состояния для большинства тестов: пузырь + штрих в корне.

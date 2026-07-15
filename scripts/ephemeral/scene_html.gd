@@ -15,6 +15,8 @@ const TAG := "ephemeral"
 
 ## Тег единого документа сцены (слитый слой): vrweb страницы + эфемерные дельты поверх.
 const SCENE_TAG := "vrwml"
+const MODE_COMBINE := "combine"
+const MODE_EXCLUSIVE := "exclusive"
 
 ## Kind'ы эфемерного ОВЕРЛЕЯ vrweb (дельты, из которых собирается слитый слой):
 ##   vrweb-node  — добавленный узел сцены: props { "tag": String, "attrs": {имя: raw-строка} }
@@ -390,7 +392,8 @@ static func _index_children(elem: HtmlNode, parent_id: String, path: Array, inde
 ## добавленные vrweb-node + (include_world) мировые объекты. У каждого элемента виден его
 ## id — по нему дифф отличает узел страницы от эфемерного объекта и от нового элемента.
 ## include_world=false даёт «флаш» — будущий <vrwml> страницы для персистенции на сервере.
-static func serialize_scene(index: Dictionary, objects: Dictionary, include_world := true) -> String:
+static func serialize_scene(index: Dictionary, objects: Dictionary, include_world := true,
+		config_attrs: Dictionary = {}) -> String:
 	# Патчи по целевому узлу и объекты по родителю ("", "<id>", "page:<node_id>").
 	var patches := {}
 	var by_parent := {}
@@ -419,7 +422,9 @@ static func serialize_scene(index: Dictionary, objects: Dictionary, include_worl
 			return ta < tb if ta != tb else str(a) < str(b))
 
 	var open := "<" + SCENE_TAG
-	var battrs: Dictionary = index.get("attrs", {})
+	# include_world=false — persistence/debug view базы: instance config туда принципиально
+	# не протекает, даже если вызывающий передал его по ошибке.
+	var battrs := effective_block_attrs(index, config_attrs if include_world else {})
 	for k in battrs:
 		open += " %s=\"%s\"" % [k, HtmlNode.escape_attr(str(battrs[k]))]
 	var lines: PackedStringArray = [open + ">"]
@@ -429,6 +434,19 @@ static func serialize_scene(index: Dictionary, objects: Dictionary, include_worl
 		_emit_scene_object(str(oid), objects, by_parent, 1, lines)
 	lines.append("</%s>" % SCENE_TAG)
 	return "\n".join(lines)
+
+
+## Эффективные attrs корня для консоли/runtime: база страницы + allowlisted config инстанса.
+## mode всегда показываем явно и нормализованно, даже если страница полагалась на combine default.
+static func effective_block_attrs(index: Dictionary, config_attrs: Dictionary = {}) -> Dictionary:
+	var attrs: Dictionary = (index.get("attrs", {}) as Dictionary).duplicate()
+	var mode := _normalized_mode(str(attrs.get("mode", MODE_COMBINE)))
+	if config_attrs.has("mode"):
+		var override := str(config_attrs["mode"]).to_lower()
+		if override == MODE_COMBINE or override == MODE_EXCLUSIVE:
+			mode = override
+	attrs["mode"] = mode
+	return attrs
 
 
 static func _emit_page_node(id: String, index: Dictionary, patches: Dictionary,
@@ -561,9 +579,31 @@ static func _parse_scene_children(node: HtmlNode, parent_entry: int, entries: Ar
 ## Правки узлов СТРАНИЦЫ становятся vrweb-patch (id "vpatch:<узел>"), новые PascalCase-теги —
 ## vrweb-node, новые lowercase-теги — мировые kind'ы (bubble/stroke/будущие). Наружу уходит
 ## ТОЛЬКО дельта — сами узлы страницы никуда не отправляются.
-static func diff_scene(index: Dictionary, objects: Dictionary, parsed: Dictionary, make_id: Callable) -> Dictionary:
-	if not _same_string_map(parsed.get("block_attrs", {}), index.get("attrs", {})):
-		return _err("атрибуты самого блока <%s> менять нельзя" % SCENE_TAG)
+static func diff_scene(index: Dictionary, objects: Dictionary, parsed: Dictionary,
+		make_id: Callable, config_attrs: Dictionary = {}) -> Dictionary:
+	# Root attrs страницы остаются immutable, кроме allowlisted instance config. V1 разрешает
+	# только mode; отсутствие mode в правке трактуется как стандартный combine.
+	var parsed_attrs: Dictionary = parsed.get("block_attrs", {})
+	var base_attrs: Dictionary = index.get("attrs", {})
+	for key in base_attrs:
+		if str(key) == "mode":
+			continue
+		if not parsed_attrs.has(key) or str(parsed_attrs[key]) != str(base_attrs[key]):
+			return _err("атрибуты самого блока <%s>, кроме mode, менять нельзя" % SCENE_TAG)
+	for key in parsed_attrs:
+		if str(key) == "mode":
+			continue
+		if not base_attrs.has(key) or str(parsed_attrs[key]) != str(base_attrs[key]):
+			return _err("атрибуты самого блока <%s>, кроме mode, менять нельзя" % SCENE_TAG)
+	var edited_mode := str(parsed_attrs.get("mode", MODE_COMBINE)).to_lower()
+	if edited_mode != MODE_COMBINE and edited_mode != MODE_EXCLUSIVE:
+		return _err("mode блока <%s> должен быть combine или exclusive" % SCENE_TAG)
+	var base_mode := _normalized_mode(str(base_attrs.get("mode", MODE_COMBINE)))
+	var current_mode := base_mode
+	if config_attrs.has("mode"):
+		var override := str(config_attrs["mode"]).to_lower()
+		if override == MODE_COMBINE or override == MODE_EXCLUSIVE:
+			current_mode = override
 	var entries: Array = parsed["entries"]
 	var page_nodes: Dictionary = index["nodes"]
 
@@ -588,6 +628,9 @@ static func diff_scene(index: Dictionary, objects: Dictionary, parsed: Dictionar
 			parents.append(str(ids[pe]))
 
 	var actions: Array = []
+	if edited_mode != current_mode:
+		actions.append({"op": SceneChanges.OP_UPDATE_CONFIG,
+			"set": {"mode": null if edited_mode == base_mode else edited_mode}})
 	# 2. Записи: узел страницы -> патч; эфемерный объект -> как раньше; новый -> add.
 	for i in entries.size():
 		var e: Dictionary = entries[i]
@@ -623,6 +666,10 @@ static func diff_scene(index: Dictionary, objects: Dictionary, parsed: Dictionar
 			continue
 		actions.append({"op": SceneChanges.OP_REMOVE, "id": str(oid)})
 	return {"ok": true, "error": "", "actions": actions}
+
+
+static func _normalized_mode(value: String) -> String:
+	return MODE_EXCLUSIVE if value.to_lower() == MODE_EXCLUSIVE else MODE_COMBINE
 
 
 ## Правка узла страницы: атрибуты сравниваются с БАЗОЙ (не с эффективным видом) — оверрайды,

@@ -46,7 +46,7 @@
 
 | Слой | Файл | Роль |
 |---|---|---|
-| **Машина состояний** (чистая, агностичная) | [scripts/ephemeral/scene_changes.gd](../../scripts/ephemeral/scene_changes.gd) `SceneChanges` | состояние + валидация + порядок; **не знает** про Godot/3D/RPC/kind. Только плоские данные |
+| **Машина состояний** (чистая, агностичная) | [scripts/ephemeral/scene_changes.gd](../../scripts/ephemeral/scene_changes.gd) `SceneChanges` | состояние + валидация + порядок; **не знает** про Godot/3D/RPC и семантику object kind, но валидирует маленькую схему root config. Только плоские данные |
 | **Транспорт** | [scripts/network_manager.gd](../../scripts/network_manager.gd) | action/event/snapshot поверх WebRTC RPC; владеет одним `SceneChanges`; не знает kind |
 | **Материализация** | [scripts/ephemeral_view.gd](../../scripts/ephemeral_view.gd) `EphemeralView` | строит 3D по `kind`; живёт в world |
 | **Тест контракта** | [tests/test_scene_changes.gd](../../tests/test_scene_changes.gd) | юнит-тест чистой машины (без сети/3D) |
@@ -56,7 +56,7 @@ Godot.
 
 ## Объект состояния
 
-Состояние — `id → object`, где object — плоский JSON-сериализуемый словарь:
+Основная часть состояния — `id → object`, где object — плоский JSON-сериализуемый словарь:
 
 | Поле | Тип | Смысл |
 |---|---|---|
@@ -72,6 +72,11 @@ Godot.
 Разбор, свойства и почему префикс недоверенный — в отдельном документе
 [object-id.md](object-id.md).
 
+Рядом, но не внутри object map, живёт единая конфигурация инстанса:
+`config = {attrs: {mode?}, by: user_id}`. Сейчас allowlist содержит только корневой атрибут
+`<vrwml mode="combine|exclusive">`. У config нет `id`, `author`, TTL или object ownership;
+это состояние комнаты, а `by` — только диагностика. Оно не входит в persistence object delta.
+
 ## Протокол
 
 ### Действие (инициатор → авторитет)
@@ -84,6 +89,7 @@ Godot.
 { "op": "update",   "id": "u1.3", "props": { "label": "новый" } }   // props — ПАТЧ (мердж; null удаляет ключ)
 { "op": "remove",   "id": "u1.3" }
 { "op": "reparent", "id": "u1.3", "parent": "u1.2" }
+{ "op": "update-config", "set": { "mode": "exclusive" } }
 ```
 
 Инициатор НЕ задаёт `author`/`ts`/`epoch`/`seq` — это привилегия авторитета.
@@ -97,7 +103,14 @@ Godot.
 { "epoch": 1, "seq": 7, "op": "add", "id": "u1.3", "kind": "bubble",
   "parent": "", "author": "a1b2…", "ts": 1719772800.0, "ttl": 30,
   "props": { … } }
+{ "epoch": 1, "seq": 8, "op": "update-config",
+  "set": { "mode": "exclusive" }, "by": "a1b2…" }
 ```
+
+`update-config` принимает только allowlisted ключи и валидные значения; `null` снимает
+override и возвращает базовый режим страницы. Некорректный config event не материализуется,
+но занимает свой `seq`, чтобы один испорченный пакет не превращал дальнейший ordered stream
+в постоянный GAP.
 
 ### Порядок: `(epoch, seq)`
 
@@ -127,7 +140,8 @@ Godot.
 
 ### Снимок (ресинк)
 
-`{ epoch, seq, objects }` — полное состояние. Нужен в двух случаях:
+`{ epoch, seq, objects, config }` — полное состояние. Config snapshot повторно проходит
+allowlist/schema-валидацию; невалидная часть сбрасывается. Снимок нужен в двух случаях:
 
 - **push новичку**: авторитет шлёт снимок при открытии p2p-канала (`_on_mp_peer_connected`);
 - **pull при смене авторитета / GAP**: пир запрашивает снимок (`_request_scene_snapshot`).
@@ -157,6 +171,12 @@ Godot.
 его не задаёт. Якорь доверия — тот же, что у рангов: самозаявленный `user_id`, который стек
 **намеренно не защищает** от подделки. Это не «компромисс до верификации», а часть модели;
 насколько доверять неподтверждённому автору — политика клиента, см. [ranks.md](ranks.md).
+
+Корневая конфигурация имеет отдельную ACL: транспорт передаёт
+`sender_can_config = rank_of_peer(sender) <= INSTANCE_CONFIG_RANK`, сейчас порог равен 0.
+Первый участник/authority автоматически имеет rank 0 и может делегировать его другим. После
+делегирования любой rank-0 пир может слать `update-config`; authority остаётся сериализатором,
+но не единственным пользователем с правом. Ранги комнаты никак не дают право на flush.
 
 ## Лимиты (защита)
 
@@ -197,11 +217,15 @@ HTML-дереве при выгрузке).
 | `new_object_id() -> String` | сгенерить адрес нового объекта (для `op=add`) |
 | `scene_objects() -> Dictionary` | снимок состояния (вьюха/отладка/выгрузка) |
 | `scene_object(id) -> Dictionary` | один объект |
+| `scene_config_attrs() -> Dictionary` | allowlisted root overrides текущего инстанса |
+| `scene_config() -> Dictionary` | config вместе с диагностическим `by` |
 | сигнал `scene_object_added(id, object)` | объект добавлен |
 | сигнал `scene_object_updated(id, object)` | объект изменён/перемещён (полное состояние) |
 | сигнал `scene_object_removed(id)` | объект снят |
+| сигнал `scene_config_changed(config)` | изменилась корневая конфигурация инстанса |
 | сигнал `scene_reset()` | состояние перезагружено снимком — пересобрать всё |
 | `const EPHEMERAL_ADMIN_RANK` | порог ранга для админ-обхода владения |
+| `const INSTANCE_CONFIG_RANK` | порог ранга для `update-config` (сейчас 0) |
 
 Сигналы несут **плоские данные**; консьюмер материализует по `kind`, не зная транспорта.
 

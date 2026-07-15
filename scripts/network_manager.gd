@@ -72,6 +72,9 @@ signal ranks_changed()
 signal scene_object_added(id: String, object: Dictionary)
 signal scene_object_updated(id: String, object: Dictionary)
 signal scene_object_removed(id: String)
+## Изменилась allowlisted конфигурация корня <vrwml> для текущего инстанса.
+## Dictionary имеет вид {attrs:{mode}, by:user_id}; это не объект и не попадает во flush.
+signal scene_config_changed(config: Dictionary)
 ## Состояние перезагружено снимком (вход в комнату / смена авторитета) — консьюмер пересобирает всё.
 signal scene_reset()
 ## Ответ авторитета на ОТСЛЕЖИВАЕМОЕ действие (request_scene_action_tracked): token — из
@@ -100,6 +103,8 @@ const DEFAULT_RANK := 1 << 30
 ## Ранг, при котором (и меньше) пир считается «админом» эфемерного слоя — может править/удалять
 ## ЧУЖИЕ объекты (обход проверки владения). 0 ≈ админ/авторитет. Фундамент под систему прав.
 const EPHEMERAL_ADMIN_RANK := 0
+## Ранг, позволяющий менять общую конфигурацию инстанса (<vrwml mode> в v1).
+const INSTANCE_CONFIG_RANK := 0
 
 ## Grace-период «призрака»: сколько секунд ушедший пир может вернуться (с новым peer_id, но
 ## тем же user_id), чтобы его капсула не «моргала» у остальных. Покрывает вынужденные
@@ -859,7 +864,7 @@ func request_scene_action(action: Dictionary) -> void:
 	if typeof(action) != TYPE_DICTIONARY:
 		return
 	if has_authority():
-		_authority_handle_action(action, Settings.user_id, my_rank() <= EPHEMERAL_ADMIN_RANK)
+		_authority_handle_action(action, Settings.user_id, my_rank())
 	elif _can_rpc():
 		var a := authority_id()
 		if a != 0:
@@ -878,7 +883,7 @@ func request_scene_action_tracked(action: Dictionary) -> int:
 	if typeof(action) != TYPE_DICTIONARY:
 		call_deferred("emit_signal", "scene_action_acked", token, false)
 	elif has_authority():
-		var accepted := _authority_handle_action(action, Settings.user_id, my_rank() <= EPHEMERAL_ADMIN_RANK)
+		var accepted := _authority_handle_action(action, Settings.user_id, my_rank())
 		call_deferred("emit_signal", "scene_action_acked", token, accepted)
 	elif _can_rpc() and authority_id() != 0:
 		var a := action.duplicate(true)
@@ -917,11 +922,22 @@ func scene_object(id: String) -> Dictionary:
 	return _scene.get_object(id)
 
 
-## Авторитет: применить действие и разослать получившиеся события. sender_user_id/sender_is_admin —
-## кто и с какими правами (авторитет доверяет себе как источнику расчёта). Возвращает,
+## Allowlisted override-атрибуты корня текущего инстанса (без базовых attrs страницы).
+func scene_config_attrs() -> Dictionary:
+	return _scene.config_attrs()
+
+
+func scene_config() -> Dictionary:
+	return _scene.config()
+
+
+## Авторитет: применить действие и разослать события. Ранг вычисляется здесь из доверенной
+## привязки peer_id->user_id, а не принимается из action. Возвращает,
 ## принял ли коммит мутацию (пустой список событий = отказ) — для ack инициатору.
-func _authority_handle_action(action: Dictionary, sender_user_id: String, sender_is_admin: bool) -> bool:
-	var events := _scene.authority_commit(action, sender_user_id, sender_is_admin, Time.get_unix_time_from_system())
+func _authority_handle_action(action: Dictionary, sender_user_id: String, sender_rank: int) -> bool:
+	var events := _scene.authority_commit(action, sender_user_id,
+		sender_rank <= EPHEMERAL_ADMIN_RANK, Time.get_unix_time_from_system(),
+		sender_rank <= INSTANCE_CONFIG_RANK)
 	_commit_scene_events(events)
 	return not events.is_empty()
 
@@ -947,6 +963,8 @@ func _emit_scene_event(event: Dictionary) -> void:
 			scene_object_updated.emit(id, _scene.get_object(id))
 		SceneChanges.OP_REMOVE:
 			scene_object_removed.emit(id)
+		SceneChanges.OP_UPDATE_CONFIG:
+			scene_config_changed.emit(_scene.config())
 
 
 ## Действие от пира — обрабатывает только авторитет (он адресат rpc_id). Если роль уже сменилась —
@@ -962,7 +980,7 @@ func _recv_scene_action(action: Dictionary) -> void:
 	# раньше ack — к приходу ответа инициатор уже применил результат.
 	var token := int(action.get("token", 0))
 	action.erase("token")
-	var accepted := _authority_handle_action(action, _user_ids.get(sender, ""), rank_of_peer(sender) <= EPHEMERAL_ADMIN_RANK)
+	var accepted := _authority_handle_action(action, _user_ids.get(sender, ""), rank_of_peer(sender))
 	if token > 0 and _can_rpc():
 		rpc_id(sender, "_recv_scene_ack", token, accepted)
 

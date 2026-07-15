@@ -60,6 +60,7 @@ func _ready() -> void:
 	NetworkManager.scene_object_added.connect(func(_id, _o): _on_scene_changed())
 	NetworkManager.scene_object_updated.connect(func(_id, _o): _on_scene_changed())
 	NetworkManager.scene_object_removed.connect(func(_id): _on_scene_changed())
+	NetworkManager.scene_config_changed.connect(func(_config): _on_scene_changed())
 	NetworkManager.scene_reset.connect(_on_scene_changed)
 	NetworkManager.scene_action_acked.connect(_on_acked)
 
@@ -106,7 +107,8 @@ func on_navigated() -> void:
 ## открытии не нужно — там документ другой.
 func _refresh(preserve := true) -> void:
 	_page_view.text = str(_get_page_html.call()) if _get_page_html.is_valid() else ""
-	_pristine = SceneHtml.serialize_scene(_page_index(), NetworkManager.scene_objects()) + "\n"
+	_pristine = SceneHtml.serialize_scene(_page_index(), NetworkManager.scene_objects(), true,
+		NetworkManager.scene_config_attrs()) + "\n"
 	_apply_editor_text(_pristine, preserve)
 	# «В страницу» — только на страницах, анонсирующих персистенцию (persist на блоке <vrwml>).
 	if _flush_btn != null:
@@ -170,7 +172,7 @@ func _on_save() -> void:
 		return
 	# Дельта: правки узлов страницы -> vrweb-patch, новые узлы -> vrweb-node, мировые -> kind.
 	var d := SceneHtml.diff_scene(_page_index(), NetworkManager.scene_objects(),
-		parsed, NetworkManager.new_object_id)
+		parsed, NetworkManager.new_object_id, NetworkManager.scene_config_attrs())
 	if not d["ok"]:
 		_reject("Не сохранено: %s" % d["error"])
 		return
@@ -182,6 +184,11 @@ func _on_save() -> void:
 	if not NetworkManager.in_room():
 		_reject("Не сохранено: вне комнаты, изменения некуда отправить")
 		return
+	for action in actions:
+		if str(action.get("op", "")) == SceneChanges.OP_UPDATE_CONFIG \
+				and NetworkManager.my_rank() > NetworkManager.INSTANCE_CONFIG_RANK:
+			_reject("Не сохранено: для смены конфигурации инстанса нужен ранг 0")
+			return
 	# Блокируем документ и шлём ТОЛЬКО изменения (не весь документ) — каждое действие
 	# отслеживается токеном, исход соберут _on_acked/_on_ack_timeout.
 	_sent_total = actions.size()

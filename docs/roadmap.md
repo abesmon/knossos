@@ -201,6 +201,9 @@ GDScript остаётся явно доверенным режимом с пра
 
 ### P2 — Space Console и live editing
 
+- [x] Реализовать rank-0 instance config override для `combine`/`exclusive`: общий
+  allowlisted config-state корня, без page opt-in и без участия в flush; проект контракта —
+  [client/space-console.md](client/space-console.md#смена-combine--exclusive-из-консоли).
 - [ ] UI восстановления tombstoned node.
 - [ ] Явная UX-обработка version skew и частичного отказа batch.
 - [ ] Пересборка специальных VRWeb-узлов при live patch либо документированное ограничение

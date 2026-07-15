@@ -24,6 +24,12 @@ const OP_ADD := "add"
 const OP_UPDATE := "update"
 const OP_REMOVE := "remove"
 const OP_REPARENT := "reparent"
+const OP_UPDATE_CONFIG := "update-config"
+
+# --- Конфигурация инстанса (не объекты и не persistence delta) ---
+const CONFIG_MODE := "mode"
+const MODE_COMBINE := "combine"
+const MODE_EXCLUSIVE := "exclusive"
 
 const PARENT_ROOT := ""
 const PAGE_PREFIX := "page:"   # parent="page:<nodeId>" — якорь к узлу HTML-дерева страницы
@@ -43,6 +49,7 @@ enum Apply { APPLIED, IGNORED, GAP }
 var reserved_ids := {}
 
 var _objects := {}        # id -> object (Dictionary)
+var _config := {"attrs": {}, "by": ""} # allowlisted root attrs <vrwml>, состояние инстанса
 var _epoch := 0           # эпоха авторитета (растёт при смене авторитета)
 var _seq := 0             # порядковый в пределах эпохи (последний применённый/выданный)
 var _last_seen_epoch := 0 # max эпоха, что мы вообще видели — для begin_authority
@@ -67,7 +74,9 @@ func begin_authority() -> void:
 ##   sender_user_id    — стабильный id инициатора (авторитет доверяет ему как источнику)
 ##   sender_is_admin   — есть ли у инициатора админ-право (обходит проверку владения)
 ##   now               — настенные часы авторитета (штамп ts)
-func authority_commit(action: Dictionary, sender_user_id: String, sender_is_admin: bool, now: float) -> Array:
+##   sender_can_config — право менять корневую конфигурацию инстанса (сейчас rank <= 0)
+func authority_commit(action: Dictionary, sender_user_id: String, sender_is_admin: bool,
+		now: float, sender_can_config := false) -> Array:
 	if typeof(action) != TYPE_DICTIONARY:
 		return []
 	match str(action.get("op", "")):
@@ -79,7 +88,31 @@ func authority_commit(action: Dictionary, sender_user_id: String, sender_is_admi
 			return _commit_remove(action, sender_user_id, sender_is_admin)
 		OP_REPARENT:
 			return _commit_reparent(action, sender_user_id, sender_is_admin)
+		OP_UPDATE_CONFIG:
+			return _commit_update_config(action, sender_user_id, sender_can_config)
 	return []
+
+
+## Корневая конфигурация не имеет object id/author ownership: это единое состояние комнаты.
+## Сейчас allowlist состоит только из mode; null снимает override и возвращает значение страницы.
+func _commit_update_config(action: Dictionary, sender_user_id: String, can_config: bool) -> Array:
+	if not can_config:
+		return []
+	var normalized := _normalize_config_patch(action.get("set", null))
+	if not normalized.get("ok", false):
+		return []
+	var patch: Dictionary = normalized["set"]
+	var attrs: Dictionary = _config["attrs"]
+	var changed := false
+	for key in patch:
+		if patch[key] == null:
+			changed = changed or attrs.has(key)
+		else:
+			changed = changed or not attrs.has(key) or attrs[key] != patch[key]
+	if not changed:
+		return []
+	_apply_config_patch(patch, sender_user_id)
+	return [_emit(OP_UPDATE_CONFIG, {"set": patch.duplicate(true), "by": sender_user_id})]
 
 
 ## Авторитет: истечь объекты с прошедшим TTL (каскадно с детьми) и вернуть события удаления.
@@ -209,6 +242,15 @@ func apply_event(event: Dictionary) -> int:
 		return Apply.IGNORED        # дубликат
 	if e_seq != _seq + 1:
 		return Apply.GAP            # пропуск в последовательности — ресинк
+	if str(event.get("op", "")) == OP_UPDATE_CONFIG:
+		var normalized := _normalize_config_patch(event.get("set", null))
+		# Даже некорректное событие от transport-authority занимает свой seq: локально оно не
+		# влияет на config, но и не превращает весь последующий поток в вечный GAP.
+		_seq = e_seq
+		if not normalized.get("ok", false):
+			return Apply.IGNORED
+		_apply_config_patch(normalized["set"], str(event.get("by", "")))
+		return Apply.APPLIED
 	_apply_op(event)
 	_seq = e_seq
 	return Apply.APPLIED
@@ -240,7 +282,8 @@ func _apply_op(event: Dictionary) -> void:
 # ============================================================================
 
 func snapshot() -> Dictionary:
-	return {"epoch": _epoch, "seq": _seq, "objects": _objects.duplicate(true)}
+	return {"epoch": _epoch, "seq": _seq, "objects": _objects.duplicate(true),
+		"config": _config.duplicate(true)}
 
 
 func load_snapshot(snap: Dictionary) -> void:
@@ -248,6 +291,13 @@ func load_snapshot(snap: Dictionary) -> void:
 		return
 	var objs = snap.get("objects", {})
 	_objects = (objs as Dictionary).duplicate(true) if typeof(objs) == TYPE_DICTIONARY else {}
+	_config = {"attrs": {}, "by": ""}
+	var incoming_config = snap.get("config", {})
+	if typeof(incoming_config) == TYPE_DICTIONARY:
+		var attrs = incoming_config.get("attrs", {})
+		var normalized := _normalize_config_snapshot(attrs)
+		if normalized.get("ok", false):
+			_config = {"attrs": normalized["attrs"], "by": str(incoming_config.get("by", ""))}
 	_epoch = int(snap.get("epoch", 0))
 	_seq = int(snap.get("seq", 0))
 	if _epoch > _last_seen_epoch:
@@ -267,6 +317,15 @@ func get_object(id: String) -> Dictionary:
 
 func has_object(id: String) -> bool:
 	return _objects.has(id)
+
+
+## Эффективные override-атрибуты корня (без значений базовой страницы).
+func config_attrs() -> Dictionary:
+	return (_config["attrs"] as Dictionary).duplicate(true)
+
+
+func config() -> Dictionary:
+	return _config.duplicate(true)
 
 
 func epoch() -> int:
@@ -307,6 +366,52 @@ func _parent_valid(parent: String) -> bool:
 func _props_ok(props: Dictionary) -> bool:
 	# Грубая оценка размера через JSON — заодно гарантия, что props сериализуемы.
 	return JSON.stringify(props).length() <= MAX_PROPS_BYTES
+
+
+## Валидация patch корневой конфигурации. Возвращаем структуру с ok, чтобы отличить
+## корректный пустой результат от отказа. V1: единственный ключ mode, null = снять override.
+func _normalize_config_patch(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY or (value as Dictionary).is_empty():
+		return {"ok": false}
+	var out := {}
+	for raw_key in (value as Dictionary).keys():
+		var key := str(raw_key)
+		if key != CONFIG_MODE:
+			return {"ok": false}
+		var raw = value[raw_key]
+		if raw == null:
+			out[key] = null
+			continue
+		var mode := str(raw).to_lower()
+		if mode != MODE_COMBINE and mode != MODE_EXCLUSIVE:
+			return {"ok": false}
+		out[key] = mode
+	return {"ok": true, "set": out}
+
+
+## Snapshot хранит итоговые attrs, поэтому null в нём недопустим.
+func _normalize_config_snapshot(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {"ok": false}
+	if (value as Dictionary).is_empty():
+		return {"ok": true, "attrs": {}}
+	var normalized := _normalize_config_patch(value)
+	if not normalized.get("ok", false):
+		return {"ok": false}
+	for v in (normalized["set"] as Dictionary).values():
+		if v == null:
+			return {"ok": false}
+	return {"ok": true, "attrs": (normalized["set"] as Dictionary).duplicate(true)}
+
+
+func _apply_config_patch(patch: Dictionary, by: String) -> void:
+	var attrs: Dictionary = _config["attrs"]
+	for key in patch:
+		if patch[key] == null:
+			attrs.erase(key)
+		else:
+			attrs[key] = patch[key]
+	_config["by"] = by
 
 
 func _children_of(id: String) -> Array:
