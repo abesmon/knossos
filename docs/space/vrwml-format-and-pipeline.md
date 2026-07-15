@@ -174,5 +174,5 @@ VRWML можно писать вручную или получать любым 
 
 Исторический префикс `Vrweb` во внутренних классах (`VrwebBuilder`, `VrwebExporter`,
 `VrwebContentPolicy`) не определяет имя формата. Карта кода принадлежит
-[implementation.md](../implementation.md) и [документу exporter-а](../vrweb-export.md), а не
+[client/implementation.md](../client/implementation.md) и [документу exporter-а](../vrweb-export.md), а не
 повторяется в спецификации.

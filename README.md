@@ -35,7 +35,7 @@ VRWeb специально проектируется **не как моноли
 - [docs/space/](docs/space/) — как HTML и VRWML превращаются в 3D-пространство;
 - [docs/network/](docs/network/) — сетевой слой: мультиплеер, домашние сервера, персистентность;
 - [docs/client/](docs/client/) — конкретные фичи клиента Knossos (звук, видео, аватары, сборка);
-- [docs/implementation.md](docs/implementation.md) — как фактически устроен код пайплайна;
+- [docs/client/implementation.md](docs/client/implementation.md) — как Knossos реализует пайплайн на Godot;
 - [docs/glossary.md](docs/glossary.md) — глоссарий проектных терминов (инстанс, карточка, флаш, призрак…).
 
 Терминология: **VRWeb** — это набор технологий и стандарт (см. выше), а **Knossos** — данная референсная реализация (клиент + домашний сервер). В документах это различие выдержано.

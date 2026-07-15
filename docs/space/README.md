@@ -4,7 +4,12 @@
 процедурной генерации из обычного HTML и правила сборки декларативной сцены из VRWML. Это ядро Слоя 1
 из обзора ([../README.md](../README.md)).
 
-Как эти правила воплощены в коде пайплайна — в [implementation.md](../implementation.md).
+Этот раздел задаёт независимые от движка правила и контракты VRWeb. Он не предписывает
+GDScript-классы, структуру Godot-сцен, конкретные API рендера или обходные пути движка.
+То, как эти правила воплощены в Godot-клиенте Knossos, описано отдельно в
+[client/implementation.md](../client/implementation.md).
+При расхождении документов нормативным источником для процедурной генерации и организации
+пространства считается `space/`; `client/` фиксирует только текущее поведение реализации.
 Public API внешних scripting modules и capability contract — в [scripting-api.md](scripting-api.md).
 Единая passthrough/audit boundary декларативного контента — в
 [content-policy.md](content-policy.md).
@@ -21,8 +26,9 @@ Public API внешних scripting modules и capability contract — в [scrip
 
 ## От топологии к геометрии
 
-- [geometry-lab.md](geometry-lab.md) — `SpaceLayout`, единый генератор пространства (формы комнат
-  из пентамино, примыкание, коридоры); кормит и 3D-мир, и отладочный вид сверху.
+- [geometry-lab.md](geometry-lab.md) — предписанный алгоритм организации пространства: формы
+  комнат из пентамино, примыкание, коридоры и детерминированность; конкретный 3D-рендер клиента
+  вынесен в [client/implementation.md](../client/implementation.md).
 - [world-visualization.md](world-visualization.md) — визуализация мира из стилей документа: небо,
   солнце, палитра из «визуального паспорта» страницы.
 
