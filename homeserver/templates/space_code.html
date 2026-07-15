@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Код пространства — {{ cfg.name }}{% endblock %}
+{% block content %}
+<h1>Код пространства</h1>
+
+<p><a href="/space">← Настройки пространства</a></p>
+<p class="muted">Редактируется содержимое блока <code>&lt;vrwml&gt;</code>. Страница доступна
+только владельцу пространства. После сохранения новая версия загрузится при следующем входе
+в пространство.</p>
+
+{% if saved %}<div class="success">Код сохранён.</div>{% endif %}
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+<form method="post" action="/space/code">
+  <label for="content">VRWML-код</label>
+  <textarea id="content" name="content" spellcheck="false" autofocus>{{ content }}</textarea>
+  <button type="submit">Сохранить код</button>
+</form>
+{% endblock %}

@@ -15,6 +15,7 @@ from __future__ import annotations
 import secrets
 import sqlite3
 import time
+import xml.etree.ElementTree as ET
 
 import vrweb_scene
 from config import Config
@@ -30,6 +31,30 @@ DEFAULT_CONTENT = """\
 <CSGBox3D size="Vector3(1, 0.5, 1)" use_collision="true" transform="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, -4)" />"""
 
 FLUSH_PATH = "/api/v1/spaces/flush"
+
+# Содержимое редактора вставляется внутрь <vrwml> на HTML-странице. Поэтому принимаем
+# только XML-подобные теги сцены, но не настоящие HTML-теги: иначе владелец мог бы случайно
+# сохранить <script> и выполнить его в origin домашнего сервера при следующем открытии.
+_HTML_TAGS = {
+    "a", "abbr", "acronym", "address", "area", "article", "aside", "audio", "b", "base",
+    "bdi", "bdo", "big", "blockquote", "body", "br", "button", "canvas", "caption",
+    "center", "cite", "code", "col", "colgroup", "data", "datalist", "dd", "del",
+    "details", "dfn", "dialog", "dir", "div", "dl", "dt", "em", "embed", "fieldset",
+    "figcaption", "figure", "font", "footer", "form", "frame", "frameset", "h1", "h2",
+    "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html", "i", "iframe",
+    "image", "img", "input", "ins", "kbd", "label", "legend", "li", "link", "main",
+    "map", "mark", "marquee", "math", "menu", "meta", "meter", "nav", "nobr", "noembed",
+    "noframes", "noscript", "object", "ol", "optgroup", "option", "output", "p", "param",
+    "picture", "plaintext", "portal", "pre", "progress", "q", "rb", "rp", "rt", "rtc",
+    "ruby", "s", "samp", "script", "search", "section", "select", "slot", "small",
+    "source", "span", "strike", "strong", "style", "sub", "summary", "sup", "svg", "table",
+    "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time", "title", "tr",
+    "track", "tt", "u", "ul", "var", "video", "vrwml", "wbr", "xmp",
+}
+
+
+class ContentError(ValueError):
+    pass
 
 
 # --- Данные ---
@@ -97,6 +122,32 @@ def save_content(db: Database, space_id: int, content: str) -> None:
     with db.conn() as c:
         c.execute("UPDATE spaces SET content = ?, updated_at = ? WHERE id = ?",
                   (content, int(time.time()), space_id))
+
+
+def validate_content(content: str) -> None:
+    """Проверить сырой VRWML-фрагмент из браузерного редактора.
+
+    Форматирование сохраняется как ввёл владелец; XML-парсер используется только для
+    проверки сбалансированности и границы фрагмента. Ограничение совпадает с максимальным
+    размером persistence flush.
+    """
+    if len(content.encode("utf-8")) > vrweb_scene.MAX_BYTES:
+        raise ContentError("Код превышает допустимый размер (4 МБ).")
+    try:
+        root = ET.fromstring("<vrweb-fragment>" + content + "</vrweb-fragment>")
+    except ET.ParseError as e:
+        raise ContentError("Некорректная VRWML-разметка: %s." % e) from None
+    for elem in root.iter():
+        if elem is root:
+            continue
+        tag = elem.tag
+        if not isinstance(tag, str) or not vrweb_scene._TAG_RE.fullmatch(tag):
+            raise ContentError("Недопустимое имя тега.")
+        if tag.lower() in _HTML_TAGS:
+            raise ContentError("HTML-тег <%s> нельзя помещать в код сцены." % tag)
+        for name in elem.attrib:
+            if not vrweb_scene._ATTR_RE.fullmatch(name.lower()):
+                raise ContentError("Недопустимое имя атрибута %s." % name)
 
 
 # --- Редакторы (allowlist полных федеративных адресов) ---

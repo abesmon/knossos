@@ -423,3 +423,52 @@ def test_editor_allowlist_via_webui(client):
                     json={"v": 1, "payload": payload})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "applied"
+
+
+def test_owner_can_edit_space_code_on_separate_page(client):
+    token = _register(client)["access_token"]
+    url = _home(client, token)["url"]
+    client.cookies.set("vrweb_session", token)
+
+    editor = client.get("/space/code")
+    assert editor.status_code == 200
+    assert "Код пространства" in editor.text
+    assert "OmniLight3D" in editor.text
+
+    content = '<Node3D id="from-code-editor"><CSGBox3D size="Vector3(2, 2, 2)" /></Node3D>'
+    saved = client.post("/space/code", data={"content": content}, follow_redirects=False)
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/space/code?saved=true"
+    page = client.get("/s/" + _slug(url), headers=_auth(token))
+    assert content in page.text
+
+
+def test_space_code_editor_requires_owner_session(client):
+    assert client.get("/space/code", follow_redirects=False).headers["location"] == "/login"
+    post = client.post("/space/code", data={"content": "<Node3D />"}, follow_redirects=False)
+    assert post.status_code == 303 and post.headers["location"] == "/login"
+
+    # Даже пользователь из allowlist не получает страницу владельца: URL редактора не
+    # принимает id/slug и всегда относится только к пространству текущей сессии.
+    owner_token = _register(client)["access_token"]
+    editor_token = _register(client, GUEST)["access_token"]
+    owner_url = _home(client, owner_token)["url"]
+    client.cookies.set("vrweb_session", owner_token)
+    client.post("/space/editors/add", data={"address": "bob@test.local"})
+    client.cookies.set("vrweb_session", editor_token)
+    client.post("/space/code", data={"content": '<Node3D id="bob-home" />'})
+    owner_page = client.get("/s/" + _slug(owner_url), headers=_auth(owner_token))
+    assert "bob-home" not in owner_page.text
+
+
+def test_space_code_editor_rejects_broken_or_active_html(client):
+    token = _register(client)["access_token"]
+    client.cookies.set("vrweb_session", token)
+
+    broken = client.post("/space/code", data={"content": "<Node3D>"})
+    assert broken.status_code == 400
+    assert "Некорректная VRWML-разметка" in broken.text
+
+    script = client.post("/space/code", data={"content": "<script>alert(1)</script>"})
+    assert script.status_code == 400
+    assert "HTML-тег" in script.text
