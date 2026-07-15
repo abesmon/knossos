@@ -90,6 +90,10 @@ Knossos и Maker Kit идут одним release train: platform target `mac`, `
    распаковывает уже готовый
    ZIP в чистый временный project и выполняет strict CLI smoke-test.
 
+Корневой `CHANGELOG.md` — необязательный release input. Если он отсутствует в checkout,
+сборка выводит предупреждение и создаёт внутри Maker Kit короткий служебный `CHANGELOG.md`;
+отсутствие release notes само по себе не блокирует сборку.
+
 Workflow `.github/workflows/maker-kit.yml` дополнительно скачивает официальный Godot 4.6.3 на
 macOS, Windows и Linux и запускает `tests/run_maker_portability.py`. Harness в чистом
 проекте проверяет freshness HTML schema, missing/case-sensitive asset paths, glTF dependencies

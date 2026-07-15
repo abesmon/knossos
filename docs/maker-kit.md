@@ -225,3 +225,5 @@ report. Defaults соответствуют VRWeb Scripting API v1.
 общим `build.sh`. Технические детали и тестовая матрица находятся в
 [документе реализации exporter-а](vrweb-export.md), незавершённые работы — в
 [roadmap](roadmap.md#p1--vrweb-maker-kit-будущая-release-проверка).
+Корневой changelog при этом является необязательным release input: если файла нет, builder
+оставляет предупреждение и кладёт в archive служебную заметку вместо падения сборки.
