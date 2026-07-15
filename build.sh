@@ -282,7 +282,7 @@ build_maker_kit() {
   cp "$ROOT/packaging/maker-kit/README.md" "$stage/README.md"
   cp "$ROOT/packaging/maker-kit/vscode-settings.json" "$stage/.vscode/settings.json"
   cp "$ROOT/schemas/vrweb-html-data.json" "$stage/schemas/vrweb-html-data.json"
-  cp "$ROOT/CHANGELOG.md" "$stage/CHANGELOG.md"
+  stage_maker_changelog "$stage/CHANGELOG.md"
 
   # project.godot — единственный source of truth; plugin manifest в артефакте получает тот же
   # semver. Исходный manifest также держим синхронным для установки прямо из checkout.
@@ -321,6 +321,18 @@ verify_maker_schema() {
     die "VRWML HTML completion schema отстала от strict policy Maker Kit"
   fi
   ok "HTML completion schema синхронна с strict policy Maker Kit"
+}
+
+stage_maker_changelog() {
+  local destination="$1"
+  if [[ -f "$ROOT/CHANGELOG.md" ]]; then
+    cp "$ROOT/CHANGELOG.md" "$destination"
+    return
+  fi
+
+  warn "Нет CHANGELOG.md — добавляю в Maker Kit служебную заметку вместо остановки сборки"
+  printf '# Changelog\n\nRelease notes for VRWeb Maker Kit %s were not included in this source checkout.\n' \
+    "$SEMVER" > "$destination"
 }
 
 verify_maker_kit_archive() {
