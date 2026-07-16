@@ -33,6 +33,9 @@ var _settings_focus_token := 0
 var _chat_focus_token := 0
 var _console_focus_token := 0
 var _image_dialog_focus_token := 0
+# Пока активного мира нет, отдельный lease удерживает свободный курсор для навигационного UI.
+# Это также закрывает синхронную ошибку fetch: хвост _on_go не сможет снова захватить мышь.
+var _loading_hub_focus_token := 0
 # Максимум ожидания внешних таблиц: дальше строим мир с тем, что успело прийти.
 const CSS_DEADLINE_SEC := 4.0
 # Номер навигации: guard от гонки «продолжение после загрузки CSS против новой навигации».
@@ -179,6 +182,9 @@ func _ready() -> void:
 	_address.focus_exited.connect(_release_address_focus)
 
 	_setup_net()
+	# До первой успешно собранной страницы клиент уже находится «между мирами».
+	# Хаб остаётся 3D-фоном, а навигационный UI доступен для ввода стартового адреса.
+	_remain_in_loading_hub()
 
 	_set_status("Введите адрес и go! — WASD ходьба, двойной пробел — полёт, ЛКМ/E — портал, колесо/тачпад — скролл текста, F3 — отладка, Esc — мышь")
 
@@ -319,7 +325,7 @@ func _on_cancel() -> void:
 		return
 	_cancel_load()
 	_set_loading(false)
-	_leave_loading_hub()
+	_remain_in_loading_hub()
 	_set_status("Загрузка отменена")
 
 
@@ -656,7 +662,7 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 
 func _on_failed(message: String, url: String) -> void:
 	_set_loading(false)
-	_leave_loading_hub()
+	_remain_in_loading_hub()
 	_set_status("Ошибка: %s (%s)" % [message, url])
 
 
@@ -747,6 +753,7 @@ func _collect_meta(node: HtmlNode, out: Array) -> void:
 ## Переводит клиент в нейтральное состояние между страницами. В отличие от прежнего
 ## in-place swap старый мир прекращает жить сразу, а не после ответа сервера/разрешений.
 func _enter_loading_hub(status: String) -> void:
+	_release_focus_token(&"_loading_hub_focus_token")
 	_ui.visible = false
 	_player.process_mode = Node.PROCESS_MODE_DISABLED
 	_loading_hub.open(status)
@@ -754,8 +761,20 @@ func _enter_loading_hub(status: String) -> void:
 	NetworkManager.disconnect_from_server()
 
 
-## Возвращает обычную камеру, HUD и обработку игрока после сборки либо ошибки/отмены.
+## Оставляет клиент в нейтральном пространстве без активного мира. В отличие от перехода,
+## навигационный UI доступен: после ошибки/отмены можно ввести другой адрес. Хаб закрывается
+## только когда новый мир действительно собран.
+func _remain_in_loading_hub() -> void:
+	_player.process_mode = Node.PROCESS_MODE_DISABLED
+	_loading_hub.open()
+	_ui.visible = true
+	if _loading_hub_focus_token == 0:
+		_loading_hub_focus_token = _player.claim_mouse_focus("loading_hub_navigation")
+
+
+## Возвращает обычную камеру, HUD и обработку игрока только после успешной сборки мира.
 func _leave_loading_hub() -> void:
+	_release_focus_token(&"_loading_hub_focus_token")
 	_loading_hub.close()
 	_player.process_mode = Node.PROCESS_MODE_INHERIT
 	_ui.visible = true

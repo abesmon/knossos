@@ -18,6 +18,9 @@ const MOUSE_SENSITIVITY := 0.0025
 
 
 func _ready() -> void:
+	# Player сохраняется между мирами вместе с LocalAvatar для зеркал. Камера хаба, как и
+	# камера первого лица, не должна снимать слой собственного тела.
+	_camera.cull_mask &= ~(1 << (LocalAvatar.AVATAR_LAYER - 1))
 	_status.text = _status_base
 	if visible:
 		_activate_camera()
@@ -65,7 +68,10 @@ func open(status: String = "Загрузка") -> void:
 	_dots_time = 0.0
 	if not visible:
 		visible = true
-		_activate_camera()
+	# Камера мира могла стать current уже после появления хаба (например, Player создаётся
+	# в _ready родительской сцены). Поэтому каждый open подтверждает камеру хаба, даже если
+	# сам хаб всё это время оставался видимым.
+	_activate_camera()
 	if is_node_ready():
 		_status.text = _status_base + "."
 

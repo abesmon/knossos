@@ -13,4 +13,3 @@ layout_mode = 1
 [node name="world" type="Node3D" parent="." unique_id=1830425431]
 
 [node name="LoadingHub" parent="." instance=ExtResource("3_hub")]
-visible = false

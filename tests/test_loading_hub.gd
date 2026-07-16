@@ -25,6 +25,14 @@ func _ready() -> void:
 	_check(hub.get_node("Shell") is MeshInstance3D, "хаб окружён 3D-сферой")
 	_check(hub.get_node("ContentAnchor/Status") is Label3D,
 		"статус находится на пространственном ContentAnchor")
+	_check((hub_camera.cull_mask & (1 << (LocalAvatar.AVATAR_LAYER - 1))) == 0,
+		"камера хаба не рендерит тело локального игрока")
+
+	world_camera.make_current()
+	hub.open("Повторная загрузка")
+	await get_tree().process_frame
+	_check(hub_camera.current and get_viewport().get_camera_3d() == hub_camera,
+		"open возвращает камеру хаба, даже если видимый хаб перехватил мир")
 
 	hub.close()
 	await get_tree().process_frame
