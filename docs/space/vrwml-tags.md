@@ -122,18 +122,17 @@ VRWML не делится на форматы мира и аватара. Эта
 
 ## Кодовые модули
 
-Эта группа является частью VRWML со статусом **provisional**. Текущий механизм основан на
-GDScript и потому тесно связан с Godot; в будущем язык или форма доставки могут быть заменены
-на более переносимый механизм без отказа от самой роли модулей в VRWML.
+Эта группа является частью VRWML со статусом **working draft**. Единственный executable contract
+модулей — WebAssembly Component Model; исходный язык и конкретный движок клиента в формат не входят.
 
 | Тег | Краткая семантика |
 |---|---|
-| `<VRWebModule>` | Объявляет идентичность, источник, integrity, permissions и capabilities кодового модуля. |
+| `<VRWebModule>` | Объявляет идентичность, Component package, integrity, world и capabilities модуля. |
 | `<VRWebComponent>` | Создаёт объект сцены, реализованный экспортируемым классом модуля. |
 
-В текущем Knossos HTML-envelope несёт module declarations и GDScript source/package metadata,
-а `<VRWebComponent>` находится в декларативной сцене. Standalone-форма объявления модулей ещё
-не реализована; это ограничение реализации, а не исключение модулей из стандарта.
+HTML-envelope несёт `VRWebModule` declarations, а `<VRWebComponent>` находится в декларативной
+сцене. Готовый `.vrmod` либо прямой `.wasm` с canonical manifest metadata доставляет Component;
+authoring source не является частью страницы.
 
 Подробно: [VRWML scripting modules](scripting-modules.md).
 

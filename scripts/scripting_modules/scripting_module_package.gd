@@ -15,6 +15,15 @@ static func unpack(module: Dictionary) -> Dictionary:
 		return _error("invalid_hash")
 	var archive_path := Sandbox.resolve(str(module.get("cache_path",
 			ScriptingModuleCache.path_for(module_hash))))
+	if not FileAccess.file_exists(archive_path):
+		return _error("missing_artifact")
+	# cache_path is caller metadata, not authority. Bind the bytes again before opening ZIP so a
+	# valid hash cannot be paired with an arbitrary local archive.
+	var archive_bytes := FileAccess.get_file_as_bytes(archive_path)
+	if ScriptingModuleCache._sha256_hex(archive_bytes) != module_hash:
+		return _error("artifact_hash_mismatch")
+	if str(module.get("kind", "package")) == "component":
+		return _unpack_direct_component(module, module_hash, archive_bytes)
 	var reader := ZIPReader.new()
 	if reader.open(archive_path) != OK:
 		return _error("invalid_zip")
@@ -49,14 +58,32 @@ static func unpack(module: Dictionary) -> Dictionary:
 	var parsed := ScriptingModuleManifest.parse(contents[MANIFEST], str(module.get("id", "")))
 	if not bool(parsed.ok):
 		return {"ok": false, "error": "invalid_manifest", "errors": parsed.errors}
-	for export_spec in parsed.manifest.exports.values():
-		var path := str(export_spec.script) if not str(export_spec.script).is_empty() \
-				else str(export_spec.scene)
-		if not contents.has(path):
-			return _error("missing_export_file")
+	var component_path := str(parsed.manifest.component)
+	if not contents.has(component_path):
+		return _error("missing_component")
+	var wasm_files: Array[String] = []
+	for path in contents:
+		var file_path := str(path)
+		if file_path.ends_with(".wasm"):
+			wasm_files.append(file_path)
+		if file_path.get_extension().to_lower() in ["dll", "so", "dylib"]:
+			return _error("native_library_forbidden")
+	if wasm_files != [component_path]:
+		return _error("invalid_component_entries")
+	var declared_files := {MANIFEST: true, component_path: true}
 	for asset_spec in parsed.manifest.assets.values():
 		if not contents.has(str(asset_spec.path)):
 			return _error("missing_asset_file")
+		declared_files[str(asset_spec.path)] = true
+	var debug: Dictionary = parsed.manifest.get("debug", {})
+	if not debug.is_empty():
+		var source_map := str(debug.source_map)
+		if not contents.has(source_map):
+			return _error("missing_debug_sidecar")
+		declared_files[source_map] = true
+	for path in contents:
+		if not declared_files.has(str(path)):
+			return _error("undeclared_package_entry")
 	# Registry must load from the same sandboxed path into which files are extracted. Keeping
 	# unsandboxed user:// here works only when Sandbox.id() is empty and breaks isolated clients.
 	var module_root := Sandbox.resolve(UNPACK_ROOT.path_join(module_hash))
@@ -72,7 +99,39 @@ static func unpack(module: Dictionary) -> Dictionary:
 		file.close()
 	module["manifest"] = parsed.manifest
 	module["exports"] = parsed.manifest.exports
+	module["component_path"] = module_root.path_join(component_path)
 	module["module_root"] = module_root
+	module["debug_source_map_path"] = module_root.path_join(str(debug.source_map)) \
+			if not debug.is_empty() else ""
+	module["execution_key"] = ScriptingModuleCache.execution_key(module_hash, parsed.manifest)
+	return {"ok": true, "module": module, "error": "", "errors": []}
+
+
+static func _unpack_direct_component(module: Dictionary, module_hash: String,
+		component_bytes: PackedByteArray) -> Dictionary:
+	if component_bytes.size() > ScriptingModuleCache.MAX_ARTIFACT_BYTES:
+		return _error("component_too_large")
+	var manifest: Dictionary = module.get("manifest", {})
+	var parsed := ScriptingModuleManifest.parse(
+			JSON.stringify(manifest).to_utf8_buffer(), str(module.get("id", "")))
+	if not bool(parsed.ok):
+		return {"ok": false, "module": {}, "error": "invalid_manifest", "errors": parsed.errors}
+	if str(parsed.manifest.component) != "module.wasm":
+		return _error("invalid_direct_component_name")
+	var module_root := Sandbox.resolve(UNPACK_ROOT.path_join(module_hash))
+	DirAccess.make_dir_recursive_absolute(module_root)
+	var component_path := module_root.path_join("module.wasm")
+	var output := FileAccess.open(component_path, FileAccess.WRITE)
+	if output == null:
+		return _error("extract_write_failed")
+	output.store_buffer(component_bytes)
+	output.close()
+	module["manifest"] = parsed.manifest
+	module["exports"] = parsed.manifest.exports
+	module["component_path"] = component_path
+	module["module_root"] = module_root
+	module["debug_source_map_path"] = ""
+	module["execution_key"] = ScriptingModuleCache.execution_key(module_hash, parsed.manifest)
 	return {"ok": true, "module": module, "error": "", "errors": []}
 
 

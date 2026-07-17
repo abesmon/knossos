@@ -44,11 +44,53 @@ output и SHA-256 записанного файла. HTML/VRWML payload в JSON 
   композиция объектов;
 - HTML `combine` — процедурное HTML-окружение плюс VRWML;
 - HTML `exclusive` — HTML служит оболочкой, визуализируется только VRWML;
-- `inline` — небольшой самодостаточный GDScript-компонент;
-- `.vrmod` — модуль с кодом, сценами, assets и manifest.
+- `.vrmod` — готовый переносимый WASM component package с manifest и assets. Prebuilt package
+  остаётся универсальным fallback; установленный внешний language adapter может собрать его из
+  authoring source перед export.
 
 Все формы создают VRWML-сцену; разделения формата на «миры» и «аватары» нет. Точный словарь —
 в [каталоге тегов](space/vrwml-tags.md).
+
+## Prebuilt WASM в сцене
+
+1. Собрать Component любым SDK/toolchain и упаковать его в `.vrmod` (референсная команда:
+   `python3 tools/build_vrmod.py --manifest ... --output ...`).
+2. В Godot добавить узел `VrwebWasmComponent`.
+3. Выбрать `package_path`, указать совпадающие с manifest `module_id` и `export_name`.
+4. Выполнить HTML build или **Build & Run in Knossos**.
+
+Exporter не запускает модуль в editor. Он проверяет безопасные ZIP paths, manifest identity,
+единственный declared `.wasm`, выбранный scene-component export, наличие assets и отсутствие
+native libraries. После этого исходные package bytes копируются как
+`dist/modules/<sha256>.vrmod`; HTML получает `VRWebModule` с SRI и `VRWebComponent`, а build report
+и sibling asset manifest — hash, size и опубликованный путь. Повторный build с теми же входами
+байт-в-байт совпадает. Standalone `.vrwml` такой узел отклоняет, потому что объявление доставки
+`VRWebModule` требует HTML envelope.
+
+Package manifest остаётся единой проверяемой границей между language toolchain и публикацией.
+Production preview выполняет настоящий Knossos, поэтому addon не содержит native WASM runtime и
+не расходится с поведением клиента.
+
+## TypeScript source в Maker Kit
+
+Кнопка **Add VRWeb Script** создаёт `VrwebWasmSourceComponent`, strict TypeScript template и
+manifest в `res://vrweb_scripts/<name>/`. В Project Settings задаются:
+
+- `vrweb/maker/javascript_adapter_script` — установленный `sdk/javascript/build.mjs`;
+- `vrweb/maker/node_executable` — Node.js 22+ (`node` по умолчанию).
+
+При export source-узел вызывает adapter безопасным argv без shell. Adapter проверяет TypeScript,
+bundle, фактические imports и отсутствие WASI, затем создаёт canonical `.vrmod`. Неиспользуемые
+SDK capabilities удаляются tree-shaking, а временный минимальный WIT world не позволяет готовому
+Component импортировать больше, чем осталось в bundle и объявлено manifest; в `dist/` попадает только
+package, не `.ts`. Fingerprint source + manifest + adapter даёт incremental no-op при неизменных
+входах. Compile error или отсутствующий toolchain останавливает новый export и сохраняет последний
+готовый package. Build & Run запускает adapter отдельным non-blocking process; **Cancel Script
+Build** завершает только этот process и также сохраняет последний package. Пути с пробелами и
+cancel проходят clean-project test. Editor smoke нажимает реальные кнопки **Add VRWeb Script** и
+**Build & Run**, проверяет неразрушающую compile error и новый hash после исправления; matrix
+выполняет тот же сценарий на macOS, Windows и Linux.
+Prebuilt `VrwebWasmComponent` продолжает работать без Node/npm.
 
 ## Build & Run in Knossos
 
@@ -60,13 +102,20 @@ Dock **VRWeb → Build & Run · production runtime** выполняет коро
 4. запуск Knossos только после подтверждения **Run in Knossos**.
 
 Повторное нажатие пересобирает тот же путь без file dialog и запускает новый runtime process —
-это текущий reload workflow. Addon не содержит `WorldGenerator`/`TopologyBuilder`: страницу
+это production preview restart; оно не притворяется сохранением памяти между процессами. Сам
+runtime поддерживает отдельный атомарный in-process module reload: candidate сначала проходит
+compile/signature/probe, после чего заменяет живые instances с сохранением module-scoped state.
+Сквозной тест строит исходный и изменённый TypeScript artifact через тот же Maker adapter и
+доказывает compile-error preservation, новый content hash и точный old-unmount/new-mount lifecycle. Addon
+не содержит `WorldGenerator`/`TopologyBuilder`: страницу
 открывает настоящий Knossos через `vrweblocal:///absolute/path`.
 
 Настройки проекта доступны в Project Settings:
 
 - `vrweb/maker/dist_dir` — каталог сборки, default `res://dist`;
 - `vrweb/maker/html_mode` — `exclusive` или `combine`.
+- `vrweb/maker/javascript_adapter_script` и `vrweb/maker/node_executable` — внешний TypeScript
+  adapter; они не нужны prebuilt workflow.
 
 Путь к Knossos и launch mode сохраняются в локальных Editor Settings, а не в `project.godot`:
 
@@ -131,7 +180,7 @@ schema отстала. Completion помогает писать markup, но str
 Та же schema и asset bundler проверяются portable harness-ом:
 
 ```bash
-python3 tests/run_maker_portability.py
+bash tests/run_maker_clean_addon.sh
 ```
 
 В GitHub Actions он запускается на macOS, Windows и Linux с официальным Godot 4.6.3.
@@ -194,8 +243,8 @@ Hosting checklist:
 ## Preview, импорт и границы
 
 В addon входят общий HTML parser/DOM, portable declarative materializer, lossless HTML importer,
-exporter, URL/local resource metadata, content-addressed asset bundler, spawner, `.vrmod` package
-builder, editor UI, strict diagnostics и headless build. Зависимости направлены как
+exporter, URL/local resource metadata, content-addressed asset bundler, spawner, editor UI,
+strict diagnostics и headless build. Зависимости направлены как
 **format/SDK → addon → Knossos**.
 
 При открытии `.html/.htm` portable importer находит `<vrwml>`, материализует максимум доступного
@@ -207,19 +256,12 @@ Knossos adapter добавляет procedural preview остального HTML 
 scene. Avatar import и runtime загрузка external resources также остаются в
 `integrations/knossos/vrweb_tools`; переносимый addon их не импортирует.
 
-## Trusted scripting modules
+## WASM scripting modules
 
-У scripted node автор явно выбирает `inline`, `package` или отсутствие экспорта. Панель VRWeb
-показывает trust boundary и редактирует переносимые module metadata: `id`, SemVer `version`,
-декларативные `permissions`, обязательные `requires` и `optional` capabilities. Значения
-сохраняются в metadata узла; для `package` addon записывает их в `vrweb-module.json` и export
-report. Defaults соответствуют VRWeb Scripting API v1.
-
-`permissions` нужны для review, но не ограничивают обычный GDScript: `trusted-gdscript`
-получает права процесса. Inline предназначен для одного самодостаточного файла; зависимости,
-сцены и assets требуют `.vrmod`. Модули являются частью VRWML, хотя текущий GDScript-механизм
-имеет provisional-статус. Полный контракт, trust model, lifecycle и multiplayer — только в
-[scripting-modules.md](space/scripting-modules.md).
+Maker Kit публикует только готовые WebAssembly components. Проектные Godot scripts не входят в
+`dist/`: strict export считает их непереносимым поведением. TypeScript является первым внешним
+source adapter, а prebuilt `.vrmod` — language-neutral fallback. Формат module package и sandbox
+boundary описаны в [scripting-modules.md](space/scripting-modules.md).
 
 Версионный archive, starter, policy metadata, changelog и clean-project smoke-test собираются
 общим `build.sh`. Технические детали и тестовая матрица находятся в

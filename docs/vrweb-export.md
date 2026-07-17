@@ -27,19 +27,19 @@
 | Открыть `.html`/`.htm` из FileSystem | открывает `<vrwml>` как editable scene, а HTML вокруг — как видимый read-only procedural preview |
 | **Сохранить импортированный HTML** / Save | заменяет только исходный `<vrwml>…</vrwml>`, не нормализуя остальной HTML |
 
-### Аудит пользовательских скриптов
+### Переносимое поведение
 
-`script` не сериализуется как обычное свойство. Автор явно выбирает режим scripted node:
+Godot `script` не сериализуется и не публикуется. Такой script является реализацией authoring-
+проекта, а strict exporter сообщает о непереносимом поведении. Исполняемое поведение страницы
+поставляется готовым WebAssembly component и связывается через `VRWebModule`/`VRWebComponent`.
+Формат, lifecycle и sandbox boundary описаны в
+[документе модулей](space/scripting-modules.md).
 
-| Режим | Экспорт |
-|---|---|
-| `off` (по умолчанию) | Script не публикуется; diagnostics сообщает о потере поведения |
-| `inline` | source попадает в `<script type="application/vrweb+gdscript">`, узел — в `<VRWebComponent module="#id" class="default">` |
-| `package` | GDScript и literal relative file-зависимости собираются в sibling `.vrmod`; HTML ссылается через `<VRWebModule integrity="sha256-…">` |
-
-Exporter отвечает только за подготовку source/package и structured diagnostics. Семантика
-`VRWebModule`/`VRWebComponent`, manifest, trust, ограничения GDScript, lifecycle и runtime
-принадлежат [единому документу модулей](space/scripting-modules.md).
+В Maker Kit для этого служит authoring-only `VrwebWasmComponent`: у него выбирают готовый
+`.vrmod`, module id и export. При HTML build exporter проверяет package, публикует его по
+content hash и создаёт обе декларации. В editor код не исполняется; production preview доступен
+через **Build & Run in Knossos**. Standalone `.vrwml` не несёт delivery declaration и потому
+отклоняет такой узел.
 
 ---
 

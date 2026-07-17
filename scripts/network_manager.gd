@@ -61,6 +61,8 @@ signal room_denied(room: String, reason: String)
 ## пиров, когда меняется старейший join_seq. Консьюмеры привилегированных действий слушают
 ## это, чтобы начать/прекратить их выполнять. Подробно — в docs/authority.md.
 signal authority_changed(new_authority: int, is_me: bool)
+## Результат обязательного pre-replication handshake executable module descriptors.
+signal scripting_module_compatibility_changed(peer_id: int, outcome: String, code: String)
 ## Изменилась таблица рангов (user_id -> rank): авторитет её правит и рассылает, остальные
 ## принимают только от авторитета. Консьюмеры (проверки действий, UI) перечитывают ранги.
 ## Подробно — в docs/ranks.md.
@@ -187,6 +189,7 @@ var _status_accum := 0.0
 var _rng := Crypto.new()   # генератор nonce для челленджей
 var _scene := SceneChanges.new()  # машина состояний эфемерного слоя (чистая, см. scene_changes.gd)
 var _replicated := ReplicatedStateStore.new()
+var _scripting_module_gate := ScriptingModulePeerGate.new()
 var _replicated_resync := false
 var _replicated_command_rates := {} # peer_id -> {second, count}
 var _replicated_request_seq := 0
@@ -426,6 +429,7 @@ func _on_mp_peer_connected(id: int) -> void:
 	_refresh_authority()
 	# Отдаём новому пиру свою карточку: user_id, ник, лицо (PNG-байты) и идентификатор аватара.
 	if _can_rpc():
+		rpc_id(id, "_recv_scripting_module_descriptor", _scripting_module_gate.descriptor())
 		rpc_id(id, "_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
 		# И сертификат идентичности, если он у нас есть, — пир проверит и пришлёт челлендж.
 		var payload: Array = HomeServer.certificate_payload()
@@ -437,7 +441,7 @@ func _on_mp_peer_connected(id: int) -> void:
 		_nlog("я АВТОРИТЕТ -> push snapshot новичку peer=%d (objects=%d)" % [id, _scene.objects().size()])
 		rpc_id(id, "_recv_ranks", _ranks)
 		rpc_id(id, "_recv_scene_snapshot", _scene.snapshot())
-		_queue_replicated_snapshot(id)
+		# Replicated snapshot ждёт module descriptor и отправляется из его RPC handler.
 	# Недокачанные блобы спрашиваем у новичка адресно: он мог принести байты, которых нет
 	# ни у кого из старожилов (например, автор переподключился). См. docs/network/realtime-resources.md.
 	if _can_rpc():
@@ -447,6 +451,7 @@ func _on_mp_peer_connected(id: int) -> void:
 
 
 func _on_mp_peer_disconnected(id: int) -> void:
+	_scripting_module_gate.remove(id)
 	if _connected_peers.erase(id):
 		# Канал был открыт и закрылся, а пир ещё в комнате по сигналингу — это обрыв ICE,
 		# а не уход. Помечаем для индикации «соединение потеряно» (неймплейт/«Пользователи»).
@@ -466,6 +471,19 @@ func send_chat(text: String) -> void:
 
 func register_replicated_schema(schema_id: String, definition: Dictionary) -> bool:
 	return _replicated.register_schema(schema_id, definition)
+
+
+func set_scripting_module_identity(identity: Array, runtime_available: bool,
+		required_capabilities: Array[String], available_capabilities: Array[String]) -> void:
+	_scripting_module_gate.configure(identity, runtime_available, required_capabilities,
+			available_capabilities)
+	if _can_rpc():
+		rpc("_recv_scripting_module_descriptor", _scripting_module_gate.descriptor())
+
+
+func scripting_module_compatibility(peer_id: int = 0) -> Dictionary:
+	return _scripting_module_gate.aggregate() if peer_id == 0 \
+			else _scripting_module_gate.result_for(peer_id)
 
 
 func unregister_replicated_schema(schema_id: String) -> void:
@@ -1358,6 +1376,7 @@ func _teardown_mesh() -> void:
 		emit_signal("peer_left", id)
 	_connections.clear()
 	_connected_peers.clear()
+	_scripting_module_gate.clear_peers()
 	_nicks.clear()
 	# Старшинство — состояние комнаты: вне комнаты его нет, при перезаходе сервер выдаст новый seq.
 	_peer_seqs.clear()
@@ -1598,6 +1617,21 @@ func _recv_ranks(table: Dictionary) -> void:
 	ranks_changed.emit()
 
 
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_scripting_module_descriptor(descriptor: Dictionary) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	var result := _scripting_module_gate.accept(sender, descriptor)
+	var outcome := str(result.outcome)
+	var code := str(result.code)
+	scripting_module_compatibility_changed.emit(sender, outcome, code)
+	if outcome == "compatible":
+		if has_authority() and _can_rpc():
+			_queue_replicated_snapshot(sender)
+	else:
+		_last_error = "WASM modules peer %d: %s (%s)" % [sender, outcome, code]
+		_nlog(_last_error)
+
+
 ## Пир просит у нас таблицу рангов (pull при смене авторитета). Отвечаем, только если мы и
 ## правда авторитет — иначе наш ответ всё равно отвергнут получателем (sender_is_authority).
 @rpc("any_peer", "reliable", "call_remote")
@@ -1610,6 +1644,9 @@ func _request_ranks() -> void:
 func _recv_replicated_command(request_id: int, object_id: String, schema_id: String, version: int,
 		command: String, args: Dictionary) -> void:
 	var sender := multiplayer.get_remote_sender_id()
+	if not _scripting_module_gate.permits_replicated_state(sender):
+		_send_replicated_ack(sender, request_id, false, "module_incompatible", -1)
+		return
 	var envelope := {"request_id": request_id, "object_id": object_id, "schema_id": schema_id,
 		"version": version, "command": command, "args": args}
 	var bytes := var_to_bytes(envelope).size()
@@ -1624,14 +1661,17 @@ func _recv_replicated_command(request_id: int, object_id: String, schema_id: Str
 
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_replicated_ack(request_id: int, accepted: bool, code: String, revision: int) -> void:
-	if not sender_is_authority() or not _replicated_pending_commands.has(request_id):
+	var sender := multiplayer.get_remote_sender_id()
+	if not sender_is_authority() or not _scripting_module_gate.permits_replicated_state(sender) \
+			or not _replicated_pending_commands.has(request_id):
 		return
 	_emit_replicated_command_result(request_id, accepted, code, revision)
 
 
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_replicated_delta(delta: Dictionary) -> void:
-	if not sender_is_authority():
+	var sender := multiplayer.get_remote_sender_id()
+	if not sender_is_authority() or not _scripting_module_gate.permits_replicated_state(sender):
 		return
 	var bytes := var_to_bytes(delta).size()
 	_metric("delta_received_count")
@@ -1650,7 +1690,9 @@ func _recv_replicated_delta(delta: Dictionary) -> void:
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_replicated_snapshot_begin(transfer_id: int, total_bytes: int, chunks: int,
 		content_hash: PackedByteArray) -> void:
-	if not sender_is_authority() or transfer_id <= 0 or total_bytes <= 0 \
+	var sender := multiplayer.get_remote_sender_id()
+	if not sender_is_authority() or not _scripting_module_gate.permits_replicated_state(sender) \
+			or transfer_id <= 0 or total_bytes <= 0 \
 			or total_bytes > MAX_REPLICATED_SNAPSHOT_BYTES or chunks <= 0 \
 			or chunks != ceili(float(total_bytes) / REPLICATED_SNAPSHOT_CHUNK_BYTES) \
 			or content_hash.size() != 32:
@@ -1667,7 +1709,9 @@ func _recv_replicated_snapshot_begin(transfer_id: int, total_bytes: int, chunks:
 
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_replicated_snapshot_chunk(transfer_id: int, index: int, bytes: PackedByteArray) -> void:
-	if not sender_is_authority() or _replicated_snapshot_rx.is_empty() \
+	var sender := multiplayer.get_remote_sender_id()
+	if not sender_is_authority() or not _scripting_module_gate.permits_replicated_state(sender) \
+			or _replicated_snapshot_rx.is_empty() \
 			or transfer_id != int(_replicated_snapshot_rx.get("id", 0)) \
 			or index < 0 or index >= int(_replicated_snapshot_rx["count"]) \
 			or bytes.is_empty() or bytes.size() > REPLICATED_SNAPSHOT_CHUNK_BYTES:
@@ -1684,7 +1728,9 @@ func _recv_replicated_snapshot_chunk(transfer_id: int, index: int, bytes: Packed
 
 @rpc("any_peer", "reliable", "call_remote")
 func _recv_replicated_snapshot_end(transfer_id: int) -> void:
-	if not sender_is_authority() or _replicated_snapshot_rx.is_empty() \
+	var sender := multiplayer.get_remote_sender_id()
+	if not sender_is_authority() or not _scripting_module_gate.permits_replicated_state(sender) \
+			or _replicated_snapshot_rx.is_empty() \
 			or transfer_id != int(_replicated_snapshot_rx.get("id", 0)):
 		return
 	var rx := _replicated_snapshot_rx
@@ -1715,12 +1761,14 @@ func _recv_replicated_snapshot_end(transfer_id: int) -> void:
 
 @rpc("any_peer", "reliable", "call_remote")
 func _request_replicated_snapshot() -> void:
-	if has_authority() and _can_rpc():
-		_queue_replicated_snapshot(multiplayer.get_remote_sender_id())
+	var sender := multiplayer.get_remote_sender_id()
+	if has_authority() and _can_rpc() and _scripting_module_gate.permits_replicated_state(sender):
+		_queue_replicated_snapshot(sender)
 
 
 func _queue_replicated_snapshot(to: int) -> void:
-	if has_authority() and _can_rpc() and _connected_peers.has(to):
+	if has_authority() and _can_rpc() and _connected_peers.has(to) \
+			and _scripting_module_gate.permits_replicated_state(to):
 		_send_replicated_snapshot(to)
 
 
@@ -1761,14 +1809,16 @@ func _replicated_sha256(bytes: PackedByteArray) -> PackedByteArray:
 @rpc("any_peer", "unreliable_ordered", "call_remote")
 func _recv_replicated_sample(object_id: String, schema_id: String, version: int, sample: Dictionary) -> void:
 	var bytes := var_to_bytes(sample).size()
-	if not sender_is_authority() or bytes > MAX_REPLICATED_SAMPLE_BYTES \
+	var sender := multiplayer.get_remote_sender_id()
+	if not sender_is_authority() or not _scripting_module_gate.permits_replicated_state(sender) \
+			or bytes > MAX_REPLICATED_SAMPLE_BYTES \
 			or not _replicated.validate_sample(object_id, schema_id, version, sample):
 		_metric("sample_rejected_count")
 		return
 	_metric("sample_received_count")
 	_metric("sample_received_bytes", bytes)
 	_metric_max("sample_max_bytes", bytes)
-	replicated_sample_received.emit(multiplayer.get_remote_sender_id(), object_id, schema_id, sample)
+	replicated_sample_received.emit(sender, object_id, schema_id, sample)
 
 
 ## Голосовой кадр от пира. Канал 1 — отдельный от состояния/чата (см. send_voice).

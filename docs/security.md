@@ -1,7 +1,7 @@
 # Безопасность — статус и философия
 
-> ⚠️ **Статус на сейчас: scripting modules требуют явного доверия, но остальные поверхности
-> произвольных Godot-классов пока остаются принятым риском.**
+> ⚠️ **Статус на сейчас: scripting modules исполняются только через capability-scoped WASM
+> sandbox, но остальные поверхности произвольных Godot-классов пока остаются принятым риском.**
 > Это осознанное решение стадии прототипа, и оно должно быть явно известно каждому, кто
 > пользуется vrweb-стеком на данном уровне развития: страница или пир пока могут
 > инстанцировать в клиенте произвольные классы Godot со всеми вытекающими (исполнение кода,
@@ -38,41 +38,30 @@
 пирам, оставляет **политикой клиента на усмотрение пользователя.** Везде одно и то же: транспорт
 даёт возможности и факты, политику выбирает клиент/пользователь.
 
-## Реализованная модель: scripting modules и вкладка «Безопасность»
+## Реализованная модель scripting modules
 
-Формат поставки пользовательских классов со страницей, разделение trusted GDScript и настоящей
-capability-песочницы описаны в [space/scripting-modules.md](space/scripting-modules.md). Module manifest, hash и
-подпись дают целостность/идентичность, но сами по себе не ограничивают raw GDScript.
+Страница может поставить только WebAssembly Component package `.vrmod`, описанный в
+[space/scripting-modules.md](space/scripting-modules.md). Исходный язык и compiler не входят в
+runtime contract. Клиент проверяет integrity, безопасно распаковывает manifest и единственный
+`.wasm`, запрещает native libraries, WASI и неизвестные imports, после чего связывает только
+versioned `vrweb:*` WIT capabilities.
 
-Приняты три пользовательских режима исполнения scripting modules:
+Каждый instance имеет fuel, deadline, memory/resource quotas и общий host-call budget. Scene API
+видит только owned subtree через opaque generational handles; системные объекты Godot, filesystem,
+произвольная сеть и native ABI недоступны. Ошибка, trap или исчерпание бюджета останавливает один
+component и не мешает открыть статическую часть страницы. Навигация вызывает cancellation
+timers/subscriptions и освобождает handles.
 
-| Уровень | Что разрешено |
-|---|---|
-| **Спрашивать для неизвестных** (default) | До компиляции один preflight показывает все неизвестные exact hashes; каждый можно разрешить разово/постоянно или запретить разово/постоянно |
-| **Разрешать все** | Все модули, прошедшие integrity, компилируются без запроса |
-| **Запрещать все** | Scripting modules не компилируются и не запускаются |
-
-Локальный trust store хранится в `user://settings.cfg`. Ключ решения — origin страницы + module
-id + SHA-256 фактически загруженных байтов. Поэтому новая версия того же URL снова неизвестна.
-URL ресурса сохраняется для аудита, но не является доверительным ключом. Вкладка показывает и
-allow, и block решения; их можно отозвать по одному или все сразу. Закрытие preflight и
-«Запретить все» означают session deny. Разовое разрешение действует только для текущей загрузки.
-
-Preflight стоит после fetch/integrity/unpack и до `ScriptingModuleRegistry.prepare()`: запрос может
-скачать недоверенные байты в immutable cache, но до ответа пользователя GDScript не компилируется
-и не исполняется. Cross-origin integrity остаётся hard requirement и не отменяется доверием.
-Более широкие origin rules и подписанные trust lists пока намеренно не реализованы.
-
-Окно preflight освобождает захват мыши на всё время решения и восстанавливает прежний режим
-после закрытия. Всё содержимое списка прокручивается, финальные кнопки закреплены снизу. Для
-ручной сверки с поставщиком каждая запись показывает fingerprint вида
-`первые 12…последние 12` символов SHA-256; полный hash доступен в tooltip и по кнопке копирования.
+SHA-256/SRI решает целостность, а не расширяет полномочия. Cross-origin artifact без точного SRI
+отклоняется. Same-origin artifact получает фактический content hash; производный execution cache
+дополнительно связан с runtime, WIT world/ABI major и module id. Capability policy всегда
+deny-first и не может быть расширена значениями manifest.
 
 ## Карта поверхностей риска
 
 | Поверхность | Риск | Статус | Где подробно |
 |---|---|---|---|
-| **Scripting modules / `.vrmod`** | Trusted GDScript имеет права приложения | **Смягчён:** integrity + default ask + exact-hash trust store; настоящей capability-песочницы ещё нет | [space/scripting-modules.md](space/scripting-modules.md) |
+| **Scripting modules / `.vrmod`** | Host imports или resource exhaustion могли бы вывести код за scope | **Sandbox:** Component Model без WASI/native ABI, allowlisted WIT capabilities, opaque scoped handles, fuel/deadline/memory/host-call quotas | [space/scripting-modules.md](space/scripting-modules.md), [space/wasm-runtime.md](space/wasm-runtime.md) |
 | **VRWML страницы** | `VrwebBuilder` инстанцирует через `ClassDB` любой класс Godot и ставит любые свойства из атрибутов недоверенной страницы: исполнение кода (`script`/GDExtension), свойства-пути → чтение ФС, сетевые узлы (SSRF/DoS) | **Принят** | [space/vrwml-tags.md](space/vrwml-tags.md) → «Принятое допущение» |
 | **Эфемерные действия пиров** | `vrweb-node` из действий пиров строится тем же `VrwebBuilder.build_element` — тот же риск, даже без захода на злонамеренную страницу | **Принят** | [network/ephemeral-changes.md](network/ephemeral-changes.md), [client/space-console.md](client/space-console.md) |
 | **Флаш персистенции** | Запекает узлы пиров в страницу на сервере — после чего они грузятся и инстанцируются как обычные узлы страницы | **Принят** (транзитивно от двух предыдущих) | [network/page-persistence.md](network/page-persistence.md) |
@@ -100,14 +89,30 @@ Preflight стоит после fetch/integrity/unpack и до `ScriptingModuleR
   фундамент под систему прав ([network/ephemeral-changes.md](network/ephemeral-changes.md),
   [network/ranks.md](network/ranks.md)).
 
-> **Не путать:** ключ запуска `--sandbox=<id>` — это **dev-изоляция** `user://` для запуска
-> нескольких инстансов на одной машине ([network/multiplayer.md](network/multiplayer.md)),
-> а НЕ security-песочница. Настоящей песочницы исполнения сейчас нет.
+> **Не путать:** ключ запуска `--sandbox=<id>` — это только **dev-изоляция** `user://` для
+> нескольких инстансов на одной машине ([network/multiplayer.md](network/multiplayer.md)).
+> Security sandbox для поставляемого кода — отдельный WASM Component runtime; ключ `--sandbox`
+> не усиливает и не ослабляет его capability policy.
+
+Hostile matrix проверяет invalid/truncated/mutated component bytes, import smuggling, core module,
+WASI, infinite loop, memory и table growth, host-call flood, trap, forged/foreign/stale handles,
+unsafe property/method/resource, resource quota, signal flood и callback after unmount. После
+каждого runtime trap запускается исправный component. Matrix выполняется на Linux, macOS и Windows;
+точные Rust/Wasmtime/godot-rust версии закреплены lock-файлом и runtime build metadata.
+Каждый CI run также сохраняет воспроизводимый seed property campaign: 10 000 случайных binary,
+10 000 многократно мутированных валидных components, 4 000 round-trip values, 8 000 недоверенных
+value inputs и 8 000 сценариев ownership/invalidation handle. Codec валидирует UTF-8 и base64 до
+декодирования, поэтому hostile bytes не создают неограниченный поток engine diagnostics.
+Scheduled release campaign умножает каждый из этих объёмов на 10; multiplier и фактические числа
+сохраняются рядом с seed в platform evidence.
+Итоговый release gate fail-closed требует evidence всех трёх desktop-платформ, один source
+revision, seed текущего workflow run, content hash каждого native binary, exported E2E и
+navigation race. Отсутствующий или повторяющийся platform artifact считается отказом gate.
 
 ## Рекомендации пользователям
 
-- Оставляйте режим «Спрашивать для неизвестных» и сохраняйте разрешение только для понятных
-  origin/module/hash. Помните: это защищает scripting modules, но пока не весь VRWML.
+- Не считайте успешный запуск WASM-модуля доверием ко всей странице: sandbox ограничивает
+  scripting modules, но пока не закрывает принятые риски произвольных VRWML-классов.
 - Внешний `.tscn` отклоняется; для внешних аватаров используйте только `.vrwml` и всё равно
   проверяйте origin и внешние ресурсы документа.
 - Не используйте `--insecure-identity` вне локальной разработки.

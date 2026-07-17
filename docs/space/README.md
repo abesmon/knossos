@@ -11,6 +11,9 @@ GDScript-классы, структуру Godot-сцен, конкретные A
 При расхождении документов нормативным источником для процедурной генерации и организации
 пространства считается `space/`; `client/` фиксирует только текущее поведение реализации.
 Public API внешних scripting modules и capability contract — в [scripting-api.md](scripting-api.md).
+Целевой переносимый runtime и его независимые нормативные границы — в
+[wasm-runtime.md](wasm-runtime.md), [wasm-module-format.md](wasm-module-format.md) и
+[wasm-scene-api.md](wasm-scene-api.md).
 Единая passthrough/audit boundary декларативного контента — в
 [content-policy.md](content-policy.md).
 
@@ -38,3 +41,11 @@ Public API внешних scripting modules и capability contract — в [scrip
   единый формат сцен, все Godot-классы, специальные стандартные классы и формы доставки.
 - [vrwml-tags.md](vrwml-tags.md) — подробный реализованный каталог стандартных тегов VRWML,
   режимы композиции, загрузка внешних GLB-ресурсов и ограничения текущего Knossos runtime.
+
+## Исполняемые модули
+
+- [scripting-modules.md](scripting-modules.md) — текущая реализация delivery/lifecycle и граница
+  её замены.
+- [wasm-runtime.md](wasm-runtime.md) — нормативная модель WebAssembly Component runtime.
+- [wasm-module-format.md](wasm-module-format.md) — declaration, manifest, package и integrity.
+- [wasm-scene-api.md](wasm-scene-api.md) — Godot-совместимая переносимая Scene-семантика.

@@ -1,18 +1,16 @@
 class_name ScriptingModuleCollector
 extends RefCounted
 
-## Чистый document -> module IR. Ничего не скачивает и не исполняет.
+## Чистый document -> WASM module IR. Ничего не скачивает и не исполняет.
 
-const SCRIPT_MIME := "application/vrweb+gdscript"
-const RUNTIME_TRUSTED := "trusted-gdscript"
-const RUNTIME_SANDBOXED := "sandboxed"
+const RUNTIME_WASM := "wasm-component"
+const SUPPORTED_WORLD := "vrweb:module@1"
 const MAX_MODULES := 32
-const MAX_INLINE_SOURCE_BYTES := 256 * 1024
 const MAX_ID_BYTES := 128
 
 
 ## Возвращает {modules: Array[Dictionary], errors: Array[String]}.
-## Module: id, kind(inline|script|package), runtime, source/src, integrity, exports, hash.
+## Module: id, kind(package), runtime, world, src, integrity, hash.
 static func collect(doc: HtmlNode, base_url: String) -> Dictionary:
 	var candidates: Array[HtmlNode] = []
 	_collect_candidates(doc, candidates)
@@ -23,8 +21,7 @@ static func collect(doc: HtmlNode, base_url: String) -> Dictionary:
 		if modules.size() >= MAX_MODULES:
 			errors.append("слишком много scripting modules (максимум %d)" % MAX_MODULES)
 			break
-		var parsed := _parse_script(elem, base_url) if elem.tag == "script" \
-				else _parse_package(elem, base_url)
+		var parsed := _parse_package(elem, base_url)
 		if not parsed.error.is_empty():
 			errors.append(parsed.error)
 			continue
@@ -40,42 +37,9 @@ static func collect(doc: HtmlNode, base_url: String) -> Dictionary:
 
 static func _collect_candidates(node: HtmlNode, out: Array[HtmlNode]) -> void:
 	for child in node.children:
-		if child.tag == "script" and child.get_attr("type").to_lower() == SCRIPT_MIME:
-			out.append(child)
-		elif child.tag == "vrwebmodule":
+		if child.tag == "vrwebmodule":
 			out.append(child)
 		_collect_candidates(child, out)
-
-
-static func _parse_script(elem: HtmlNode, base_url: String) -> Dictionary:
-	var id := elem.get_attr("id")
-	var invalid := _id_error(id)
-	if not invalid.is_empty():
-		return _error("inline script: " + invalid)
-	var src := elem.get_attr("src")
-	var source := _raw_text(elem)
-	if not src.is_empty() and not source.strip_edges().is_empty():
-		return _error("module «%s»: одновременно заданы src и inline body" % id)
-	if src.is_empty() and source.strip_edges().is_empty():
-		return _error("module «%s»: отсутствуют src и inline body" % id)
-	if source.to_utf8_buffer().size() > MAX_INLINE_SOURCE_BYTES:
-		return _error("module «%s»: inline source превышает %d байт" % [id, MAX_INLINE_SOURCE_BYTES])
-	var runtime := elem.get_attr("data-mode", RUNTIME_TRUSTED)
-	if not _valid_runtime(runtime):
-		return _error("module «%s»: неизвестный runtime «%s»" % [id, runtime])
-	var base := elem.get_attr("data-base", "Node")
-	var module := {
-		"id": id,
-		"kind": "inline" if src.is_empty() else "script",
-		"runtime": runtime,
-		"source": source if src.is_empty() else "",
-		"src": src,
-		"base_url": base_url,
-		"integrity": elem.get_attr("integrity"),
-		"exports": {"default": {"script": "main.gd", "base": base}},
-		"hash": source.sha256_text() if src.is_empty() else "",
-	}
-	return {"module": module, "error": ""}
 
 
 static func _parse_package(elem: HtmlNode, base_url: String) -> Dictionary:
@@ -86,22 +50,36 @@ static func _parse_package(elem: HtmlNode, base_url: String) -> Dictionary:
 	var src := elem.get_attr("src")
 	if src.is_empty():
 		return _error("module «%s»: отсутствует src пакета" % id)
-	var runtime := elem.get_attr("mode", RUNTIME_TRUSTED)
-	if not _valid_runtime(runtime):
+	var runtime := elem.get_attr("runtime", RUNTIME_WASM)
+	if runtime != RUNTIME_WASM:
 		return _error("module «%s»: неизвестный runtime «%s»" % [id, runtime])
+	var world := elem.get_attr("world", SUPPORTED_WORLD)
+	if world != SUPPORTED_WORLD:
+		return _error("module «%s»: несовместимый world «%s»" % [id, world])
+	var src_path := src.get_slice("?", 0).get_slice("#", 0)
+	if src_path.get_extension().to_lower() == "wasm":
+		var metadata_text := elem.get_attr("manifest")
+		if metadata_text.is_empty():
+			return _error("module «%s»: прямой .wasm требует manifest metadata" % id)
+		var metadata: Variant = JSON.parse_string(metadata_text)
+		if not (metadata is Dictionary):
+			return _error("module «%s»: manifest metadata содержит невалидный JSON" % id)
+		var parsed := ScriptingModuleManifest.parse(
+				JSON.stringify(metadata).to_utf8_buffer(), id)
+		if not bool(parsed.ok):
+			return _error("module «%s»: %s" % [id, "; ".join(parsed.errors)])
+		if str(parsed.manifest.component) != "module.wasm":
+			return _error("module «%s»: direct manifest component должен быть module.wasm" % id)
+		return {"module": {
+			"id": id, "kind": "component", "runtime": runtime, "world": world,
+			"src": src, "base_url": base_url, "integrity": elem.get_attr("integrity"),
+			"manifest": parsed.manifest, "exports": parsed.manifest.exports, "hash": "",
+		}, "error": ""}
 	return {"module": {
-		"id": id, "kind": "package", "runtime": runtime,
-		"source": "", "src": src, "base_url": base_url,
-		"integrity": elem.get_attr("integrity"), "exports": {}, "hash": "",
+		"id": id, "kind": "package", "runtime": runtime, "world": world,
+		"src": src, "base_url": base_url, "integrity": elem.get_attr("integrity"),
+		"exports": {}, "hash": "",
 	}, "error": ""}
-
-
-static func _raw_text(elem: HtmlNode) -> String:
-	var out := ""
-	for child in elem.children:
-		if child.is_text():
-			out += child.text
-	return out
 
 
 static func _id_error(id: String) -> String:
@@ -114,10 +92,6 @@ static func _id_error(id: String) -> String:
 				and not (c >= "0" and c <= "9") and c not in [".", "_", "-"]:
 			return "недопустимый id «%s»" % id
 	return ""
-
-
-static func _valid_runtime(runtime: String) -> bool:
-	return runtime in [RUNTIME_TRUSTED, RUNTIME_SANDBOXED]
 
 
 static func _error(message: String) -> Dictionary:

@@ -81,16 +81,6 @@ var avatar_uri: String = DEFAULT_AVATAR_URI
 ## проверка идентичности появится позже через центры авторизации. Подробно — в docs/ranks.md.
 var user_id: String = ""
 
-## Политика исполнения scripting modules. ask — безопасный default: неизвестный exact hash требует
-## preflight; allow_all/block_all — явные глобальные режимы. Постоянные решения привязаны к
-## origin страницы + id модуля + hash, поэтому обновившийся код не наследует старое доверие.
-const SCRIPT_POLICY_ASK := "ask"
-const SCRIPT_POLICY_ALLOW_ALL := "allow_all"
-const SCRIPT_POLICY_BLOCK_ALL := "block_all"
-var scripting_module_policy: String = SCRIPT_POLICY_ASK
-## key -> {decision, origin, module_id, resource_url, hash, updated_at}; decision allow|block.
-var scripting_module_rules: Dictionary = {}
-
 ## Фактические пути с учётом dev-песочницы (Sandbox): без --sandbox равны константам, с ним —
 ## уходят под user://<id>/. Резолвим один раз в _ready.
 var _path := PATH
@@ -234,15 +224,6 @@ func load_settings() -> void:
 	nick = cfg.get_value("net", "nick", nick)
 	user_id = cfg.get_value("identity", "user_id", user_id)
 	avatar_uri = cfg.get_value("avatar", "uri", avatar_uri)
-	# Старые page_script_* ключи читаются как migration fallback, чтобы переименование
-	# Scripting API не сбросило уже принятые exact-hash trust decisions.
-	var legacy_policy = cfg.get_value("security", "page_script_policy", scripting_module_policy)
-	scripting_module_policy = str(cfg.get_value("security", "scripting_module_policy", legacy_policy))
-	if scripting_module_policy not in [SCRIPT_POLICY_ASK, SCRIPT_POLICY_ALLOW_ALL, SCRIPT_POLICY_BLOCK_ALL]:
-		scripting_module_policy = SCRIPT_POLICY_ASK
-	var legacy_rules = cfg.get_value("security", "page_script_rules", {})
-	var stored_rules = cfg.get_value("security", "scripting_module_rules", legacy_rules)
-	scripting_module_rules = stored_rules if typeof(stored_rules) == TYPE_DICTIONARY else {}
 	if avatar_uri.strip_edges() == "":
 		avatar_uri = DEFAULT_AVATAR_URI
 
@@ -266,47 +247,6 @@ func save() -> void:
 	cfg.set_value("net", "nick", nick)
 	cfg.set_value("identity", "user_id", user_id)
 	cfg.set_value("avatar", "uri", avatar_uri)
-	cfg.set_value("security", "scripting_module_policy", scripting_module_policy)
-	cfg.set_value("security", "scripting_module_rules", scripting_module_rules)
 	cfg.save(_path)
 	apply_audio()
 	changed.emit()
-
-
-## Стабильный ключ exact-code правила. URL ресурса намеренно не входит: redirect/CDN может
-## меняться, но доверие всё равно ограничено origin страницы, module id и проверенным hash.
-func scripting_module_rule_key(origin: String, module_id: String, content_hash: String) -> String:
-	return (origin + "\n" + module_id + "\n" + content_hash).sha256_text()
-
-
-func scripting_module_decision(origin: String, module_id: String, content_hash: String) -> String:
-	if scripting_module_policy == SCRIPT_POLICY_ALLOW_ALL:
-		return "allow"
-	if scripting_module_policy == SCRIPT_POLICY_BLOCK_ALL:
-		return "block"
-	var rule = scripting_module_rules.get(
-			scripting_module_rule_key(origin, module_id, content_hash), {})
-	return str(rule.get("decision", "")) if typeof(rule) == TYPE_DICTIONARY else ""
-
-
-func remember_scripting_module_decision(origin: String, module: Dictionary, decision: String) -> void:
-	if decision not in ["allow", "block"]:
-		return
-	var content_hash := str(module.get("hash", ""))
-	var id := str(module.get("id", ""))
-	scripting_module_rules[scripting_module_rule_key(origin, id, content_hash)] = {
-		"decision": decision, "origin": origin, "module_id": id,
-		"resource_url": str(module.get("resolved_url", "inline")), "hash": content_hash,
-		"updated_at": int(Time.get_unix_time_from_system()),
-	}
-	save()
-
-
-func forget_scripting_module_rule(key: String) -> void:
-	scripting_module_rules.erase(key)
-	save()
-
-
-func clear_scripting_module_rules() -> void:
-	scripting_module_rules.clear()
-	save()

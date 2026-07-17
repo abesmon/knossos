@@ -1,0 +1,17 @@
+[
+  {"name":"null","wire":{"t":"null"}},
+  {"name":"bool","wire":{"t":"bool","v":true}},
+  {"name":"i64","wire":{"t":"i64","v":"42"}},
+  {"name":"f64","wire":{"t":"f64","v":3.5}},
+  {"name":"string","wire":{"t":"string","v":"VRWeb ✓"}},
+  {"name":"bytes","wire":{"t":"bytes","v":"AAEC/w=="}},
+  {"name":"array","wire":{"t":"array","v":[{"t":"bool","v":true},{"t":"i64","v":"7"}]}},
+  {"name":"map","wire":{"t":"map","v":[["a",{"t":"i64","v":"1"}],["b",{"t":"string","v":"two"}]]}},
+  {"name":"vec2","wire":{"t":"vec2","v":[1.0,2.0]}},
+  {"name":"vec3","wire":{"t":"vec3","v":[1.0,2.0,3.0]}},
+  {"name":"vec4","wire":{"t":"vec4","v":[1.0,2.0,3.0,4.0]}},
+  {"name":"quat","wire":{"t":"quat","v":[0.0,0.0,0.0,1.0]}},
+  {"name":"color","wire":{"t":"color","v":[0.10000000149011612,0.20000000298023224,0.30000001192092896,0.4000000059604645]}},
+  {"name":"basis","wire":{"t":"basis","v":[1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0]}},
+  {"name":"transform3d","wire":{"t":"transform3d","v":[1.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,1.0,4.0,5.0,6.0]}}
+]

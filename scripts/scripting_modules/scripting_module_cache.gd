@@ -57,6 +57,25 @@ static func valid_hash(content_hash: String) -> bool:
 	return true
 
 
+## Stable key for VM/compiled caches. Artifact storage remains keyed by bytes only; anything
+## derived from validation/compilation must also bind the public runtime contract and identity.
+static func execution_key(content_hash: String, manifest: Dictionary) -> String:
+	if not valid_hash(content_hash):
+		return ""
+	var world := str(manifest.get("world", ""))
+	var world_major := world.get_slice("@", 1)
+	if world_major.is_empty() or not world_major.is_valid_int():
+		return ""
+	var identity := "\n".join([
+		content_hash,
+		str(manifest.get("runtime", "")),
+		world,
+		world_major,
+		str(manifest.get("id", "")),
+	])
+	return _sha256_hex(identity.to_utf8_buffer())
+
+
 static func _sha256_hex(bytes: PackedByteArray) -> String:
 	var context := HashingContext.new()
 	context.start(HashingContext.HASH_SHA256)

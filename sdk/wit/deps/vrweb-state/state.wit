@@ -1,0 +1,8 @@
+package vrweb:state@1.0.0;
+
+interface host {
+  read: func(key: string) -> result<list<u8>, string>;
+  command: func(request: list<u8>) -> result<_, string>;
+  subscribe: func(key: string) -> result<u64, string>;
+  unsubscribe: func(subscription: u64);
+}

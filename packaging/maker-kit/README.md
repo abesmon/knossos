@@ -12,9 +12,17 @@ Godot 4.6 project/addon. Knossos не требуется для сборки HTM
 3. Откройте `world.tscn` и соберите HTML через Scene → Export As… → VRWML Scene.
 4. Для production preview задайте executable Knossos той же версии и нажмите Build & Run.
 
-`scripting_inline_demo.tscn` и `scripting_package_demo.tscn` показывают две формы trusted
-GDScript. `compatibility.json` фиксирует совместимые версии Maker Kit, Knossos, Godot и
-локальной VRWML policy. Изменения и миграции перечисляются в общем `CHANGELOG.md` release train.
+Исполняемое поведение поставляется как WebAssembly component; Godot scripts authoring-проекта
+не публикуются. `compatibility.json` фиксирует совместимые версии Maker Kit, Knossos, Godot и
+локальной VRWML policy. Изменения формата перечисляются в общем `CHANGELOG.md` release train.
+
+Для поведения добавьте `VrwebWasmComponent`, выберите готовый `.vrmod` и задайте module id/export
+из его manifest. Build проверит и скопирует package в `dist/modules/<sha256>.vrmod`, но не станет
+исполнять его внутри Godot. Проверка исполнения выполняется кнопкой **Build & Run in Knossos**.
+
+Если установлен VRWeb TypeScript adapter, кнопка **Add VRWeb Script** создаёт source component и
+template. Укажите путь к `build.mjs` в `vrweb/maker/javascript_adapter_script`; Build & Run
+инкрементально соберёт `.vrmod`, но не опубликует `.ts`. Prebuilt workflow не требует Node/npm.
 
 При открытии корня архива в VS Code файл `.vscode/settings.json` автоматически подключает
 `schemas/vrweb-html-data.json`: для ручного HTML появляются completion и hover descriptions

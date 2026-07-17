@@ -1,0 +1,325 @@
+name: WASM runtime matrix
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/wasm-runtime.yml"
+      - "native/vrweb_wasm_runtime/**"
+      - "scripts/scripting_modules/**"
+      - "addons/vrweb_tools/**"
+      - "tools/build_vrmod.py"
+      - "tools/generate_wasm_sdk.py"
+      - "sdk/**"
+      - "conformance/**"
+      - "tools/build_wasm_conformance.py"
+      - "tools/build_wasm_security_evidence.py"
+      - "tools/build_wasm_runtime_evidence.py"
+      - "tools/verify_wasm_release_gate.py"
+      - "tests/test_wasm_conformance_archive.py"
+      - "tests/test_wasm_product_audit.py"
+      - "tests/test_wasm_release_gate.py"
+      - "tests/run_maker_clean_addon.sh"
+      - "tests/test_vrmod_packaging.py"
+      - "tests/test_native_wasm_runtime.gd"
+      - "tests/**/*wasm*"
+  push:
+    paths:
+      - ".github/workflows/wasm-runtime.yml"
+      - "native/vrweb_wasm_runtime/**"
+      - "scripts/scripting_modules/**"
+      - "addons/vrweb_tools/**"
+      - "tools/build_vrmod.py"
+      - "tools/generate_wasm_sdk.py"
+      - "sdk/**"
+      - "conformance/**"
+      - "tools/build_wasm_conformance.py"
+      - "tools/build_wasm_security_evidence.py"
+      - "tools/build_wasm_runtime_evidence.py"
+      - "tools/verify_wasm_release_gate.py"
+      - "tests/test_wasm_conformance_archive.py"
+      - "tests/test_wasm_product_audit.py"
+      - "tests/test_wasm_release_gate.py"
+      - "tests/run_maker_clean_addon.sh"
+      - "tests/test_vrmod_packaging.py"
+      - "tests/test_native_wasm_runtime.gd"
+      - "tests/**/*wasm*"
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 0"
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: 4.6.3-stable
+  RUST_TOOLCHAIN: 1.94.0
+  WASM_SOAK_ROUNDS: ${{ github.event_name == 'schedule' && '10' || '1' }}
+  VRWEB_FUZZ_MULTIPLIER: ${{ github.event_name == 'schedule' && '10' || '1' }}
+  VRWEB_FUZZ_SEED: ${{ github.run_id }}
+
+jobs:
+  native:
+    name: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: Godot_v4.6.3-stable_linux.x86_64.zip
+            binary: Godot_v4.6.3-stable_linux.x86_64
+            preset: Linux
+            export_path: .ci-export/knossos.x86_64
+            run_binary: .ci-export/knossos.x86_64
+            runtime_binary: libvrweb_wasm_runtime.so
+            build_target: linux
+          - os: macos-latest
+            asset: Godot_v4.6.3-stable_macos.universal.zip
+            binary: Godot.app/Contents/MacOS/Godot
+            preset: macOS
+            export_path: .ci-export/knossos.app
+            run_binary: .ci-export/knossos.app/Contents/MacOS/knossos
+            runtime_binary: libvrweb_wasm_runtime.dylib
+            build_target: mac
+          - os: windows-latest
+            asset: Godot_v4.6.3-stable_win64.exe.zip
+            binary: Godot_v4.6.3-stable_win64.exe
+            preset: Windows Desktop
+            export_path: .ci-export/knossos.exe
+            run_binary: .ci-export/knossos.exe
+            runtime_binary: vrweb_wasm_runtime.dll
+            build_target: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: sdk/javascript/package-lock.json
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+          rustup target add wasm32-unknown-unknown --toolchain "$RUST_TOOLCHAIN"
+
+      - name: Build fixtures and test native runtime
+        shell: bash
+        run: |
+          cargo run --locked --manifest-path native/vrweb_wasm_runtime/Cargo.toml --bin build_fixture
+          cargo test --locked --manifest-path native/vrweb_wasm_runtime/Cargo.toml
+          CARGO="$(command -v cargo)" RUSTC="$(command -v rustc)" \
+            RUSTUP="$(command -v rustup)" \
+            bash native/vrweb_wasm_runtime/build_runtime.sh debug
+
+      - name: Download official Godot editor
+        shell: python
+        env:
+          GODOT_ASSET: ${{ matrix.asset }}
+          GODOT_BINARY: ${{ matrix.binary }}
+        run: |
+          import os
+          from pathlib import Path
+          from urllib.request import urlretrieve
+          from zipfile import ZipFile
+
+          root = Path.cwd()
+          install = root / ".ci-godot"
+          archive = install / os.environ["GODOT_ASSET"]
+          install.mkdir()
+          url = (
+              "https://github.com/godotengine/godot/releases/download/"
+              f"{os.environ['GODOT_VERSION']}/{os.environ['GODOT_ASSET']}"
+          )
+          urlretrieve(url, archive)
+          with ZipFile(archive) as bundle:
+              bundle.extractall(install)
+          binary = (install / os.environ["GODOT_BINARY"]).resolve()
+          binary.chmod(0o755)
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env:
+              env.write(f"GODOT={binary.as_posix()}\n")
+
+      - name: Run Godot integration and hostile corpus
+        shell: bash
+        run: |
+          "$GODOT" --headless --path . --editor --quit
+          "$GODOT" --headless --path . --script res://tests/test_native_wasm_runtime.gd
+          "$GODOT" --headless --path . --script res://tests/test_wasm_reentrancy.gd
+          "$GODOT" --headless --path . --script res://tests/test_wasm_value_handles.gd
+          "$GODOT" --headless --path . --script res://tests/test_wasm_value_fuzz.gd
+          "$GODOT" --headless --path . --script res://tests/test_wasm_services.gd
+          "$GODOT" --headless --path . --script res://tests/test_wasm_source_map.gd
+          "$GODOT" --headless --path . --script res://tests/test_scripting_module_identity.gd
+          "$GODOT" --headless --path . --script res://tests/test_scripting_modules.gd
+          "$GODOT" --headless --path . --script res://tests/test_scripting_module_cache.gd
+          "$GODOT" --headless --path . --script res://tests/test_scripting_module_integrity.gd
+          "$GODOT" --headless --path . --script res://tests/test_scripting_module_manifest.gd
+          "$GODOT" --headless --path . --script res://tests/test_scripting_module_package.gd
+          "$GODOT" --headless --path . --script res://tests/test_maker_wasm_export.gd
+
+      - name: Build JavaScript fixture included by exported network E2E
+        shell: bash
+        run: |
+          python3 tools/generate_wasm_sdk.py --check
+          npm --prefix sdk/javascript ci --ignore-scripts
+          npm --prefix sdk/javascript run check
+
+      - name: Install official export templates and run exported WASM smoke
+        shell: python
+        env:
+          EXPORT_PRESET: ${{ matrix.preset }}
+          EXPORT_PATH: ${{ matrix.export_path }}
+          RUN_BINARY: ${{ matrix.run_binary }}
+        run: |
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          from urllib.request import urlretrieve
+          from zipfile import ZipFile
+
+          root = Path.cwd()
+          version = os.environ["GODOT_VERSION"]
+          archive = root / ".ci-godot" / f"Godot_v{version}_export_templates.tpz"
+          url = (
+              "https://github.com/godotengine/godot/releases/download/"
+              f"{version}/Godot_v{version}_export_templates.tpz"
+          )
+          urlretrieve(url, archive)
+          extracted = root / ".ci-godot" / "export-templates"
+          with ZipFile(archive) as bundle:
+              bundle.extractall(extracted)
+          folder = version.replace("-", ".")
+          if os.name == "nt":
+              destination = Path(os.environ["APPDATA"]) / "Godot/export_templates" / folder
+          elif os.uname().sysname == "Darwin":
+              destination = Path.home() / "Library/Application Support/Godot/export_templates" / folder
+          else:
+              destination = Path.home() / ".local/share/godot/export_templates" / folder
+          destination.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copytree(extracted / "templates", destination, dirs_exist_ok=True)
+          output = root / os.environ["EXPORT_PATH"]
+          output.parent.mkdir(parents=True, exist_ok=True)
+          subprocess.run([os.environ["GODOT"], "--headless", "--path", str(root),
+                          "--export-debug", os.environ["EXPORT_PRESET"], str(output)], check=True)
+          binary = root / os.environ["RUN_BINARY"]
+          binary.chmod(binary.stat().st_mode | 0o111)
+          subprocess.run([str(binary), "--headless", "--", "--vrweb-wasm-self-test"], check=True)
+
+      - name: Run exported multiplayer identity, navigation and authority E2E
+        shell: bash
+        run: |
+          python3 -m pip install -r signaling/requirements.txt
+          python3 tests/run_net_wasm_identity_test.py --rounds "$WASM_SOAK_ROUNDS" \
+            --exported-binary "${{ matrix.run_binary }}"
+
+      - name: Verify build.sh release layout and packaged runtime license
+        shell: bash
+        env:
+          BUILD_TARGET: ${{ matrix.build_target }}
+          VRWEB_SKIP_MAKER_KIT: "1"
+        run: bash build.sh "$BUILD_TARGET"
+
+      - name: Build and run JavaScript authoring fixture
+        shell: bash
+        run: |
+          python3 -m unittest tests/test_javascript_adapter_cli.py
+          cargo test --locked --manifest-path sdk/rust/Cargo.toml
+          python3 sdk/rust/build.py
+          "$GODOT" --headless --path . --script res://tests/test_javascript_wasm_runtime.gd
+          "$GODOT" --headless --path . --script res://tests/test_maker_wasm_reload.gd
+          python3 -m pip install -r signaling/requirements.txt
+          python3 tests/run_net_wasm_identity_test.py --rounds "$WASM_SOAK_ROUNDS" --godot "$GODOT"
+
+      - name: Verify engine-independent conformance release
+        shell: bash
+        run: |
+          cargo run --locked --manifest-path conformance/model-host/Cargo.toml -- \
+            sdk/rust/dist/module.wasm conformance/expected/rust-conformance.json
+          python3 tools/build_wasm_conformance.py
+          python3 tests/test_wasm_conformance_archive.py
+
+      - name: Verify deterministic package and clean Maker Kit workflow
+        shell: bash
+        run: |
+          python3 tests/test_vrmod_packaging.py
+          python3 tests/test_wasm_product_audit.py
+          python3 tests/test_wasm_release_gate.py
+          python3 tools/build_wasm_security_evidence.py --platform "${{ runner.os }}"
+          GODOT="$GODOT" bash tests/run_maker_clean_addon.sh
+
+      - name: Build content-addressed runtime evidence
+        id: runtime-evidence
+        shell: bash
+        run: |
+          python3 tools/build_wasm_runtime_evidence.py \
+            --platform "${{ runner.os }}" \
+            --binary "${{ matrix.runtime_binary }}" \
+            --profile debug \
+            --source-revision "${{ github.sha }}"
+
+      - name: Upload platform runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrweb-wasm-runtime-${{ runner.os }}-${{ steps.runtime-evidence.outputs.artifact_digest }}
+          path: |
+            addons/vrweb_wasm_runtime
+            conformance/dist/wasm-runtime-evidence-${{ runner.os }}.json
+          if-no-files-found: error
+
+      - name: Upload versioned conformance suite
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrweb-wasm-conformance-${{ runner.os }}
+          path: |
+            conformance/dist/vrweb-wasm-conformance-1.0.0-draft.1.*
+            conformance/dist/wasm-security-evidence-${{ runner.os }}.json
+          if-no-files-found: error
+
+  release-gate:
+    name: Three-platform release evidence
+    if: ${{ always() }}
+    needs: native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download every content-addressed runtime artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vrweb-wasm-runtime-*
+          path: release-evidence
+          merge-multiple: true
+
+      - name: Download every platform conformance artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vrweb-wasm-conformance-*
+          path: release-evidence
+          merge-multiple: true
+
+      - name: Verify complete release evidence
+        shell: bash
+        env:
+          MINIMUM_MULTIPLIER: ${{ github.event_name == 'schedule' && '10' || '1' }}
+          MINIMUM_SOAK_ROUNDS: ${{ github.event_name == 'schedule' && '10' || '1' }}
+        run: |
+          python3 tools/verify_wasm_release_gate.py \
+            --root release-evidence \
+            --source-revision "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --minimum-multiplier "$MINIMUM_MULTIPLIER" \
+            --minimum-soak-rounds "$MINIMUM_SOAK_ROUNDS" \
+            --output release-evidence/wasm-release-gate.json
+
+      - name: Upload aggregate release gate
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrweb-wasm-release-gate-${{ github.run_id }}
+          path: release-evidence/wasm-release-gate.json
+          if-no-files-found: error

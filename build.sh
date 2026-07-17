@@ -16,6 +16,7 @@
 # Переопределяемые переменные окружения:
 #   GODOT   — путь к бинарю Godot (по умолчанию ищется автоматически)
 #   VERSION — semver; по умолчанию берётся config/version из project.godot
+#   VRWEB_SKIP_MAKER_KIT=1 — проверить только platform client packaging (используется matrix CI)
 #
 set -euo pipefail
 
@@ -27,6 +28,8 @@ NAME="knossos"
 MAKER_NAME="vrweb-maker-kit"
 PRESETS="$ROOT/export_presets.cfg"
 MACOS_PACKAGE_FILES="$ROOT/packaging/macos"
+WASM_RUNTIME_ADDON="$ROOT/addons/vrweb_wasm_runtime"
+WASM_RUNTIME_LICENSE="$ROOT/native/vrweb_wasm_runtime/LICENSES.md"
 BUILD_NUMBER_FILE="$BUILD/.build_number"   # локальный счётчик, не в гите (весь build/ в .gitignore)
 
 cd "$ROOT"
@@ -52,6 +55,7 @@ godot_templates_dir() {
   case "$(uname -s)" in
     Darwin) echo "$HOME/Library/Application Support/Godot/export_templates/$TPL_DIR_NAME" ;;
     Linux)  echo "${XDG_DATA_HOME:-$HOME/.local/share}/godot/export_templates/$TPL_DIR_NAME" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "${APPDATA:?APPDATA is required}/Godot/export_templates/$TPL_DIR_NAME" ;;
     *)      echo "$HOME/.local/share/godot/export_templates/$TPL_DIR_NAME" ;;
   esac
 }
@@ -173,15 +177,34 @@ export_preset() {
   rm -f "$log"
 }
 
+require_wasm_runtime_artifact() {
+  local binary="$1" platform="$2"
+  [[ -f "$WASM_RUNTIME_ADDON/vrweb_wasm_runtime.gdextension" ]] || \
+    die "Нет optional WASM GDExtension descriptor; соберите native runtime для $platform"
+  [[ -s "$WASM_RUNTIME_ADDON/bin/$binary" ]] || \
+    die "Нет WASM runtime binary $binary для $platform"
+  [[ -f "$WASM_RUNTIME_ADDON/LICENSES.md" && -f "$WASM_RUNTIME_LICENSE" ]] || \
+    die "Нет license metadata WASM runtime"
+}
+
+copy_wasm_runtime_license() {
+  local destination="$1"
+  cp "$WASM_RUNTIME_LICENSE" "$destination/VRWEB_WASM_RUNTIME_LICENSES.md"
+}
+
 # --- сборка macOS -----------------------------------------------------------
 build_mac() {
   ensure_templates
+  require_wasm_runtime_artifact "libvrweb_wasm_runtime.dylib" "macOS universal"
   local dir="$BUILD/macos" app
   rm -rf "$dir"; mkdir -p "$dir"
   app="$dir/$NAME.app"
   export_preset "macOS" "$app"
 
   [[ -x "$app/Contents/MacOS/$NAME" ]] || die "В .app нет исполняемого файла"
+  find "$app/Contents" -name 'libvrweb_wasm_runtime.dylib' | grep -q . || \
+    die "WASM runtime не попал в macOS app"
+  copy_wasm_runtime_license "$dir"
 
   step "Ad-hoc подпись .app"
   # --entitlements: микрофон для голосового чата (com.apple.security.device.audio-input).
@@ -212,12 +235,15 @@ build_mac() {
 # --- сборка Windows ---------------------------------------------------------
 build_win() {
   ensure_templates
+  require_wasm_runtime_artifact "vrweb_wasm_runtime.dll" "Windows x86_64"
   local dir="$BUILD/windows" exe
   rm -rf "$dir"; mkdir -p "$dir"
   exe="$dir/$NAME.exe"
   export_preset "Windows Desktop" "$exe"
 
   [[ -f "$exe" ]] || die "Не создан $NAME.exe"
+  [[ -f "$dir/vrweb_wasm_runtime.dll" ]] || die "WASM runtime не попал в Windows export"
+  copy_wasm_runtime_license "$dir"
 
   # проверка, что рядом легли ffmpeg dll
   if ls "$dir"/libgdffmpeg.windows*.dll >/dev/null 2>&1 && ls "$dir"/avcodec-*.dll >/dev/null 2>&1; then
@@ -236,12 +262,15 @@ build_win() {
 # --- сборка Linux -----------------------------------------------------------
 build_linux() {
   ensure_templates
+  require_wasm_runtime_artifact "libvrweb_wasm_runtime.so" "Linux x86_64"
   local dir="$BUILD/linux" bin
   rm -rf "$dir"; mkdir -p "$dir"
   bin="$dir/$NAME"
   export_preset "Linux" "$bin"
 
   [[ -f "$bin" ]] || die "Не создан $NAME"
+  [[ -f "$dir/libvrweb_wasm_runtime.so" ]] || die "WASM runtime не попал в Linux export"
+  copy_wasm_runtime_license "$dir"
   chmod +x "$bin" || true
 
   # проверка, что рядом легли ffmpeg .so и GDExtension-библиотеки
@@ -401,6 +430,10 @@ case "$target" in
   *)                die "Неизвестная цель: $target (см. --help)" ;;
 esac
 
-build_maker_kit
+if [[ "${VRWEB_SKIP_MAKER_KIT:-0}" != "1" ]]; then
+  build_maker_kit
+else
+  ok "Maker Kit пропущен: platform-only matrix verification"
+fi
 
 ok "Сборка завершена."

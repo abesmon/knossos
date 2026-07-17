@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "fixture": "rust-conformance.wasm",
+  "world": "vrweb:module@1",
+  "log_codes": [71, 72, 73, 74],
+  "host_trace": [
+    "scene.query",
+    "scene.mutate",
+    "scene.commit",
+    "state.command",
+    "state.read"
+  ]
+}

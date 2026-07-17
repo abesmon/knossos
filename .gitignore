@@ -11,6 +11,15 @@ __pycache__/
 
 # Сборки (build.sh)
 /build/
+/addons/vrweb_wasm_runtime/
+/native/vrweb_wasm_runtime/target/
+/sdk/javascript/node_modules/
+/sdk/javascript/dist/
+/sdk/rust/target/
+/sdk/rust/dist/
+/conformance/model-host/target/
+/conformance/dist/
+/.ci-export/
 
 # Приватный конфиг сборки (адреса сигналинга/ICE, учётка TURN) — см. docs/build-config.md.
 # Коммитим только шаблон config/build.example.cfg.

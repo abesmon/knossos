@@ -1,0 +1,22 @@
+[package]
+name = "vrweb-rust-conformance"
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "=0.55.0"
+serde_json = "=1.0.150"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+wit-component = "=0.246.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

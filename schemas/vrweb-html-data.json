@@ -333,7 +333,7 @@
     },
     {
       "name": "VRWebModule",
-      "description": "Trusted GDScript package declaration.",
+      "description": "Portable WebAssembly component declaration.",
       "attributes": [
         {
           "name": "id",
@@ -341,18 +341,31 @@
         },
         {
           "name": "src",
-          "description": "Relative or absolute .vrmod URL."
+          "description": "Relative or absolute .vrmod or direct .wasm URL."
+        },
+        {
+          "name": "manifest",
+          "description": "Required canonical manifest JSON for a direct .wasm URL."
         },
         {
           "name": "integrity",
           "description": "sha256-BASE64 integrity value."
         },
         {
-          "name": "mode",
-          "description": "Runtime trust mode.",
+          "name": "runtime",
+          "description": "Portable runtime format.",
           "values": [
             {
-              "name": "trusted-gdscript"
+              "name": "wasm-component"
+            }
+          ]
+        },
+        {
+          "name": "world",
+          "description": "Required WIT world.",
+          "values": [
+            {
+              "name": "vrweb:module@1"
             }
           ]
         }
@@ -360,15 +373,15 @@
     },
     {
       "name": "VRWebComponent",
-      "description": "Node implemented by an inline or packaged module.",
+      "description": "Scene node implemented by a WASM module export.",
       "attributes": [
         {
           "name": "module",
-          "description": "Module id, or #id for an inline script."
+          "description": "Module id declared by VRWebModule."
         },
         {
-          "name": "class",
-          "description": "Exported module class; inline modules use default."
+          "name": "export",
+          "description": "Export name implemented by the component."
         },
         {
           "name": "auto_translate_mode",

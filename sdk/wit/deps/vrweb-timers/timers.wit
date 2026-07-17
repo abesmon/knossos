@@ -1,0 +1,6 @@
+package vrweb:timers@1.0.0;
+
+interface host {
+  start: func(delay-ms: u32, repeat: bool) -> result<u64, string>;
+  cancel: func(timer: u64);
+}

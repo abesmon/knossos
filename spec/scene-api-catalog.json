@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "methods": {
+    "Node3D": {
+      "hide": {"classification": "safe", "args": 0},
+      "show": {"classification": "safe", "args": 0}
+    },
+    "AnimationPlayer": {
+      "play": {"classification": "safe", "args_min": 1, "args_max": 4},
+      "stop": {"classification": "safe", "args_min": 0, "args_max": 1}
+    }
+  },
+  "signals": {
+    "Node": ["renamed"],
+    "CanvasItem": ["visibility_changed"],
+    "Area3D": ["mouse_entered"]
+  }
+}

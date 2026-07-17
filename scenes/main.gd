@@ -7,7 +7,6 @@ extends Node
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
-const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/scripting_modules/scripting_module_permission_dialog.gd")
 
 @onready var _world: Node3D = $world
 @onready var _ui: MainUI = $UI
@@ -26,8 +25,6 @@ var _fetcher: PageFetcher
 # сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
 var _css_fetcher: CssFetcher
 var _module_fetcher: ScriptingModuleFetcher
-var _script_permission_dialog: ScriptingModulePermissionDialog
-var _script_permission_focus_token := 0
 var _address_focus_token := 0
 var _settings_focus_token := 0
 var _chat_focus_token := 0
@@ -89,9 +86,9 @@ var _base_url: String = ""
 # «Паспорт» текущей страницы из <head> (title/description/thumbnail/metas) — заполняется в
 # _on_fetched и отдаётся вкладке «Мир» настроек (см. _extract_page_meta).
 var _page_meta: Dictionary = {}
-# Фактические hashes executable modules текущей страницы. Пока runtime поддерживает inline
-# allow-all; структура уже пригодна для compatibility/trust UI следующих этапов.
+# Фактические hashes executable modules текущей страницы для compatibility negotiation.
 var _scripting_module_hashes: Dictionary = {}
+var _scripting_module_identity: Array[Dictionary] = []
 var _content_policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 # ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
 # консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
@@ -336,10 +333,6 @@ func _cancel_load() -> void:
 	_fetcher.cancel()
 	if _module_fetcher != null:
 		_module_fetcher.cancel()
-	if is_instance_valid(_script_permission_dialog):
-		_script_permission_dialog.queue_free()
-		_script_permission_dialog = null
-	_restore_mouse_after_script_permission()
 	_nav_id += 1
 
 
@@ -560,52 +553,9 @@ func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: i
 						str(unpacked.error)])
 		else:
 			runnable_modules.append(module)
-	_authorize_scripting_modules(runnable_modules, final_url, func(allowed_modules: Array):
-		if not is_inside_tree() or final_url != _current_url:
-			return
-		_finish_materialize_page(doc, final_url, base_url, t0, allowed_modules))
-
-
-## Разделяет уже integrity-проверенные модули на известные allow/block и неизвестные. В ask
-## неизвестные показываются одним preflight; до ответа registry.prepare (компиляция) не зовётся.
-func _authorize_scripting_modules(modules: Array, page_url: String, done: Callable) -> void:
-	var origin := ScriptingModuleIntegrity.origin_of(page_url)
-	if origin.is_empty():
-		origin = page_url.get_base_dir()
-	var allowed: Array = []
-	var pending: Array = []
-	for module in modules:
-		var decision := Settings.scripting_module_decision(origin, str(module.get("id", "")),
-				str(module.get("hash", "")))
-		if decision == "allow":
-			allowed.append(module)
-		elif decision != "block":
-			pending.append(module)
-	if pending.is_empty():
-		done.call(allowed)
+	if not is_inside_tree() or final_url != _current_url:
 		return
-	_set_status("Ожидание разрешения для %d скриптов…" % pending.size())
-	_script_permission_focus_token = _player.claim_mouse_focus("scripting_module_permission")
-	_script_permission_dialog = SCRIPT_PERMISSION_DIALOG.new()
-	add_child(_script_permission_dialog)
-	_script_permission_dialog.decisions_submitted.connect(func(decisions: Dictionary):
-		_script_permission_dialog = null
-		_restore_mouse_after_script_permission()
-		for module in pending:
-			var choice: Dictionary = decisions.get(str(module.get("id", "")), {})
-			var allow := bool(choice.get("allow", false))
-			if bool(choice.get("remember", false)):
-				Settings.remember_scripting_module_decision(origin, module, "allow" if allow else "block")
-			if allow:
-				allowed.append(module)
-		done.call(allowed), CONNECT_ONE_SHOT)
-	_script_permission_dialog.present(pending, page_url)
-
-
-func _restore_mouse_after_script_permission() -> void:
-	if is_instance_valid(_player):
-		_player.release_mouse_focus(_script_permission_focus_token)
-	_script_permission_focus_token = 0
+	_finish_materialize_page(doc, final_url, base_url, t0, runnable_modules)
 
 
 func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
@@ -613,14 +563,25 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 	_set_loading(false)
 	_set_status("Сборка пространства…")
 	var module_registry := ScriptingModuleRegistry.new()
-	var module_prepared := module_registry.prepare(
-			runnable_modules, ScriptingModuleRegistry.ScriptMode.ALLOW_ALL)
-	for module_error in module_prepared.errors:
-		Log.warn("modules", str(module_error))
+	var module_prepared := module_registry.prepare(runnable_modules)
+	if not (module_prepared.get("diagnostics", []) as Array).is_empty():
+		for diagnostic in module_prepared.diagnostics:
+			Log.warn("modules", JSON.stringify(diagnostic))
+	else:
+		for module_error in module_prepared.errors:
+			Log.warn("modules", str(module_error))
 	_scripting_module_hashes.clear()
 	for module in runnable_modules:
 		if not str(module.get("hash", "")).is_empty():
 			_scripting_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
+	_scripting_module_identity = ScriptingModuleIdentity.canonical(runnable_modules)
+	NetworkManager.set_scripting_module_identity(_scripting_module_identity,
+			NativeWasmBackend.is_available(),
+			ScriptingModuleIdentity.required_capabilities(runnable_modules),
+			NativeWasmBackend.HOST_CAPABILITIES)
+	if not _scripting_module_identity.is_empty() and not NativeWasmBackend.is_available():
+		Log.warn("modules", JSON.stringify({"outcome": "degraded",
+			"code": "runtime_unavailable", "identity": _scripting_module_identity}))
 	var vrweb := VrwebBuilder.build(doc, base_url, module_registry, _content_policy)
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
@@ -1148,7 +1109,11 @@ func _join_current_room() -> void:
 		return
 	NetworkManager.connect_to_server()
 	if _current_url != "":
-		NetworkManager.join_room(PageFetcher.seed_key(_current_url))
+		var room_key := ScriptingModuleIdentity.room_key(
+				PageFetcher.seed_key(_current_url), _scripting_module_identity)
+		Log.info("modules", JSON.stringify({"outcome": "compatible",
+			"room": room_key, "identity": _scripting_module_identity}))
+		NetworkManager.join_room(room_key)
 
 
 func _on_connection_changed(online: bool) -> void:

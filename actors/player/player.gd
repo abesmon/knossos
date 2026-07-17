@@ -315,13 +315,10 @@ func _update_aim() -> void:
 	_dispatch_hover()
 	var col := _aim_collider()
 	# is_active_at — есть ли подсветка курсора; aim_hint_at — «куда ведёт» (для строки статуса).
-	var module_input: ScriptingModuleInputAPI = _module_input_for(col)
-	var active: bool = module_input != null or (col != null and col.has_method("is_active_at") \
-			and col.is_active_at(_ray.get_collision_point()))
+	var active: bool = col != null and col.has_method("is_active_at") \
+			and col.is_active_at(_ray.get_collision_point())
 	var hint: String = ""
-	if module_input != null:
-		hint = module_input.hint(col)
-	elif active and col.has_method("aim_hint_at"):
+	if active and col.has_method("aim_hint_at"):
 		hint = col.aim_hint_at(_ray.get_collision_point())
 	if active != _aim_active or hint != _aim_hint:
 		_aim_active = active
@@ -446,18 +443,8 @@ func _try_interact() -> void:
 		return
 	var col := _ray.get_collider()
 	# Единый интерфейс: и Portal, и RichPanel реализуют interact_at(точка_прицела).
-	var module_input: ScriptingModuleInputAPI = _module_input_for(col)
-	if module_input != null:
-		module_input.dispatch(col, _ray.get_collision_point())
-	elif col != null and col.has_method("interact_at"):
+	if col != null and col.has_method("interact_at"):
 		col.interact_at(_ray.get_collision_point())
-
-
-func _module_input_for(node: Object) -> ScriptingModuleInputAPI:
-	if node == null or not node.has_meta(ScriptingModuleInputAPI.META):
-		return null
-	var api = node.get_meta(ScriptingModuleInputAPI.META)
-	return api as ScriptingModuleInputAPI if api is ScriptingModuleInputAPI else null
 
 
 ## Колесо мыши прокручивает длинную панель, на которую смотрит игрок (RichPanel со скроллом).

@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "suite": "vrweb-wasm-conformance",
+  "version": "1.0.0-draft.1",
+  "profile": "core-scene-state",
+  "full_claim_allowed": false,
+  "coverage": {
+    "lifecycle": ["create", "mount", "event", "unmount"],
+    "handles": ["scoped-root-handle"],
+    "classes": ["Node"],
+    "properties": ["Node.visible"],
+    "methods": [],
+    "host_operations": [
+      "scene.query",
+      "scene.mutate",
+      "scene.commit",
+      "state.command",
+      "state.read"
+    ]
+  },
+  "missing_for_full": {
+    "methods": [
+      "AnimationPlayer.play",
+      "AnimationPlayer.stop",
+      "Node3D.hide",
+      "Node3D.show"
+    ],
+    "signals": ["CanvasItem.visibility_changed", "Node.renamed"],
+    "interfaces": ["assets", "features", "input", "log", "timers"]
+  }
+}

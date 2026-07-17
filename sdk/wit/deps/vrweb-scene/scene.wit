@@ -1,0 +1,18 @@
+package vrweb:scene@1.0.0;
+
+interface host {
+  /// Opaque generational handle owned by one module/page instance.
+  type handle = u64;
+
+  /// Canonical bounded value/request encoding defined by VRWeb Scene API.
+  query: func(target: handle, request: list<u8>) -> result<list<u8>, string>;
+
+  /// Enqueues one command in a host-validated transaction.
+  mutate: func(transaction: u64, command: list<u8>) -> result<_, string>;
+  /// Applies all commands atomically at a host phase boundary and returns a bounded result
+  /// containing guest create-token to opaque-handle mappings.
+  commit: func(transaction: u64) -> result<list<u8>, string>;
+  call: func(target: handle, method: string, args: list<list<u8>>) -> result<list<u8>, string>;
+  subscribe: func(target: handle, signal: string) -> result<u64, string>;
+  unsubscribe: func(subscription: u64);
+}

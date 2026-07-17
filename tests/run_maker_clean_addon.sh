@@ -3,7 +3,8 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/vrweb-maker-clean.XXXXXX")"
-mkdir -p "$work/addons" "$work/home" "$work/assets" "$work/asset_fixtures" "$work/modules"
+mkdir -p "$work/addons" "$work/home" "$work/assets" "$work/asset_fixtures" "$work/wasm"
+mkdir -p "$work/wasm source"
 cp "$repo/tests/fixtures/maker_clean_project/project.godot" "$work/project.godot"
 cp "$repo/tests/fixtures/maker_clean_project/test.gd" "$work/test.gd"
 cp "$repo/tests/fixtures/maker_clean_project/test.tscn" "$work/test.tscn"
@@ -17,19 +18,20 @@ cp "$repo/tests/fixtures/maker_clean_project/published_verifier_test.tscn" "$wor
 cp "$repo/tests/fixtures/maker_clean_project/editable.html" "$work/editable.html"
 cp "$repo/tests/fixtures/maker_clean_project/html_portable_test.gd" "$work/html_portable_test.gd"
 cp "$repo/tests/fixtures/maker_clean_project/html_portable_test.tscn" "$work/html_portable_test.tscn"
-cp "$repo/tests/fixtures/maker_clean_project/module_test.gd" "$work/module_test.gd"
-cp "$repo/tests/fixtures/maker_clean_project/module_test.tscn" "$work/module_test.tscn"
-cp "$repo/templates/vrweb_maker_starter/modules/interaction_example.gd" \
-  "$work/modules/interaction_example.gd"
+cp "$repo/tests/fixtures/maker_clean_project/wasm_export_test.gd" "$work/wasm_export_test.gd"
+cp "$repo/tests/fixtures/maker_clean_project/wasm_export_test.tscn" "$work/wasm_export_test.tscn"
+cp "$repo/tests/fixtures/maker_clean_project/wasm_source_test.gd" "$work/wasm_source_test.gd"
+cp "$repo/tests/fixtures/maker_clean_project/wasm_source_test.tscn" "$work/wasm_source_test.tscn"
+cp "$repo/tests/fixtures/maker_clean_project/maker_editor_smoke.gd" "$work/maker_editor_smoke.gd"
+cp "$repo/tests/fixtures/maker_clean_project/wasm_source/main.ts" "$work/wasm source/main.ts"
+cp "$repo/tests/fixtures/maker_clean_project/wasm_source/vrweb-module.json" \
+  "$work/wasm source/vrweb-module.json"
+cp "$repo/test_pages/lights.vrmod" "$work/wasm/lights.vrmod"
 cp "$repo/tests/fixtures/maker_clean_project/asset_fixtures/.gdignore" "$work/asset_fixtures/.gdignore"
 cp "$repo/tests/fixtures/maker_clean_project/asset_fixtures/local_model.gltf" "$work/asset_fixtures/local_model.gltf"
 cp "$repo/tests/fixtures/maker_clean_project/asset_fixtures/local_model.bin" "$work/asset_fixtures/local_model.bin"
 cp "$repo/tests/fixtures/maker_clean_project/asset_fixtures/local_model.png" "$work/asset_fixtures/local_model.png"
 cp "$repo/templates/vrweb_maker_starter/world.tscn" "$work/world.tscn"
-cp "$repo/templates/vrweb_maker_starter/scripting_inline_demo.tscn" \
-  "$work/scripting_inline_demo.tscn"
-cp "$repo/templates/vrweb_maker_starter/scripting_package_demo.tscn" \
-  "$work/scripting_package_demo.tscn"
 cp "$repo/templates/vrweb_maker_starter/assets/starter-image.svg" "$work/assets/starter-image.svg"
 
 cp -R "$repo/addons/vrweb_tools" "$work/addons/vrweb_tools"
@@ -40,7 +42,20 @@ HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" res://laun
 HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" res://asset_test.tscn
 HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" res://published_verifier_test.tscn
 HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" res://html_portable_test.tscn
-HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" res://module_test.tscn
+HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" res://wasm_export_test.tscn
+HOME="$work/home" VRWEB_JS_ADAPTER="$repo/sdk/javascript/build.mjs" \
+  "${GODOT:-godot}" --headless --quiet --path "$work" res://wasm_source_test.tscn
+test -s "$work/dist/wasm-world.html"
+test -s "$work/dist/wasm-world.report.json"
+test -s "$work/dist/wasm-world.assets.json"
+test "$(find "$work/dist/modules" -type f -name '*.vrmod' | wc -l | tr -d ' ')" = 1
+cp "$work/dist/wasm-world.html" "$work/wasm-world.first.html"
+cp "$work/dist/wasm-world.report.json" "$work/wasm-world.first.report.json"
+cp "$work/dist/wasm-world.assets.json" "$work/wasm-world.first.assets.json"
+HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" res://wasm_export_test.tscn
+cmp "$work/wasm-world.first.html" "$work/dist/wasm-world.html"
+cmp "$work/wasm-world.first.report.json" "$work/dist/wasm-world.report.json"
+cmp "$work/wasm-world.first.assets.json" "$work/dist/wasm-world.assets.json"
 HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" \
   --script res://addons/vrweb_tools/vrweb_cli.gd -- \
   --scene=res://world.tscn --output=res://dist/world.html --profile=strict \
@@ -48,17 +63,6 @@ HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" \
 test -s "$work/dist/world.html"
 test -s "$work/dist/report.json"
 test -s "$work/dist/world.assets.json"
-HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" \
-  --script res://addons/vrweb_tools/vrweb_cli.gd -- \
-  --scene=res://scripting_inline_demo.tscn --output=res://dist/inline.html \
-  --profile=strict --mode=exclusive --report=res://dist/inline.report.json
-HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" \
-  --script res://addons/vrweb_tools/vrweb_cli.gd -- \
-  --scene=res://scripting_package_demo.tscn --output=res://dist/package.html \
-  --profile=strict --mode=exclusive --report=res://dist/package.report.json
-rg -q 'data-mode="trusted-gdscript"' "$work/dist/inline.html"
-rg -q 'VRWebModule.*demo.interaction.package.vrmod' "$work/dist/package.html"
-test -s "$work/dist/demo.interaction.package.vrmod"
 cp "$work/dist/world.html" "$work/world.first.html"
 cp "$work/dist/world.assets.json" "$work/assets.first.json"
 HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" \
@@ -76,4 +80,9 @@ if HOME="$work/home" "${GODOT:-godot}" --headless --quiet --path "$work" \
 fi
 test -s "$work/dist/unsupported-report.json"
 test ! -e "$work/dist/unsupported.html"
+if ! HOME="$work/home" VRWEB_JS_ADAPTER="$repo/sdk/javascript/build.mjs" \
+  "${GODOT:-godot}" --headless --editor --path "$work" --script res://maker_editor_smoke.gd; then
+  test -f "$work/maker-editor-smoke.pass"
+fi
+test "$(cat "$work/maker-editor-smoke.pass")" = "PASS"
 echo "clean maker addon project: $work"

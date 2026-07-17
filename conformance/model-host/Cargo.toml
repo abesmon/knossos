@@ -1,0 +1,10 @@
+[package]
+name = "vrweb-model-host"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "=1.0.103"
+wasmtime = { version = "=46.0.1", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+serde_json = "=1.0.150"

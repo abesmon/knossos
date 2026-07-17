@@ -1,0 +1,5 @@
+package vrweb:features@1.0.0;
+
+interface host {
+  has: func(capability: string) -> bool;
+}

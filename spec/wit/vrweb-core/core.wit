@@ -1,0 +1,10 @@
+package vrweb:core@1.0.0;
+
+interface host {
+  /// Bounded diagnostic code for tests and low-overhead telemetry.
+  log-code: func(code: s32);
+
+  /// Records a bounded guest-language error before the guest traps. Language adapters use this
+  /// to preserve their portable stack frames across the Component Model boundary.
+  report-error: func(message: string);
+}

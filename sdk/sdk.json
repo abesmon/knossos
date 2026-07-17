@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "version": "1.0.0",
+  "world": "vrweb:module@1",
+  "scene_catalog": "../spec/scene-api-catalog.json"
+}

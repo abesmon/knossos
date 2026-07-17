@@ -507,18 +507,19 @@ func _build_state_action(elem: HtmlNode) -> Node:
 ## намеренно находятся вне Builder, чтобы страница не исполнила код в обход preflight.
 func _build_page_component(elem: HtmlNode) -> Node:
 	var module_id := elem.get_attr("module")
-	var export_name := elem.get_attr("class", "default")
+	var export_name := elem.get_attr("export", "default")
 	if _scripting_modules == null:
 		Log.warn("builder", "<VRWebComponent %s:%s> пропущен: modules не подготовлены" \
 				% [module_id, export_name])
 		return null
 	var result: Dictionary = _scripting_modules.instantiate_export(module_id, export_name)
 	if not str(result.get("error", "")).is_empty():
-		Log.warn("builder", str(result.error))
+		Log.warn("builder", JSON.stringify(result.diagnostic) if result.has("diagnostic") \
+				else str(result.error))
 		return null
 	var node: Node = result.node
 	for key in elem.attributes:
-		if key in ["module", "class"]:
+		if key in ["module", "export"]:
 			continue
 		if _property_allowed(node, str(key), str(elem.attributes[key])):
 			node.set(key, _resolve_value(elem.attributes[key]))

@@ -13,9 +13,6 @@ static func verify(module: Dictionary, page_url: String, resolved_url: String,
 	var actual_hex := digest.hex_encode()
 	var actual_sri := "sha256-" + Marshalls.raw_to_base64(digest)
 	var warnings: Array[String] = []
-	if str(module.get("kind", "")) == "inline":
-		return _result(true, "ok", actual_hex, warnings, true, actual_sri)
-
 	var is_same_origin := same_origin(page_url, resolved_url)
 	var expected := str(module.get("integrity", "")).strip_edges()
 	if not is_same_origin and expected.is_empty():

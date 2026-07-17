@@ -1,0 +1,12 @@
+package root:component;
+
+world root {
+  import vrweb:core/host@1.0.0;
+  import vrweb:scene/host@1.0.0;
+  import vrweb:state/host@1.0.0;
+
+  export create: func() -> s32;
+  export mount: func(instance: s32) -> s32;
+  export event: func(instance: s32, envelope: list<u8>) -> s32;
+  export unmount: func(instance: s32) -> s32;
+}

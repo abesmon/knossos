@@ -1,18 +1,17 @@
 extends SceneTree
 
 var _failed := false
-var _bytes := "extends Node\n".to_utf8_buffer()
+var _bytes := "wasm component bytes".to_utf8_buffer()
 
 
 func _initialize() -> void:
 	_test_same_origin()
 	_test_cross_origin()
-	_test_inline()
 	quit(1 if _failed else 0)
 
 
 func _test_same_origin() -> void:
-	var module := {"kind": "script", "integrity": ""}
+	var module := {"kind": "package", "integrity": ""}
 	var result := ScriptingModuleIntegrity.verify(module, "https://example.test/page",
 			"https://example.test/code.gd", _bytes)
 	_eq(result.allowed, true, "same-origin integrity is optional")
@@ -42,14 +41,6 @@ func _test_cross_origin() -> void:
 	result = ScriptingModuleIntegrity.verify(module, "https://example.test/page",
 			"https://cdn.test/code.vrmod", _bytes)
 	_eq(result.allowed, true, "cross-origin exact integrity passes")
-
-
-func _test_inline() -> void:
-	var result := ScriptingModuleIntegrity.verify({"kind": "inline"},
-			"https://example.test/page", "", _bytes)
-	_eq(result.allowed, true, "inline body needs no integrity attribute")
-	_eq(result.hash.length(), 64, "inline body still gets SHA-256 identity")
-
 
 func _eq(actual, expected, label: String) -> void:
 	if actual == expected:

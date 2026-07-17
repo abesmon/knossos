@@ -1,0 +1,5 @@
+package vrweb:log@1.0.0;
+
+interface host {
+  write: func(request: list<u8>) -> result<_, string>;
+}

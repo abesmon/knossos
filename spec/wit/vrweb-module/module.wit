@@ -1,0 +1,21 @@
+package vrweb:module@1.0.0;
+
+world module {
+  import vrweb:core/host@1.0.0;
+  import vrweb:scene/host@1.0.0;
+  import vrweb:assets/host@1.0.0;
+  import vrweb:state/host@1.0.0;
+  import vrweb:timers/host@1.0.0;
+  import vrweb:input/host@1.0.0;
+  import vrweb:features/host@1.0.0;
+  import vrweb:log/host@1.0.0;
+
+  /// Creates guest-owned lifecycle state and returns its opaque guest id.
+  export create: func() -> s32;
+  /// Mounts one component instance. Zero means success.
+  export mount: func(instance: s32) -> s32;
+  /// Delivers one bounded serialized event envelope. Zero means success.
+  export event: func(instance: s32, envelope: list<u8>) -> s32;
+  /// Invalidates guest state. Zero means success.
+  export unmount: func(instance: s32) -> s32;
+}

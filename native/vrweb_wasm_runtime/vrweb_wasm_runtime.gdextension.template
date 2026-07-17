@@ -1,0 +1,14 @@
+[configuration]
+
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.6
+reloadable = false
+
+[libraries]
+
+macos.debug = "res://addons/vrweb_wasm_runtime/bin/libvrweb_wasm_runtime.dylib"
+macos.release = "res://addons/vrweb_wasm_runtime/bin/libvrweb_wasm_runtime.dylib"
+linux.debug.x86_64 = "res://addons/vrweb_wasm_runtime/bin/libvrweb_wasm_runtime.so"
+linux.release.x86_64 = "res://addons/vrweb_wasm_runtime/bin/libvrweb_wasm_runtime.so"
+windows.debug.x86_64 = "res://addons/vrweb_wasm_runtime/bin/vrweb_wasm_runtime.dll"
+windows.release.x86_64 = "res://addons/vrweb_wasm_runtime/bin/vrweb_wasm_runtime.dll"

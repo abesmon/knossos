@@ -13,6 +13,8 @@ const EXPORT_AS_VRWML_ID := 0x5652574D # "VRWM"
 const INTEGRATION_SETTING := "vrweb/tools/integration_script"
 const DIST_SETTING := "vrweb/maker/dist_dir"
 const BUILD_MODE_SETTING := "vrweb/maker/html_mode"
+const JS_ADAPTER_SETTING := "vrweb/maker/javascript_adapter_script"
+const NODE_EXECUTABLE_SETTING := "vrweb/maker/node_executable"
 const EDITOR_EXECUTABLE_SETTING := "vrweb_maker/knossos_executable"
 const EDITOR_LAUNCH_MODE_SETTING := "vrweb_maker/launch_mode"
 
@@ -22,11 +24,6 @@ var _integration_slot: VBoxContainer
 var _prop_edit: LineEdit
 var _url_edit: LineEdit
 var _type_opt: OptionButton
-var _module_id_edit: LineEdit
-var _module_version_edit: LineEdit
-var _module_permissions_edit: LineEdit
-var _module_requires_edit: LineEdit
-var _module_optional_edit: LineEdit
 var _status: Label
 var _file_dialog: EditorFileDialog
 var _knossos_file_dialog: EditorFileDialog
@@ -34,7 +31,11 @@ var _local_asset_dialog: EditorFileDialog
 var _review_dialog: AcceptDialog
 var _knossos_path_edit: LineEdit
 var _launch_mode_opt: OptionButton
+var _build_run_button: Button
+var _cancel_source_build_button: Button
 var _pending_launch_path := ""
+var _source_build_queue: Array[VrwebWasmSourceComponent] = []
+var _current_source_build: VrwebWasmSourceComponent
 var _portable_html_importer: EditorSceneFormatImporter
 var _integration: Object
 
@@ -48,15 +49,16 @@ func _enter_tree() -> void:
 	_register_portable_importer()
 	_load_integration()
 	scene_changed.connect(_on_editor_scene_changed)
-	EditorInterface.get_selection().selection_changed.connect(_on_selection_changed)
 	_on_editor_scene_changed(EditorInterface.get_edited_scene_root())
 
 
 func _exit_tree() -> void:
+	if _current_source_build != null and _current_source_build.is_package_build_running():
+		_current_source_build.cancel_package_build()
+	_source_build_queue.clear()
+	_current_source_build = null
 	if scene_changed.is_connected(_on_editor_scene_changed):
 		scene_changed.disconnect(_on_editor_scene_changed)
-	if EditorInterface.get_selection().selection_changed.is_connected(_on_selection_changed):
-		EditorInterface.get_selection().selection_changed.disconnect(_on_selection_changed)
 	if _integration != null and _integration.has_method("teardown"):
 		_integration.call("teardown")
 	_integration = null
@@ -87,27 +89,6 @@ func _build_dock() -> void:
 	_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_dock_scroll.add_child(_dock)
 
-	_dock.add_child(_heading("Script выбранного узла"))
-	var trusted_note := Label.new()
-	trusted_note.text = "Trusted GDScript получает права процесса. permissions — описание для review, не sandbox. Inline: один файл; package: зависимости и manifest."
-	trusted_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_dock.add_child(trusted_note)
-	_dock.add_child(_button("Экспортировать inline", _on_script_inline_pressed))
-	_dock.add_child(_button("Экспортировать package", _on_script_package_pressed))
-	_dock.add_child(_button("Не экспортировать Script", _on_script_off_pressed))
-	_module_id_edit = _module_edit("module id (например, acme.lights)")
-	_dock.add_child(_module_id_edit)
-	_module_version_edit = _module_edit("version (SemVer, например 1.0.0)")
-	_dock.add_child(_module_version_edit)
-	_module_permissions_edit = _module_edit("permissions через запятую")
-	_dock.add_child(_module_permissions_edit)
-	_module_requires_edit = _module_edit("required capabilities через запятую")
-	_dock.add_child(_module_requires_edit)
-	_module_optional_edit = _module_edit("optional capabilities через запятую")
-	_dock.add_child(_module_optional_edit)
-	_dock.add_child(_button("Применить metadata модуля", _on_module_metadata_pressed))
-
-	_dock.add_child(_sep())
 	_dock.add_child(_heading("Внешний ресурс → выбранный узел"))
 	_prop_edit = LineEdit.new()
 	_prop_edit.placeholder_text = "свойство (напр. texture); пусто = ExtScene"
@@ -138,7 +119,12 @@ func _build_dock() -> void:
 			EDITOR_LAUNCH_MODE_SETTING))
 	_launch_mode_opt.select(1 if saved_mode == VrwebLauncher.MODE_DEEPLINK else 0)
 	_dock.add_child(_launch_mode_opt)
-	_dock.add_child(_button("Build & Run in Knossos", _on_build_run_pressed))
+	_build_run_button = _button("Build & Run in Knossos", _on_build_run_pressed)
+	_dock.add_child(_build_run_button)
+	_cancel_source_build_button = _button("Cancel Script Build", _on_cancel_source_build_pressed)
+	_cancel_source_build_button.disabled = true
+	_dock.add_child(_cancel_source_build_button)
+	_dock.add_child(_button("Add VRWeb Script", _on_add_vrweb_script_pressed))
 
 	_integration_slot = VBoxContainer.new()
 	_integration_slot.name = "Integration"
@@ -197,6 +183,15 @@ func _ensure_settings() -> void:
 	ProjectSettings.set_initial_value(BUILD_MODE_SETTING, VrwebFormat.MODE_EXCLUSIVE)
 	ProjectSettings.add_property_info({"name": BUILD_MODE_SETTING, "type": TYPE_STRING,
 		"hint": PROPERTY_HINT_ENUM, "hint_string": "exclusive,combine"})
+	if not ProjectSettings.has_setting(JS_ADAPTER_SETTING):
+		ProjectSettings.set_setting(JS_ADAPTER_SETTING, "")
+	ProjectSettings.set_initial_value(JS_ADAPTER_SETTING, "")
+	ProjectSettings.add_property_info({"name": JS_ADAPTER_SETTING, "type": TYPE_STRING,
+		"hint": PROPERTY_HINT_GLOBAL_FILE, "hint_string": "*.mjs"})
+	if not ProjectSettings.has_setting(NODE_EXECUTABLE_SETTING):
+		ProjectSettings.set_setting(NODE_EXECUTABLE_SETTING, "node")
+	ProjectSettings.set_initial_value(NODE_EXECUTABLE_SETTING, "node")
+	ProjectSettings.add_property_info({"name": NODE_EXECUTABLE_SETTING, "type": TYPE_STRING})
 	var editor_settings := EditorInterface.get_editor_settings()
 	if not editor_settings.has_setting(EDITOR_EXECUTABLE_SETTING):
 		editor_settings.set_setting(EDITOR_EXECUTABLE_SETTING, "")
@@ -312,6 +307,10 @@ func _on_build_run_pressed() -> void:
 	if root == null:
 		_say("Нет открытой сцены для Build & Run.")
 		return
+	if _source_build_queue.is_empty() and _current_source_build == null:
+		_collect_source_components(root, _source_build_queue)
+		var source_state := _advance_source_build_queue()
+		if source_state != "complete": return
 	var basename := root.name.to_snake_case()
 	if not root.scene_file_path.is_empty():
 		basename = root.scene_file_path.get_file().get_basename()
@@ -346,6 +345,124 @@ func _on_build_run_pressed() -> void:
 	_pending_launch_path = path
 	_say("Build готов: %s. Подтвердите report для запуска." % path)
 	_show_export_review(report, path, true)
+
+
+func _process(_delta: float) -> void:
+	if _current_source_build == null: return
+	var result := _current_source_build.poll_package_build()
+	if bool(result.get("running", false)):
+		_say("Сборка %s…" % _current_source_build.module_id)
+		return
+	if not bool(result.get("ok", false)):
+		_abort_source_builds(str(result.get("error", "source build failed")))
+		return
+	_current_source_build = null
+	var state := _advance_source_build_queue()
+	if state == "complete":
+		call_deferred("_on_build_run_pressed")
+
+
+func _advance_source_build_queue() -> String:
+	while not _source_build_queue.is_empty():
+		var component: VrwebWasmSourceComponent = _source_build_queue.pop_front()
+		var result: Dictionary = component.start_package_build()
+		if not bool(result.get("ok", false)):
+			_abort_source_builds(str(result.get("error", "source build failed")))
+			return "error"
+		if bool(result.get("running", false)):
+			_current_source_build = component
+			set_process(true)
+			_build_run_button.disabled = true
+			_cancel_source_build_button.disabled = false
+			_say("Сборка %s…" % component.module_id)
+			return "running"
+	set_process(false)
+	_build_run_button.disabled = false
+	_cancel_source_build_button.disabled = true
+	return "complete"
+
+
+func _on_cancel_source_build_pressed() -> void:
+	if _current_source_build != null:
+		_current_source_build.cancel_package_build()
+	_abort_source_builds("Сборка VRWeb Script отменена; последний успешный package сохранён.")
+
+
+func _abort_source_builds(message: String) -> void:
+	_source_build_queue.clear()
+	_current_source_build = null
+	set_process(false)
+	_build_run_button.disabled = false
+	_cancel_source_build_button.disabled = true
+	_say(message)
+
+
+func _collect_source_components(node: Node,
+		result: Array[VrwebWasmSourceComponent]) -> void:
+	if node is VrwebWasmSourceComponent: result.append(node)
+	for child in node.get_children(): _collect_source_components(child, result)
+
+
+func _on_add_vrweb_script_pressed() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
+		_say("Сначала откройте или создайте сцену.")
+		return
+	var selected := EditorInterface.get_selection().get_selected_nodes()
+	var parent: Node = selected[0] if not selected.is_empty() else root
+	var base_name := "interaction"
+	var index := 1
+	while DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(
+			"res://vrweb_scripts/" + base_name)):
+		index += 1
+		base_name = "interaction_%d" % index
+	var directory := "res://vrweb_scripts/" + base_name
+	var source_path := directory.path_join("main.ts")
+	var manifest_path := directory.path_join("vrweb-module.json")
+	var package_path := directory.path_join("build/module.vrmod")
+	var module_id := "vrweb.local." + base_name.replace("_", "-")
+	var source := """import { core, scene, state, value } from \"@vrweb/sdk\";
+
+let instance = 1;
+export function create(): number { return instance++; }
+export function mount(_instance: number): number { return 0; }
+export function event(_instance: number, _event: Uint8Array): number {
+  const root = scene.root();
+  scene.transaction().set(root, \"visible\", value.bool(true)).commit();
+  state.command({ key: \"active\", command: \"toggle\" });
+  core.logCode(1);
+  return 0;
+}
+export function unmount(_instance: number): number { return 0; }
+"""
+	var manifest := {
+		"format": 1, "id": module_id, "version": "1.0.0", "sdk": "1.0.0",
+		"runtime": "wasm-component", "world": "vrweb:module@1",
+		"component": "build/module.wasm",
+		"exports": {"default": {"kind": "scene-component"}},
+		"requires": ["vrweb:core/1", "vrweb:scene/1", "vrweb:state/1"],
+		"optional": [], "limits": {"fuel": 50_000_000},
+	}
+	if not _write_text(source_path, source) or not _write_text(
+			manifest_path, JSON.stringify(manifest, "  ") + "\n"):
+		_say("Не удалось создать VRWeb Script template.")
+		return
+	var component := VrwebWasmSourceComponent.new()
+	component.name = base_name.to_pascal_case()
+	component.module_id = module_id
+	component.export_name = "default"
+	component.source_path = source_path
+	component.manifest_path = manifest_path
+	component.package_path = package_path
+	component.adapter_script = str(ProjectSettings.get_setting(JS_ADAPTER_SETTING, ""))
+	component.node_executable = str(ProjectSettings.get_setting(NODE_EXECUTABLE_SETTING, "node"))
+	parent.add_child(component, true)
+	component.owner = root
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(component)
+	EditorInterface.get_resource_filesystem().scan()
+	_say("VRWeb Script создан: %s. Настройте adapter path в Project Settings и запустите Build & Run." \
+			% source_path)
 
 
 func _write_text(path: String, content: String) -> bool:
@@ -429,96 +546,6 @@ func _sha256_text(content: String) -> String:
 	return context.finish().hex_encode()
 
 
-func _on_script_inline_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if not (node.get_script() is GDScript):
-		_say("У выбранного узла нет GDScript.")
-		return
-	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_INLINE)
-	_mark_dirty()
-	_say("Script «%s» будет экспортирован inline." % node.name)
-
-
-func _on_script_off_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if node.has_meta(VrwebExporter.META_SCRIPT_MODE):
-		node.remove_meta(VrwebExporter.META_SCRIPT_MODE)
-	_mark_dirty()
-	_say("Script «%s» не будет экспортирован." % node.name)
-
-
-func _on_script_package_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if not (node.get_script() is GDScript):
-		_say("У выбранного узла нет GDScript.")
-		return
-	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_PACKAGE)
-	_mark_dirty()
-	_say("Script «%s» будет экспортирован в .vrmod." % node.name)
-
-
-func _on_selection_changed() -> void:
-	_load_module_metadata(_selected_node())
-
-
-func _load_module_metadata(node: Node) -> void:
-	if _module_id_edit == null:
-		return
-	var enabled := node != null and node.get_script() is GDScript
-	for field in [_module_id_edit, _module_version_edit, _module_permissions_edit,
-			_module_requires_edit, _module_optional_edit]:
-		field.editable = enabled
-	if not enabled:
-		_module_id_edit.text = ""
-		_module_version_edit.text = ""
-		_module_permissions_edit.text = ""
-		_module_requires_edit.text = ""
-		_module_optional_edit.text = ""
-		return
-	var metadata := VrwebModuleMetadata.from_node(node, _module_fallback_id(node))
-	_module_id_edit.text = metadata.id
-	_module_version_edit.text = metadata.version
-	_module_permissions_edit.text = VrwebModuleMetadata.list_text(metadata.permissions)
-	_module_requires_edit.text = VrwebModuleMetadata.list_text(metadata.requires)
-	_module_optional_edit.text = VrwebModuleMetadata.list_text(metadata.optional)
-
-
-func _on_module_metadata_pressed() -> void:
-	var node := _selected_node()
-	if node == null or not (node.get_script() is GDScript):
-		_say("Выберите узел с GDScript.")
-		return
-	var errors := VrwebModuleMetadata.apply_to_node(node, {
-		"id": _module_id_edit.text,
-		"version": _module_version_edit.text,
-		"permissions": VrwebModuleMetadata.parse_list(_module_permissions_edit.text),
-		"requires": VrwebModuleMetadata.parse_list(_module_requires_edit.text),
-		"optional": VrwebModuleMetadata.parse_list(_module_optional_edit.text),
-	})
-	if not errors.is_empty():
-		_say("Metadata не сохранена: %s" % "; ".join(errors))
-		return
-	_mark_dirty()
-	_say("Metadata модуля «%s» сохранена." % _module_id_edit.text)
-
-
-func _module_fallback_id(node: Node) -> String:
-	var candidate := str(node.name).to_snake_case()
-	var safe := ""
-	for character in candidate:
-		safe += character if character.to_lower() in \
-				"abcdefghijklmnopqrstuvwxyz0123456789_.-" else "_"
-	if safe.is_empty() or not safe[0].to_lower() in "abcdefghijklmnopqrstuvwxyz_":
-		safe = "module_" + safe
-	return safe
-
-
 func _on_bind_pressed() -> void:
 	var node := _selected_node()
 	if node == null:
@@ -599,7 +626,6 @@ func _save_external_data() -> void:
 func _on_editor_scene_changed(root: Node) -> void:
 	if _integration != null and _integration.has_method("on_scene_changed"):
 		_integration.call("on_scene_changed", root)
-	_load_module_metadata(null)
 
 
 func _selected_node() -> Node:
@@ -629,18 +655,12 @@ func _button(text: String, handler: Callable) -> Button:
 	return button
 
 
-func _module_edit(placeholder: String) -> LineEdit:
-	var edit := LineEdit.new()
-	edit.placeholder_text = placeholder
-	edit.editable = false
-	return edit
-
-
 func _sep() -> HSeparator:
 	return HSeparator.new()
 
 
 func _say(text: String) -> void:
-	if _status != null:
-		_status.text = text
+	if _status != null and _status.text == text:
+		return
+	if _status != null: _status.text = text
 	print("[VRWeb Tools] ", text)

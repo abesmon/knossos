@@ -1,58 +1,72 @@
 extends SceneTree
 
-## Document -> module IR, без сети и исполнения кода.
+## Document -> WASM module IR, без сети и исполнения кода.
 
 var _failed := false
 
 
 func _initialize() -> void:
-	_test_inline()
-	_test_external_script_and_package()
-	_test_errors_and_javascript_ignored()
+	_test_package()
+	_test_direct_component()
+	_test_errors_and_scripts_ignored()
 	quit(1 if _failed else 0)
 
 
-func _test_inline() -> void:
-	var source := "\nextends Node3D\nvar marker := '<tag>'\n"
-	var html := '<script type="application/vrweb+gdscript" id="tiny" data-base="Node3D">%s</script>' % source
+func _test_package() -> void:
+	var html := """
+<VRWebModule id="acme.lights" src="mods/lights.vrmod"
+             integrity="sha256-two" runtime="wasm-component"
+             world="vrweb:module@1"/>
+"""
 	var result := ScriptingModuleCollector.collect(HtmlParser.parse(html), "https://example.test/world/index.html")
-	_eq(result.errors, [], "inline module has no errors")
-	_eq(result.modules.size(), 1, "inline module collected")
+	_eq(result.errors, [], "WASM module has no errors")
+	_eq(result.modules.size(), 1, "package collected")
 	if result.modules.size() == 1:
 		var module: Dictionary = result.modules[0]
-		_eq(module.kind, "inline", "inline kind")
-		_eq(module.source, source, "raw source preserved exactly")
-		_eq(module.hash, source.sha256_text(), "inline source is content-addressed")
-		_eq(module.exports.default.base, "Node3D", "synthetic default export has base")
+		_eq(module.kind, "package", "package kind")
+		_eq(module.runtime, "wasm-component", "runtime normalized")
+		_eq(module.world, "vrweb:module@1", "world normalized")
+		_eq(module.src, "mods/lights.vrmod", "relative URL preserved")
+		_eq(module.base_url, "https://example.test/world/index.html", "base URL preserved")
 
 
-func _test_external_script_and_package() -> void:
-	var html := """
-<script type="application/vrweb+gdscript" id="small" src="./small.gd"
-        integrity="sha256-one"></script>
-<VRWebModule id="acme.lights" src="mods/lights.vrmod"
-             integrity="sha256-two" mode="trusted-gdscript"/>
-"""
-	var result := ScriptingModuleCollector.collect(HtmlParser.parse(html), "https://example.test/world/index.html")
-	_eq(result.errors, [], "external modules have no errors")
-	_eq(result.modules.size(), 2, "script and package collected")
-	if result.modules.size() == 2:
-		_eq(result.modules[0].src, "./small.gd", "script keeps document-relative URL")
-		_eq(result.modules[0].base_url, "https://example.test/world/index.html", "script keeps base URL")
-		_eq(result.modules[1].src, "mods/lights.vrmod", "package keeps document-relative URL")
-
-
-func _test_errors_and_javascript_ignored() -> void:
+func _test_errors_and_scripts_ignored() -> void:
 	var html := """
 <script>window.alert('ignored')</script>
-<script type="application/vrweb+gdscript" id="dup">extends Node</script>
-<script type="application/vrweb+gdscript" id="dup" src="x.gd"></script>
-<script type="application/vrweb+gdscript" id="bad/id">extends Node</script>
-<script type="application/vrweb+gdscript" id="both" src="x.gd">extends Node</script>
+<script type="text/javascript">window.alert('ignored')</script>
+<VRWebModule id="dup" src="one.vrmod"/>
+<VRWebModule id="dup" src="two.vrmod"/>
+<VRWebModule id="bad/id" src="bad.vrmod"/>
+<VRWebModule id="unsupported" src="unsupported.vrmod" runtime="unsupported-runtime"/>
+<VRWebModule id="world" src="world.vrmod" world="vrweb:module@2"/>
 """
 	var result := ScriptingModuleCollector.collect(HtmlParser.parse(html), "https://example.test/")
-	_eq(result.modules.size(), 1, "only first valid VRWeb script accepted")
-	_eq(result.errors.size(), 3, "duplicate, invalid id and body+src reported")
+	_eq(result.modules.size(), 1, "only first valid WASM module accepted")
+	_eq(result.errors.size(), 4, "duplicate, invalid id, runtime and world reported")
+
+
+func _test_direct_component() -> void:
+	var metadata := JSON.stringify({
+		"format": 1, "id": "acme.direct", "runtime": "wasm-component",
+		"world": "vrweb:module@1", "component": "module.wasm",
+		"exports": {"default": {"kind": "scene-component"}},
+		"requires": ["vrweb:core/1"], "optional": [],
+	})
+	var html := "<VRWebModule id=\"acme.direct\" src=\"direct.wasm?rev=1\" " \
+			+ "manifest='%s'/>" % metadata
+	var result := ScriptingModuleCollector.collect(HtmlParser.parse(html),
+			"https://example.test/world/index.html")
+	_eq(result.errors, [], "direct WASM with manifest metadata accepted")
+	_eq(result.modules.size(), 1, "direct component collected")
+	if result.modules.size() == 1:
+		_eq(result.modules[0].kind, "component", "direct artifact kind preserved")
+		_eq(result.modules[0].exports.default.kind, "scene-component",
+				"direct manifest exports normalized")
+	var missing := ScriptingModuleCollector.collect(HtmlParser.parse(
+			"<VRWebModule id='acme.missing' src='missing.wasm'/>") ,
+			"https://example.test/world/index.html")
+	_eq(missing.modules, [], "direct WASM without metadata rejected")
+	_eq(missing.errors.size(), 1, "missing direct manifest has one diagnostic")
 
 
 func _eq(actual, expected, label: String) -> void:

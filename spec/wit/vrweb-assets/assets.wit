@@ -1,0 +1,6 @@
+package vrweb:assets@1.0.0;
+
+interface host {
+  /// Returns bounded metadata with a logical vrweb-asset URI, never a host path.
+  lookup: func(name: string) -> result<list<u8>, string>;
+}

@@ -95,7 +95,7 @@ Knossos и Maker Kit идут одним release train: platform target `mac`, `
 отсутствие release notes само по себе не блокирует сборку.
 
 Workflow `.github/workflows/maker-kit.yml` дополнительно скачивает официальный Godot 4.6.3 на
-macOS, Windows и Linux и запускает `tests/run_maker_portability.py`. Harness в чистом
+macOS, Windows и Linux и запускает `tests/run_maker_clean_addon.sh`. Harness в чистом
 проекте проверяет freshness HTML schema, missing/case-sensitive asset paths, glTF dependencies
 и byte-identical повторную сборку `dist/`.
 
@@ -124,12 +124,11 @@ macOS, Windows и Linux и запускает `tests/run_maker_portability.py`. 
 ### Maker Kit self-test экспортированной сборки
 
 Экспортированный Knossos намеренно не разрешает command-line scene path overrides. Для узкой
-CI-проверки scripting package штатный loading screen принимает user argument
+CI-проверки WASM delivery штатный loading screen принимает user argument
 `--vrweb-maker-self-test` после `--` и переключается на embedded
-`tests/test_package_demo.tscn`. Тест читает заранее собранный Maker Kit `.vrmod`, проверяет
-integrity/unpack/assets, компилирует module и материализует компонент теми же runtime-классами,
-что обычная страница. Клиент намеренно не пересобирает package из remapped `.gdc` своего PCK:
-package build относится к addon, а exported Knossos — consumer готового артефакта.
+`tests/test_scripting_module_fetcher.tscn`. Тест читает готовый `.vrmod`, проверяет
+collector, fetch, integrity и cache теми же delivery-классами, что обычная страница, а при
+отсутствии optional native backend подтверждает явную безопасную деградацию.
 Аргумент ничего не делает без явного запуска и не открывает произвольный путь из CLI.
 
 ## Нативные зависимости (GDExtension)

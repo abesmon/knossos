@@ -1,0 +1,21 @@
+{
+  "name": "@vrweb/javascript-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "generate": "python3 ../../tools/generate_wasm_sdk.py",
+    "build:fixture": "node ./build.mjs",
+    "check": "python3 ../../tools/generate_wasm_sdk.py --check && node ./test-golden.mjs && node ./build.mjs --check"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "0.21.0",
+    "@bytecodealliance/jco": "1.25.2",
+    "esbuild": "0.28.1",
+    "typescript": "5.9.3"
+  }
+}

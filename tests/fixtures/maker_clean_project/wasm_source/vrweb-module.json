@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "id": "vrweb.example.maker-source",
+  "version": "1.0.0",
+  "sdk": "1.0.0",
+  "runtime": "wasm-component",
+  "world": "vrweb:module@1",
+  "component": "build/module.wasm",
+  "exports": {
+    "default": {"kind": "scene-component"}
+  },
+  "requires": ["vrweb:core/1"],
+  "optional": []
+}

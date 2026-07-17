@@ -1,7 +1,7 @@
 extends Node
 
-## Byte-for-byte regression test for the portable declarative export path. Unlike the legacy
-## round-trip script, this scene does not compile or invoke Knossos' runtime builder.
+## Byte-for-byte regression test for the portable declarative export path. This scene does not
+## compile or invoke Knossos' runtime builder.
 
 var _ok := true
 

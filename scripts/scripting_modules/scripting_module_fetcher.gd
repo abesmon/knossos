@@ -28,15 +28,12 @@ func fetch_all(definitions: Array, page_url: String, on_done: Callable) -> void:
 	_queue = []
 	for definition in definitions:
 		var module: Dictionary = (definition as Dictionary).duplicate(true)
-		if str(module.get("kind", "")) == "inline":
-			_accept_bytes(module, "", str(module.get("source", "")).to_utf8_buffer(), "")
+		var resolved := PageFetcher.resolve_url(str(module.get("src", "")),
+				str(module.get("base_url", page_url)))
+		if resolved.is_empty():
+			_errors.append(_error(module, "invalid_url", "Некорректный URL модуля"))
 		else:
-			var resolved := PageFetcher.resolve_url(str(module.get("src", "")),
-					str(module.get("base_url", page_url)))
-			if resolved.is_empty():
-				_errors.append(_error(module, "invalid_url", "Некорректный URL модуля"))
-			else:
-				_queue.append({"module": module, "url": resolved, "generation": _generation})
+			_queue.append({"module": module, "url": resolved, "generation": _generation})
 	_pump()
 	_finish_if_ready()
 
@@ -81,7 +78,7 @@ func _start(job: Dictionary) -> void:
 		var ok: bool = int(result) == HTTPRequest.RESULT_SUCCESS and int(code) >= 200 and int(code) < 300
 		_complete(job, body if ok else PackedByteArray(), "" if ok else "http_%d" % code))
 	var err := request.request(url, ["User-Agent: " + USER_AGENT,
-		"Accept: application/vrweb-module+zip,text/x-gdscript,application/octet-stream"])
+		"Accept: application/vrweb-module+zip,application/wasm,application/octet-stream"])
 	if err != OK:
 		_requests.erase(request)
 		request.queue_free()
