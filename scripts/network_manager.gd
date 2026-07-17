@@ -65,6 +65,11 @@ signal authority_changed(new_authority: int, is_me: bool)
 ## принимают только от авторитета. Консьюмеры (проверки действий, UI) перечитывают ранги.
 ## Подробно — в docs/ranks.md.
 signal ranks_changed()
+## Адресованный transient-вызов page script. Transport фиксирует sender по WebRTC peer,
+## проверяет wire limits и доставляет только текущему клиенту; смысловую авторизацию выполняет
+## локальный Luau handler. Не является состоянием и не replay-ится late joiners.
+signal script_remote_call_received(sender_id: int, script_id: String, endpoint: String,
+		version: int, args: Array)
 ## Эфемерные изменения сцены (action/event-протокол, см. docs/ephemeral-changes.md). Авторитет —
 ## единственная точка коммита: валидирует действия и рассылает события. Сигналы несут плоский
 ## объект состояния { id, kind, parent, author, ts, ttl, props } — консьюмер (EphemeralView)
@@ -87,6 +92,8 @@ signal scene_action_acked(token: int, accepted: bool)
 ## (лог, бабл) не отрисовывалось больше.
 const MAX_CHAT_CHARS := 280
 const MAX_REPLICATED_COMMANDS_PER_SECOND := 30
+const MAX_SCRIPT_REMOTE_CALLS_PER_SECOND := 20
+const MAX_SCRIPT_REMOTE_CALL_BYTES := 8 * 1024
 const MAX_REPLICATED_COMMAND_BYTES := 16 * 1024
 const MAX_REPLICATED_DELTA_BYTES := 16 * 1024
 const MAX_REPLICATED_SAMPLE_BYTES := 4 * 1024
@@ -190,6 +197,7 @@ var _scene := SceneChanges.new()  # машина состояний эфемер
 var _replicated := ReplicatedStateStore.new()
 var _replicated_resync := false
 var _replicated_command_rates := {} # peer_id -> {second, count}
+var _script_remote_call_rates := {} # peer_id -> {second, count}
 var _replicated_request_seq := 0
 var _replicated_pending_commands := {} # request_id -> {deadline, authority}
 var _replicated_command_seen := {} # "peer:request" -> ACK (dedupe в рамках комнаты)
@@ -469,6 +477,27 @@ func send_chat(text: String) -> void:
 	if not _can_rpc():
 		return
 	rpc("_recv_chat", text.left(MAX_CHAT_CHARS))
+
+
+## Отправить transient-вызов endpoint конкретного page script на выбранном клиенте.
+## target == my_peer_id() доставляется deferred локально; в offline mode локальный id равен 0.
+func send_script_remote_call(target_peer_id: int, script_id: String, endpoint: String,
+		version: int, args: Array) -> bool:
+	if not _valid_script_remote_envelope(script_id, endpoint, version, args):
+		return false
+	if target_peer_id == _my_id:
+		call_deferred("_emit_script_remote_call", _my_id, script_id, endpoint, version,
+				args.duplicate(true))
+		return true
+	if not _can_rpc() or not _connected_peers.has(target_peer_id):
+		return false
+	rpc_id(target_peer_id, "_recv_script_remote_call", script_id, endpoint, version, args)
+	return true
+
+
+func _emit_script_remote_call(sender_id: int, script_id: String, endpoint: String,
+		version: int, args: Array) -> void:
+	script_remote_call_received.emit(sender_id, script_id, endpoint, version, args)
 
 
 func register_replicated_schema(schema_id: String, definition: Dictionary) -> bool:
@@ -809,6 +838,12 @@ func _refresh_authority() -> void:
 ## Ранг по user_id. Нет в таблице → DEFAULT_RANK (практически без прав).
 func rank_of_user(user_id: String) -> int:
 	return int(_ranks.get(user_id, DEFAULT_RANK))
+
+
+## Эфемерный id локального участника. Вне комнаты равен 0; он всё равно пригоден как target
+## локального demo-вызова через send_script_remote_call.
+func my_peer_id() -> int:
+	return _my_id
 
 
 ## Ранг пира по его эфемерному peer_id. Авторитет всегда считается рангом 0 — даже до того,
@@ -1439,6 +1474,7 @@ func _teardown_mesh() -> void:
 	_replicated.reset_session()
 	_replicated_resync = false
 	_replicated_command_rates.clear()
+	_script_remote_call_rates.clear()
 	_replicated_command_seen.clear()
 	_fail_replicated_pending("authority_changed")
 	_replicated_snapshot_rx.clear()
@@ -1556,6 +1592,66 @@ func _recv_state(position: Vector3, look_yaw: float, params: Dictionary) -> void
 func _recv_chat(text: String) -> void:
 	# Режем и на приёме — пир мог быть с модифицированным клиентом.
 	chat_received.emit(multiplayer.get_remote_sender_id(), text.left(MAX_CHAT_CHARS))
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _recv_script_remote_call(script_id: String, endpoint: String, version: int,
+		args: Array) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not _valid_script_remote_envelope(script_id, endpoint, version, args) \
+			or not _allow_script_remote_call(sender):
+		return
+	script_remote_call_received.emit(sender, script_id, endpoint, version, args.duplicate(true))
+
+
+func _allow_script_remote_call(sender: int) -> bool:
+	var second := floori(Time.get_ticks_msec() / 1000.0)
+	var rate: Dictionary = _script_remote_call_rates.get(sender,
+			{"second": second, "count": 0})
+	if int(rate["second"]) != second:
+		rate = {"second": second, "count": 0}
+	rate["count"] = int(rate["count"]) + 1
+	_script_remote_call_rates[sender] = rate
+	return int(rate["count"]) <= MAX_SCRIPT_REMOTE_CALLS_PER_SECOND
+
+
+func _valid_script_remote_envelope(script_id: String, endpoint: String, version: int,
+		args: Array) -> bool:
+	if not VrwebScriptDeclaration.valid_id(script_id) \
+			or not VrwebScriptDeclaration.valid_id(endpoint) or version < 1 or args.size() > 8:
+		return false
+	if not _script_remote_portable(args):
+		return false
+	return var_to_bytes({"script": script_id, "endpoint": endpoint,
+		"version": version, "args": args}).size() <= MAX_SCRIPT_REMOTE_CALL_BYTES
+
+
+func _script_remote_portable(value, depth := 0) -> bool:
+	if depth > 4:
+		return false
+	match typeof(value):
+		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_VECTOR2, TYPE_VECTOR3, TYPE_VECTOR4, \
+				TYPE_COLOR, TYPE_QUATERNION:
+			return true
+		TYPE_STRING:
+			return value.to_utf8_buffer().size() <= 4096
+		TYPE_PACKED_BYTE_ARRAY:
+			return value.size() <= 4096
+		TYPE_ARRAY:
+			if value.size() > 32:
+				return false
+			for item in value:
+				if not _script_remote_portable(item, depth + 1):
+					return false
+			return true
+		TYPE_DICTIONARY:
+			if value.size() > 32:
+				return false
+			for key in value:
+				if typeof(key) != TYPE_STRING or not _script_remote_portable(value[key], depth + 1):
+					return false
+			return true
+	return false
 
 
 # --- Сертификаты идентичности (двухшаговая проверка, см. docs/home-server.md) ---

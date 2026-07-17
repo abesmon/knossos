@@ -24,6 +24,8 @@ const CAPABILITIES := {
 	"vrweb/core/1": true,
 	"vrweb/scene/1": true,
 	"vrweb/state/1": true,
+	"vrweb/remote/1": true,
+	"vrweb/players/1": true,
 	"vrweb/player/1": true,
 	"vrweb/assets/1": true,
 	"vrweb/clock/1": true,
@@ -58,6 +60,8 @@ var _timers: Dictionary = {}
 var _updates: Array[Callable] = []
 var _next_timer := 1
 var _state := VrwebScriptState.new()
+var _remote := VrwebScriptRemote.new()
+var _players := VrwebScriptPlayers.new()
 var _clock_snapshot: Callable
 
 
@@ -77,6 +81,8 @@ func setup(id: String, content_hash: String, page_root: Node, targets: Dictionar
 	_policy = policy
 	_clock_snapshot = clock_snapshot
 	_state.setup(script_id, _invoke)
+	_remote.setup(script_id, _invoke)
+	_players.setup(_invoke)
 
 
 func api() -> Dictionary:
@@ -88,6 +94,8 @@ func api() -> Dictionary:
 		"session_set": func(key: String, value): return _session_set(key, value),
 		"session": session,
 		"state": _state.api(),
+		"remote": _remote.api(),
+		"players": _players.api(),
 		"assets": {"resolve": resolve_asset},
 		"clock": {"local_time": local_time, "authority_time": authority_time,
 			"authority_ready": authority_clock_ready, "set_timeout": set_timeout,
@@ -105,6 +113,8 @@ func commit() -> bool:
 	if not _valid or not is_instance_valid(_page_root):
 		return false
 	if not _state.commit():
+		return false
+	if not _remote.commit() or not _players.commit():
 		return false
 	for handle_id in _owned:
 		var node: Node = _owned[handle_id]
@@ -144,6 +154,8 @@ func close(preserve_replicated_state := false) -> void:
 	_handles.clear()
 	_reverse_handles.clear()
 	_state.close(not preserve_replicated_state)
+	_remote.close()
+	_players.close()
 	_invoke = Callable()
 	_page_root = null
 	_player = null

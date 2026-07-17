@@ -127,6 +127,15 @@ query. Контракт пока не стандартизирован; рабо
 определяется через `multiplayer.get_remote_sender_id()`, поэтому отдельный
 `MultiplayerSpawner`/авторитет на капсулу не нужен.
 
+**Page Remote Call.** Luau capability `document.remote` использует отдельный reliable RPC
+`_recv_script_remote_call(script_id, endpoint, version, args)`. Получатель сам берёт sender id из
+WebRTC transport, проверяет переносимые типы, размер 8 KiB и лимит 20 сообщений/с от peer, после
+чего адресует событие только активному realm совпадающего `script_id`. Transport не решает, имеет
+ли caller право на действие: локальный handler страницы проверяет `event.caller` и при допуске
+использует обычный sandboxed host API. События не проходят через authority, не сохраняются и не
+имеют late-join replay. Page-facing контракт — в
+[scripting-api.md](../space/scripting-api.md#адресованные-remote-calls).
+
 **Видео и Replicated State.** Play/pause/seek идут как generic `COMMAND` к authority, результат —
 упорядоченный `DELTA`, а late join получает `SNAPSHOT`. Heartbeat стал generic `SAMPLE`
 (unreliable ordered: позиция + состояние + revision). Его шлёт **таймкипер** —

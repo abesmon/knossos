@@ -38,3 +38,8 @@ Public page scripting API и capability contract — в [scripting-api.md](scrip
   единый формат сцен, все Godot-классы, специальные стандартные классы и формы доставки.
 - [vrwml-tags.md](vrwml-tags.md) — подробный реализованный каталог стандартных тегов VRWML,
   режимы композиции, загрузка внешних GLB-ресурсов и ограничения текущего Knossos runtime.
+
+## Исследования других платформ
+
+- [vrchat-developer-api.md](vrchat-developer-api.md) — карта SDK/Udon, Player API, persistence,
+  media, avatars, OSC и внешнего HTTP API VRChat; ограничения и выводы для API VRWeb.

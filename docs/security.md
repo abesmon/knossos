@@ -45,15 +45,19 @@ Luau исполняется в отдельных sandboxed VM без Godot obje
 ограничивает CPU, память, число handles, timers и host calls. Подробнее —
 [space/scripting.md](space/scripting.md).
 
-User permissions и instance ACL предусмотрены как последующие пересекающиеся слои, но в MVP
-пока не сужают клиентский capability pool. Старого trust store/preflight для raw-кода нет,
-поскольку raw GDScript со страницы больше не поддерживается.
+Стандартный capability pool page scripting должен быть безопасен сам по себе и не требует
+per-site permission prompts для core API вроде locomotion. Capability здесь означает границу и
+обнаружение поддерживаемого Web API, а не делегирование safety пользователю. Instance ACL и код
+автора мира задают игровую семантику поверх этой границы, но не расширяют доступ к engine/ОС.
+Старого trust store/preflight для raw-кода нет, поскольку raw GDScript со страницы больше не
+поддерживается.
 
 ## Карта поверхностей риска
 
 | Поверхность | Риск | Статус | Где подробно |
 |---|---|---|---|
 | **Luau page scripts** | Зацикливание, расход памяти или злоупотребление выданным API | **Изолирован:** отдельная VM, opaque handles, staged commit, deadlines и client quotas; hard allocator ceiling ещё не реализован | [space/scripting.md](space/scripting.md) |
+| **Page remote calls** | Пир вызывает локальный endpoint; изменённый клиент может вызвать любой опубликованный endpoint, не соблюдая проверки на своей стороне | **Изолирован:** transport закрепляет caller/target, script/endpoint/version, wire limits и rate limit; принимающий handler автора задаёт смысловой allow/deny и может использовать только безопасный `document` API | [space/scripting-api.md](space/scripting-api.md#адресованные-remote-calls) |
 | **VRWML страницы** | `VrwebBuilder` инстанцирует через `ClassDB` любой класс Godot и ставит любые свойства из атрибутов недоверенной страницы: исполнение кода (`script`/GDExtension), свойства-пути → чтение ФС, сетевые узлы (SSRF/DoS) | **Принят** | [space/vrwml-tags.md](space/vrwml-tags.md) → «Принятое допущение» |
 | **Эфемерные действия пиров** | `vrweb-node` из действий пиров строится тем же `VrwebBuilder.build_element` — тот же риск, даже без захода на злонамеренную страницу | **Принят** | [network/ephemeral-changes.md](network/ephemeral-changes.md), [client/space-console.md](client/space-console.md) |
 | **Флаш персистенции** | Запекает узлы пиров в страницу на сервере — после чего они грузятся и инстанцируются как обычные узлы страницы | **Принят** (транзитивно от двух предыдущих) | [network/page-persistence.md](network/page-persistence.md) |

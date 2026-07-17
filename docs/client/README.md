@@ -18,6 +18,8 @@
   → поверхности, синхронизация воспроизведения по сети.
 - [state-switch-demo.md](state-switch-demo.md) — единое копируемое демо Luau scripting API:
   per-frame update, local/authority clocks, ресурсы, input и Distributed State.
+- [remote-call-demo.md](remote-call-demo.md) — адресованные Remote Call, локальные правила
+  authority/rank и реактивные панели участников инстанса.
 - [gif-support.md](gif-support.md) — собственный декодер GIF на GDScript, анимация через
   `AnimatedTexture`.
 - [godot-coreaudio-input-rate-bug.md](godot-coreaudio-input-rate-bug.md) — заметка о баге Godot

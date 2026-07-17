@@ -264,6 +264,8 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Перенести Scripting API adapters поверх ABI; prompts fetch/storage/mic сделать deny-first.
 - [x] Перенести LightSwitch на sandboxed Luau: обычные VRWML-узлы, opaque handles,
   `document.state`, page-defined reducer и scene subscription; специальные state/action tags удалены.
+- [x] Добавить типизированные адресованные `document.remote` calls и реактивный read-only
+  `document.players` для локальных authority/rank правил и roster UI.
 - [ ] Расширить hostile fixtures: sustained memory growth, чужой handle, дополнительные
   path/network escape и callback после unmount (infinite top-level/callback loops уже покрыты).
 
