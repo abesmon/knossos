@@ -72,6 +72,12 @@ func _test_fetch() -> void:
 	var doc := HtmlParser.parse(FileAccess.get_file_as_string("res://test_pages/external_script.html"))
 	var collected := VrwebScriptDeclaration.collect(doc,
 			"vrwebresource://external_script.html")
+	_eq(collected.errors.is_empty(), true, "modular demo declarations are valid")
+	_eq(collected.scripts.size(), 3, "two linked modules and one inline controller collect")
+	if collected.scripts.size() == 3:
+		_eq(collected.scripts[0].kind, "linked", "model is linked")
+		_eq(collected.scripts[1].kind, "linked", "view is linked")
+		_eq(collected.scripts[2].kind, "inline", "controller is inline")
 	var fetcher := VrwebScriptFetcher.new()
 	add_child(fetcher)
 	var completion := {"done": false, "result": {}}
@@ -86,8 +92,8 @@ func _test_fetch() -> void:
 		return
 	var result: Dictionary = completion.result
 	_eq(result.errors.is_empty(), true, "linked source fetch succeeds")
-	_eq(result.scripts.size(), 1, "linked source is materialized")
-	if result.scripts.size() == 1:
+	_eq(result.scripts.size(), 3, "linked sources and inline controller are materialized")
+	if result.scripts.size() == 3:
 		_eq(str(result.scripts[0].source).contains("document.query"), true,
 				"fetcher returns source, never bytecode")
 		var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
@@ -103,11 +109,34 @@ func _test_fetch() -> void:
 				targets[node_id] = node
 		var runtime := VrwebLuauRuntime.new()
 		add_child(runtime)
+		var script_errors := []
+		runtime.script_failed.connect(func(id, phase, message):
+			script_errors.append({"id": id, "phase": phase, "message": message}))
 		runtime.setup(page_root, targets, "vrwebresource://external_script.html", null, policy)
 		_eq(runtime.activate(result.scripts).ok, true,
-				"linked declaration executes through the page runtime")
-		_eq((targets.get("external-label") as Label3D).text, "LINKED LUAU SCRIPT",
-				"linked script mutates its VRWML target by id")
+				"three modular declarations execute through the page runtime")
+		_eq((targets.get("external-label") as Label3D).text,
+				"2 LINKED FILES + 1 INLINE SCRIPT",
+				"linked view mutates its VRWML target by id")
+		await get_tree().process_frame
+		_eq((targets.get("view-status") as Label3D).text.contains("apply-speed(1.0)"), true,
+				"linked model calls the linked view endpoint after activation")
+		var spinner := targets.get("external-spinner") as MeshInstance3D
+		runtime._process(0.25)
+		_eq(not spinner.position.is_equal_approx(Vector3.ZERO), true,
+				"linked view animates from its private received speed")
+		var button := targets.get("external-button") as StaticBody3D
+		var bridge = button.get_meta(VrwebScriptInputBridge.META, null)
+		_eq(bridge is VrwebScriptInputBridge and bridge.dispatch(Vector3.ZERO), true,
+				"inline controller invokes the linked model")
+		await get_tree().process_frame
+		await get_tree().process_frame
+		_eq((targets.get("model-status") as Label3D).text.contains("private speed = 2.0x"),
+				true, "linked model updates its private state")
+		_eq((targets.get("view-status") as Label3D).text.contains("apply-speed(2.0)"), true,
+				"model forwards the new value to the linked view")
+		_eq(script_errors.is_empty(), true,
+				"cross-realm endpoint chain completes without script errors")
 		runtime.close()
 		runtime.queue_free()
 		page_root.queue_free()

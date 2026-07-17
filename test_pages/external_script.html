@@ -3,17 +3,54 @@
 <head>
   <meta charset="utf-8">
   <title>VRWeb linked Luau script</title>
-  <script type="application/vrweb+luau" id="external.tiny"
-		  src="external_tiny.luau"></script>
+  <!-- MODEL: owns private state and exposes a typed endpoint. -->
+  <script type="application/vrweb+luau" id="demo.external.model"
+          src="external_model.luau"></script>
+  <!-- VIEW: exposes its own endpoint and renders values received from the model. -->
+  <script type="application/vrweb+luau" id="demo.external.view"
+          src="external_tiny.luau"></script>
+  <!-- CONTROLLER: inline on purpose, to show composition with two linked modules. -->
+  <script type="application/vrweb+luau" id="demo.external.controller">
+local MODEL_SCRIPT_ID = "demo.external.model"
+local button = document.query("#external-button")
+local status = document.query("#controller-status")
+
+if not button or not status then
+  error("inline controller scene ids are missing")
+end
+
+button.on("activate", function(_event)
+  local me = document.players.local_info()
+  local sent = document.remote.call(
+    me.peer_id, MODEL_SCRIPT_ID, "cycle-speed", 1, {})
+  status.set("text", sent
+    and "3 · INLINE CONTROLLER → MODEL: cycle-speed()"
+    or "3 · INLINE CONTROLLER: вызов не отправлен")
+end, "Переключить скорость linked-модуля")
+  </script>
 </head>
 <body>
   <vrwml mode="exclusive">
     <Node3D id="external-root" name="ExternalRoot" position="Vector3(0,1.7,-3)">
-      <Label3D id="external-label" name="ExternalLabel" position="Vector3(0,0.9,0)"
-               text="Loading external script..." font_size="48"/>
+      <Label3D id="external-label" name="ExternalLabel" position="Vector3(0,1.65,0)"
+               text="Loading three script modules..." font_size="42"/>
       <MeshInstance3D id="external-spinner" name="ExternalSpinner"
                       mesh="SubResource:::SpinnerMesh"
                       material_override="SubResource:::SpinnerMaterial"/>
+      <Label3D id="model-status" position="Vector3(-2.8,0.75,0)"
+               text="1 · EXTERNAL MODEL: loading..." font_size="27"/>
+      <Label3D id="view-status" position="Vector3(2.8,0.75,0)"
+               text="2 · EXTERNAL VIEW: loading..." font_size="27"/>
+      <StaticBody3D id="external-button" position="Vector3(0,-1.15,0)">
+        <MeshInstance3D mesh="SubResource:::ButtonMesh"
+                        material_override="SubResource:::ButtonMaterial">
+          <Label3D position="Vector3(0,0,0.11)" text="СМЕНИТЬ СКОРОСТЬ"
+                   font_size="34" outline_size="8" pixel_size="0.005"/>
+        </MeshInstance3D>
+        <CollisionShape3D shape="SubResource:::ButtonShape"/>
+      </StaticBody3D>
+      <Label3D id="controller-status" position="Vector3(0,-1.75,0)"
+               text="3 · INLINE CONTROLLER: нажмите кнопку" font_size="27"/>
     </Node3D>
 
     <Node3D name="Ground" position="Vector3(0,-0.1,0)">
@@ -30,6 +67,10 @@
     <Resource id="SpinnerMaterial" type="StandardMaterial3D"
               albedo_color="Color(0.15,0.75,1,1)"
               emission_enabled="true" emission="Color(0.02,0.25,0.55,1)"/>
+    <Resource id="ButtonMesh" type="BoxMesh" size="Vector3(3.2,0.65,0.2)"/>
+    <Resource id="ButtonShape" type="BoxShape3D" size="Vector3(3.2,0.65,0.2)"/>
+    <Resource id="ButtonMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.15,0.38,0.62,1)"/>
   </vrwml>
 </body>
 </html>

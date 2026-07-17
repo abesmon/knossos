@@ -30,12 +30,19 @@ end
 - inline: исходный текст внутри элемента;
 - linked: `src`, разрешаемый относительно URL документа.
 
-Рабочий linked-пример можно открыть по адресу
-`vrwebresource://external_script.html`. В нём
-[external_script.html](../../test_pages/external_script.html) подключает через `src`
-лежащий рядом [external_tiny.luau](../../test_pages/external_tiny.luau). Внешний скрипт через
-`document.on_update` двигает и вращает куб и обновляет таймер на метке, поэтому его исполнение
-видно сразу. Ссылка на демо также есть на локальной странице `vrwebresource://index.html` под названием
+Рабочий linked-пример можно открыть по адресу `vrwebresource://external_script.html`. В нём
+[external_script.html](../../test_pages/external_script.html) собирает три изолированных realm:
+
+1. [external_model.luau](../../test_pages/external_model.luau) хранит приватную скорость и
+   публикует endpoint модели;
+2. [external_tiny.luau](../../test_pages/external_tiny.luau) публикует endpoint представления,
+   принимает скорость и анимирует куб;
+3. inline-контроллер обрабатывает кнопку и вызывает endpoint модели.
+
+Luau-глобалы между скриптами намеренно не разделяются. Модули взаимодействуют сообщениями через
+типизированные `document.remote` endpoints, адресованные по `script_id`; модель затем таким же
+контрактом передаёт значение view-модулю. Это даёт разделение model/view/controller без общего
+изменяемого global scope. Ссылка на демо есть на `vrwebresource://index.html` под названием
 «Luau: скрипт из соседнего файла».
 
 `src` и непустое тело одновременно являются ошибкой. Клиент получает и интерпретирует исходник;
