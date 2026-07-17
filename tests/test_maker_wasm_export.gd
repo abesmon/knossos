@@ -7,9 +7,9 @@ func _initialize() -> void:
 	var root := Node3D.new()
 	var component := VrwebWasmComponent.new()
 	component.name = "PortableLight"
-	component.module_id = "external.tiny"
+	component.module_id = "fixture.delivery-lifecycle"
 	component.export_name = "default"
-	component.package_path = "res://test_pages/lights.vrmod"
+	component.package_path = "res://tests/fixtures/wasm_delivery/lifecycle.vrmod"
 	component.position = Vector3(1, 2, 3)
 	root.add_child(component)
 	var spawner := VrwebSpawner.new()
@@ -24,9 +24,9 @@ func _initialize() -> void:
 	_eq(report.ok, true, "prebuilt WASM package exports without executing it")
 	_eq(report.packages.size(), 1, "package appears once in build report")
 	var html := str(report.html)
-	_eq(html.contains("<VRWebModule id=\"external.tiny\""), true,
+	_eq(html.contains("<VRWebModule id=\"fixture.delivery-lifecycle\""), true,
 			"HTML declares content-addressed module")
-	_eq(html.contains("<VRWebComponent module=\"external.tiny\" export=\"default\""), true,
+	_eq(html.contains("<VRWebComponent module=\"fixture.delivery-lifecycle\" export=\"default\""), true,
 			"scene binds selected export")
 	_eq(html.contains(", 1, 2, 3)\""), true,
 			"authoring transform is preserved")
@@ -35,7 +35,8 @@ func _initialize() -> void:
 		_eq(str(package.file).begins_with("modules/"), true,
 				"published package path is content-addressed")
 		_eq(FileAccess.get_file_as_bytes(output.get_base_dir().path_join(package.file)),
-				FileAccess.get_file_as_bytes("res://test_pages/lights.vrmod"),
+				FileAccess.get_file_as_bytes(
+						"res://tests/fixtures/wasm_delivery/lifecycle.vrmod"),
 				"published package bytes are exact")
 	var standalone := VrwebExporter.export_vrwml_report(root, "user://maker-wasm-test/world.vrwml",
 			VrwebCompatibility.PROFILE_STRICT)

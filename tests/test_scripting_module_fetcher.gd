@@ -6,10 +6,13 @@ var _failed := false
 func _ready() -> void:
 	var fetcher := ScriptingModuleFetcher.new()
 	add_child(fetcher)
-	var html := FileAccess.get_file_as_string("res://test_pages/external_wasm.html")
+	var html := FileAccess.get_file_as_string(
+			"res://tests/fixtures/wasm_delivery/declaration_only.html")
 	var doc := HtmlParser.parse(html)
-	var collected := ScriptingModuleCollector.collect(doc, "vrwebresource://external_wasm.html")
-	fetcher.fetch_all(collected.modules, "vrwebresource://external_wasm.html", func(result):
+	var page_url := "vrweblocal://" + ProjectSettings.globalize_path(
+			"res://tests/fixtures/wasm_delivery/declaration_only.html")
+	var collected := ScriptingModuleCollector.collect(doc, page_url)
+	fetcher.fetch_all(collected.modules, page_url, func(result):
 		_eq(result.errors, [], "local same-origin WASM package fetched")
 		_eq(result.modules.size(), 1, "one artifact prepared")
 		if result.modules.size() == 1:

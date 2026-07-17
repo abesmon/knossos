@@ -5,11 +5,12 @@ var _archive_seq := 0
 
 
 func _initialize() -> void:
-	var bytes := FileAccess.get_file_as_bytes("res://test_pages/lights.vrmod")
+	var bytes := FileAccess.get_file_as_bytes(
+			"res://tests/fixtures/wasm_delivery/lifecycle.vrmod")
 	var cached := ScriptingModuleCache.store(bytes)
 	_eq(cached.ok, true, "WASM package cached")
 	var unpacked := ScriptingModulePackage.unpack({
-		"id": "external.tiny",
+		"id": "fixture.delivery-lifecycle",
 		"hash": cached.hash,
 		"cache_path": cached.path,
 	})
@@ -54,7 +55,7 @@ func _test_direct_component() -> void:
 func _test_substituted_archive(cached: Dictionary) -> void:
 	var other := ScriptingModuleCache.store("not the package".to_utf8_buffer())
 	var result := ScriptingModulePackage.unpack({
-		"id": "external.tiny",
+		"id": "fixture.delivery-lifecycle",
 		"hash": cached.hash,
 		"cache_path": other.path,
 	})
@@ -65,33 +66,33 @@ func _test_substituted_archive(cached: Dictionary) -> void:
 func _test_rejected_packages() -> void:
 	var wasm := FileAccess.get_file_as_bytes(
 			"res://native/vrweb_wasm_runtime/fixtures/lifecycle.wasm")
-	var valid_manifest := _manifest("external.tiny")
+	var valid_manifest := _manifest("fixture.delivery-lifecycle")
 	_expect_error([
 		{"path": "vrweb-module.json", "bytes": valid_manifest},
 		{"path": "module.wasm", "bytes": wasm},
 		{"path": "second.wasm", "bytes": wasm},
-	], "external.tiny", "invalid_component_entries", "duplicate WASM component rejected")
+	], "fixture.delivery-lifecycle", "invalid_component_entries", "duplicate WASM component rejected")
 	_expect_error([
 		{"path": "vrweb-module.json", "bytes": valid_manifest},
 		{"path": "module.wasm", "bytes": wasm},
 		{"path": "plugin.dylib", "bytes": PackedByteArray([1])},
-	], "external.tiny", "native_library_forbidden", "native library rejected")
+	], "fixture.delivery-lifecycle", "native_library_forbidden", "native library rejected")
 	_expect_error([
 		{"path": "vrweb-module.json", "bytes": valid_manifest},
 		{"path": "module.wasm", "bytes": wasm},
 		{"path": "hidden.txt", "bytes": PackedByteArray([1])},
-	], "external.tiny", "undeclared_package_entry", "undeclared sidecar rejected")
+	], "fixture.delivery-lifecycle", "undeclared_package_entry", "undeclared sidecar rejected")
 	_expect_error([
 		{"path": "vrweb-module.json", "bytes": _manifest("changed.id")},
 		{"path": "module.wasm", "bytes": wasm},
-	], "external.tiny", "invalid_manifest", "changed manifest identity rejected")
+	], "fixture.delivery-lifecycle", "invalid_manifest", "changed manifest identity rejected")
 	_expect_error([
 		{"path": "vrweb-module.json", "bytes": valid_manifest},
 		{"path": "module.wasm", "bytes": wasm},
 		{"path": "../escape.txt", "bytes": PackedByteArray([1])},
-	], "external.tiny", "unsafe_path", "ZIP traversal rejected")
+	], "fixture.delivery-lifecycle", "unsafe_path", "ZIP traversal rejected")
 	var asset_manifest := JSON.stringify({
-		"format": 1, "id": "external.tiny", "runtime": "wasm-component",
+		"format": 1, "id": "fixture.delivery-lifecycle", "runtime": "wasm-component",
 		"world": "vrweb:module@1", "component": "module.wasm",
 		"exports": {"default": {"kind": "scene-component"}},
 		"requires": ["vrweb:core/1"], "optional": [],
@@ -100,13 +101,14 @@ func _test_rejected_packages() -> void:
 	_expect_error([
 		{"path": "vrweb-module.json", "bytes": asset_manifest},
 		{"path": "module.wasm", "bytes": wasm},
-	], "external.tiny", "missing_asset_file", "missing manifest asset rejected")
-	var debug_manifest: Dictionary = JSON.parse_string(_manifest("external.tiny").get_string_from_utf8())
+	], "fixture.delivery-lifecycle", "missing_asset_file", "missing manifest asset rejected")
+	var debug_manifest: Dictionary = JSON.parse_string(
+			_manifest("fixture.delivery-lifecycle").get_string_from_utf8())
 	debug_manifest["debug"] = {"source_map": "debug/module.wasm.map"}
 	_expect_error([
 		{"path": "vrweb-module.json", "bytes": JSON.stringify(debug_manifest).to_utf8_buffer()},
 		{"path": "module.wasm", "bytes": wasm},
-	], "external.tiny", "missing_debug_sidecar", "declared debug sidecar must exist")
+	], "fixture.delivery-lifecycle", "missing_debug_sidecar", "declared debug sidecar must exist")
 
 
 func _manifest(id: String) -> PackedByteArray:

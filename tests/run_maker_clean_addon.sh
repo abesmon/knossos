@@ -26,7 +26,7 @@ cp "$repo/tests/fixtures/maker_clean_project/maker_editor_smoke.gd" "$work/maker
 cp "$repo/tests/fixtures/maker_clean_project/wasm_source/main.ts" "$work/wasm source/main.ts"
 cp "$repo/tests/fixtures/maker_clean_project/wasm_source/vrweb-module.json" \
   "$work/wasm source/vrweb-module.json"
-cp "$repo/test_pages/lights.vrmod" "$work/wasm/lights.vrmod"
+cp "$repo/tests/fixtures/wasm_delivery/lifecycle.vrmod" "$work/wasm/lifecycle.vrmod"
 cp "$repo/tests/fixtures/maker_clean_project/asset_fixtures/.gdignore" "$work/asset_fixtures/.gdignore"
 cp "$repo/tests/fixtures/maker_clean_project/asset_fixtures/local_model.gltf" "$work/asset_fixtures/local_model.gltf"
 cp "$repo/tests/fixtures/maker_clean_project/asset_fixtures/local_model.bin" "$work/asset_fixtures/local_model.bin"

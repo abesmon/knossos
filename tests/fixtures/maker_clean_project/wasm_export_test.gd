@@ -4,9 +4,9 @@ extends Node
 func _ready() -> void:
 	var root := Node3D.new()
 	var component := VrwebWasmComponent.new()
-	component.module_id = "external.tiny"
+	component.module_id = "fixture.delivery-lifecycle"
 	component.export_name = "default"
-	component.package_path = "res://wasm/lights.vrmod"
+	component.package_path = "res://wasm/lifecycle.vrmod"
 	component.position = Vector3(1, 2, 3)
 	root.add_child(component)
 	var spawner := VrwebSpawner.new()
@@ -21,8 +21,8 @@ func _ready() -> void:
 			VrwebCompatibility.PROFILE_STRICT)
 	var html := str(report.get("html", ""))
 	var ok: bool = bool(report.get("ok", false)) and report.packages.size() == 1 \
-			and html.contains("<VRWebModule id=\"external.tiny\"") \
-			and html.contains("<VRWebComponent module=\"external.tiny\" export=\"default\"")
+			and html.contains("<VRWebModule id=\"fixture.delivery-lifecycle\"") \
+			and html.contains("<VRWebComponent module=\"fixture.delivery-lifecycle\" export=\"default\"")
 	if ok:
 		ok = _write(output, html)
 		var summary := report.duplicate(true)

@@ -31,10 +31,11 @@ func _initialize() -> void:
 	_eq(str(runtime.call("get_last_error")).contains("invalid WebAssembly component"), true,
 			"invalid component diagnostic preserved")
 
-	var package_bytes := FileAccess.get_file_as_bytes("res://test_pages/lights.vrmod")
+	var package_bytes := FileAccess.get_file_as_bytes(
+			"res://tests/fixtures/wasm_delivery/lifecycle.vrmod")
 	var cached := ScriptingModuleCache.store(package_bytes)
 	var unpacked := ScriptingModulePackage.unpack({
-		"id": "external.tiny", "hash": cached.hash, "cache_path": cached.path,
+		"id": "fixture.delivery-lifecycle", "hash": cached.hash, "cache_path": cached.path,
 	})
 	_eq(unpacked.ok, true, "delivery package unpacked")
 	if bool(unpacked.ok):
@@ -43,7 +44,7 @@ func _initialize() -> void:
 				"native backend prepares delivered component")
 		_eq(int(backend.runtime_object().call("component_count")), 1,
 				"backend owns compiled component")
-		var made := backend.instantiate_export("external.tiny", "default")
+		var made := backend.instantiate_export("fixture.delivery-lifecycle", "default")
 		_eq(str(made.error), "", "lifecycle scene export instantiated")
 		if made.node != null:
 			_eq(str(made.context.module_hash), str(unpacked.module.hash),
@@ -52,7 +53,7 @@ func _initialize() -> void:
 			var instance_id := str(made.context.instance_id)
 			_eq(Array(backend.runtime_object().call("instance_log_codes", instance_id)), [1, 2],
 					"create and mount order recorded")
-			_eq(backend.deliver_event("external.tiny", {"code": 9}).ok, true,
+			_eq(backend.deliver_event("fixture.delivery-lifecycle", {"code": 9}).ok, true,
 					"event delivered")
 			_eq(Array(backend.runtime_object().call("instance_log_codes", instance_id)), [1, 2, 123],
 					"serialized event envelope follows mount")

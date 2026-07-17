@@ -19,6 +19,8 @@ __pycache__/
 /sdk/rust/dist/
 /conformance/model-host/target/
 /conformance/dist/
+/examples/wasm-scene-demo/target/
+/examples/wasm-scene-demo/build/
 /.ci-export/
 
 # Приватный конфиг сборки (адреса сигналинга/ICE, учётка TURN) — см. docs/build-config.md.

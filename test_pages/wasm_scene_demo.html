@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — sandboxed WASM Scene demo</title>
+  <VRWebModule id="demo.wasm-scene" src="wasm_scene_demo.vrmod"
+               runtime="wasm-component" world="vrweb:module@1"/>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <MeshInstance3D mesh="SubResource:::FloorMesh" position="Vector3(0,-0.05,0)">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::FloorShape"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+    <DirectionalLight3D rotation_degrees="Vector3(-55,-25,0)" light_energy="0.7"/>
+
+    <Label3D text="WASM SCENE API DEMO" position="Vector3(0,3,-3)"
+             font_size="52" pixel_size="0.006"/>
+    <Label3D text="The cube and caption below are created by the sandboxed component"
+             position="Vector3(0,2.55,-3)" font_size="28" pixel_size="0.005"/>
+
+    <VRWebComponent module="demo.wasm-scene" export="default"/>
+
+    <VRWebSpawner mode="first">
+      <SpawnerPoint position="Vector3(0,1.6,2)"/>
+    </VRWebSpawner>
+
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(12,0.1,12)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(12,0.1,12)"/>
+  </vrwml>
+</body>
+</html>

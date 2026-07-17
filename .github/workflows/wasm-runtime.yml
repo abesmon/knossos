@@ -147,6 +147,7 @@ jobs:
         run: |
           "$GODOT" --headless --path . --editor --quit
           "$GODOT" --headless --path . --script res://tests/test_native_wasm_runtime.gd
+          "$GODOT" --headless --path . --script res://tests/test_wasm_scene_demo.gd
           "$GODOT" --headless --path . --script res://tests/test_wasm_reentrancy.gd
           "$GODOT" --headless --path . --script res://tests/test_wasm_value_handles.gd
           "$GODOT" --headless --path . --script res://tests/test_wasm_value_fuzz.gd

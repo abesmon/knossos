@@ -71,6 +71,23 @@ Package manifest остаётся единой проверяемой грани
 Production preview выполняет настоящий Knossos, поэтому addon не содержит native WASM runtime и
 не расходится с поведением клиента.
 
+### Готовый Scene API пример
+
+Репозиторий содержит видимое демо `test_pages/wasm_scene_demo.html` и его полный исходник в
+`examples/wasm-scene-demo`. Компонент получает scoped root, транзакционно создаёт `Label3D`,
+`MeshInstance3D`, `OmniLight3D` и `BoxMesh`, затем привязывает ресурс к созданной ноде. Страница
+отдельно содержит только floor, поясняющий текст и `VRWebComponent`, поэтому результат работы
+WASM виден сразу. Сборка примера:
+
+```bash
+python3 examples/wasm-scene-demo/build.py
+```
+
+После этого `vrwebresource://wasm_scene_demo.html` открывает committed package тем же production
+loader-ом, который используется для опубликованного контента. Технический declaration-only
+fixture находится отдельно в `tests/fixtures/wasm_delivery` и не показывается как пользовательская
+страница.
+
 ## TypeScript source в Maker Kit
 
 Кнопка **Add VRWeb Script** создаёт `VrwebWasmSourceComponent`, strict TypeScript template и
