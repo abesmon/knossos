@@ -333,10 +333,9 @@ func _update_aim() -> void:
 ## Это нужно canvas-контролам для mouse_exited и медиа-панелям для мгновенного сброса UI.
 func _dispatch_hover() -> void:
 	var current: Object = null
-	if _ray != null and _ray.is_colliding():
-		var col := _ray.get_collider()
-		if col != null and col.has_method("hover_at"):
-			current = col
+	var col := _aim_collider()
+	if col != null and col.has_method("hover_at"):
+		current = col
 	if current != _hovered_ui:
 		if is_instance_valid(_hovered_ui) and _hovered_ui.has_method("pointer_exit"):
 			_hovered_ui.pointer_exit()
@@ -351,7 +350,10 @@ func _dispatch_hover() -> void:
 func _aim_collider() -> Object:
 	if _ray == null or not _ray.is_colliding():
 		return null
-	return _ray.get_collider()
+	var collider := _ray.get_collider()
+	if collider is Node and not (collider as Node).is_inside_tree():
+		return null
+	return collider
 
 
 ## --- Отладочный инспектор провенанса (F3) ---
@@ -442,9 +444,9 @@ func _move_axes() -> Vector2:
 
 
 func _try_interact() -> void:
-	if _ray == null or not _ray.is_colliding():
+	var col := _aim_collider()
+	if col == null:
 		return
-	var col := _ray.get_collider()
 	# Единый интерфейс: и Portal, и RichPanel реализуют interact_at(точка_прицела).
 	var script_input = _script_input_for(col)
 	if script_input != null:

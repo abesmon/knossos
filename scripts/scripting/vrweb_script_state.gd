@@ -10,6 +10,7 @@ var _objects: Dictionary = {}
 var _subscriptions: Dictionary = {}
 var _invoke: Callable
 var _connected := false
+var _authority_connected := false
 var _closed := false
 var _staging := true
 var _pending_schemas: Dictionary = {}
@@ -26,7 +27,11 @@ func setup(script_id: String, invoke: Callable) -> void:
 
 func api() -> Dictionary:
 	return {"define": register_schema, "ensure": ensure_object, "read": read,
-		"revision": revision, "command": command, "on": subscribe}
+		"revision": revision,
+		"command": func(object_id, schema_id, version, command_name, args = {}):
+			return command(str(object_id), str(schema_id), int(version), str(command_name),
+					args if args is Dictionary else {}),
+		"on": subscribe}
 
 
 func register_schema(local_schema: String, definition: Dictionary) -> bool:
@@ -61,7 +66,8 @@ func ensure_object(local_object: String, local_schema: String, initial: Dictiona
 	if not NetworkManager.register_replicated_object(wire_object, wire_schema, initial, owner_user_id):
 		return false
 	_objects[_key(local_object, local_schema)] = {"schema": wire_schema, "object": wire_object,
-		"owner": owner_user_id}
+		"owner": owner_user_id, "initial": initial.duplicate(true)}
+	_connect_authority()
 	return true
 
 
@@ -141,6 +147,9 @@ func close(unregister := true) -> void:
 	if _connected and NetworkManager.replicated_state_received.is_connected(_on_state):
 		NetworkManager.replicated_state_received.disconnect(_on_state)
 	_connected = false
+	if _authority_connected and NetworkManager.authority_changed.is_connected(_on_authority_changed):
+		NetworkManager.authority_changed.disconnect(_on_authority_changed)
+	_authority_connected = false
 	_subscriptions.clear()
 	if unregister and not _staging:
 		for record in _objects.values():
@@ -216,6 +225,28 @@ func _on_state(object_id: String, schema_id: String, state: Dictionary,
 			if callback.is_valid() and _invoke.is_valid():
 				_invoke.call(callback, {"state": state.duplicate(true),
 					"changed": changed.duplicate(true), "revision": revision_value})
+
+
+## Room/mesh replacement clears replicated objects after page scripts may already have run.
+## Schemas survive reset_session, but registering both parts again is idempotent and also makes
+## this bridge robust if the network implementation later scopes schemas to a room as well.
+func _on_authority_changed(_authority: int, _is_me: bool) -> void:
+	if _closed or _staging:
+		return
+	for local_schema in _schemas:
+		NetworkManager.register_replicated_schema(str(_schemas[local_schema]),
+				_definitions.get(local_schema, {}))
+	for record in _objects.values():
+		NetworkManager.register_replicated_object(str(record.object), str(record.schema),
+				(record.get("initial", {}) as Dictionary).duplicate(true),
+				str(record.get("owner", "")))
+
+
+func _connect_authority() -> void:
+	if _authority_connected:
+		return
+	NetworkManager.authority_changed.connect(_on_authority_changed)
+	_authority_connected = true
 
 
 func _wrap_definition(definition: Dictionary) -> Dictionary:

@@ -547,6 +547,7 @@ func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: i
 
 func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
 		scripts: Array) -> void:
+	var navigation := _nav_id
 	_set_loading(false)
 	_set_status("Сборка пространства…")
 	var vrweb := VrwebBuilder.build(doc, base_url, _content_policy)
@@ -563,6 +564,13 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
 	_rebuild_world(space, final_url, vrweb, base_url)
+	# scene-ready: _ready() уже прошёл при add_child, но физические тела и viewport input
+	# становятся наблюдаемыми только на границе physics frame. Page scripts по умолчанию
+	# стартуют после этой границы, а не в промежуточном состоянии материализации.
+	await get_tree().physics_frame
+	# Пока ждали lifecycle boundary, пользователь мог начать другую навигацию.
+	if navigation != _nav_id:
+		return
 	_script_runtime = VrwebLuauRuntime.new()
 	_script_runtime.name = "VrwebLuauRuntime"
 	_world.add_child(_script_runtime)

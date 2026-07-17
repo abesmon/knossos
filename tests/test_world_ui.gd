@@ -38,6 +38,12 @@ func _ready() -> void:
 	_check(canvas._pointer_inside, "hover_at открывает pointer state")
 	canvas.pointer_exit()
 	_check(not canvas._pointer_inside, "pointer_exit закрывает pointer state")
+	remove_child(canvas)
+	canvas.hover_at(Vector3.ZERO)
+	canvas.interact_at(Vector3.ZERO)
+	_check(canvas.world_to_ui_uv(Vector3.ZERO) == Vector2(-1.0, -1.0) \
+			and not canvas.is_active_at(Vector3.ZERO) and not canvas._pointer_inside,
+			"снятая при навигации UI-поверхность больше не принимает stale ray input")
 	canvas.free()
 
 	var image_node := IMAGE_PANEL_SCENE.instantiate()

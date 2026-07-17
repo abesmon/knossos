@@ -3,6 +3,10 @@
 Скрипт получает global table `document`. Все объекты сцены представлены opaque handles; их нельзя
 преобразовать в Godot `Object` или сохранить как движковую ссылку.
 
+Top-level код всегда входит в VM на lifecycle-границе `scene-ready`: декларативная сцена уже
+находится в дереве и прошла первый physics frame. Отдельного `DOMContentLoaded` callback в v1 нет,
+потому что сам запуск скрипта является его эквивалентом.
+
 ## Scene
 
 - `document.query("#id") -> handle?`
@@ -27,7 +31,7 @@ Knossos v1 разрешает создание безопасного подмн
 
 ## Distributed state
 
-`document.state` использует тот же replicated-state subsystem, что декларативные state tags:
+`document.state` — единственная page-facing надстройка над generic replicated-state subsystem:
 
 - `define(schema_id, definition)`;
 - `ensure(object_id, schema_id, initial, owner_user_id)`;
@@ -36,6 +40,21 @@ Knossos v1 разрешает создание безопасного подмн
 - `on(object_id, schema_id, callback)`.
 
 Wire ids namespaced script id. Регистрация и top-level commands staged до успешного запуска.
+Живой realm сохраняет свои schema/object registrations при подключении или смене комнаты:
+сетевой reset очищает локальный Store, после чего client bridge повторяет идемпотентную
+регистрацию на `authority_changed`. Начальное значение действует до canonical snapshot от
+authority; пользовательский скрипт не должен повторно вызывать `define`/`ensure` из-за reconnect.
+
+Reducer в `definition.commands[name].reducer` получает один event:
+`{ state, args, context }` и возвращает patch-таблицу. Callback `on` получает
+`{ state, changed, revision }`. Представление остаётся обычной сценой: subscription вызывает
+`handle.set(...)`, а интеракция — `handle.on("activate", ...)` и затем `state.command(...)`.
+Полный копируемый пример: [демо общего света](../client/state-switch-demo.md) и его
+[inline Luau](../../test_pages/state_switch.html).
+
+В offline mode Knossos обрабатывает `command` тем же Store/reducer/delta путём локально, считая
+клиент временным standalone authority. При появлении комнаты это локальное состояние заменяется
+canonical snapshot по обычным правилам; специальной ветки в page script не требуется.
 
 ## Остальной host API
 

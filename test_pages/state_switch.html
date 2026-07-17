@@ -2,7 +2,56 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <title>VRWeb — Replicated State switch</title>
+  <title>VRWeb — Luau Distributed State lighting demo</title>
+  <script type="application/vrweb+luau" id="demo.light-switch">
+local button = document.query("#light-button")
+local red_lamp = document.query("#red-lamp")
+local green_lamp = document.query("#green-lamp")
+local red_status = document.query("#red-status")
+local green_status = document.query("#green-status")
+
+if not button or not red_lamp or not green_lamp or not red_status or not green_status then
+  error("lighting demo scene ids are missing")
+end
+
+local schema = "light"
+local object = "switch"
+local version = 1
+
+assert(document.state.define(schema, {
+  version = version,
+  fields = {
+    enabled = { type = "bool", default = false },
+  },
+  -- MVP пока оставляет user/instance permissions открытыми: команда доступна обычному rank.
+  default_write_rule = { rank = { op = "lte", value = 1073741824 } },
+  commands = {
+    toggle = {
+      reducer = function(event)
+        return { enabled = not event.state.enabled }
+      end,
+    },
+  },
+}))
+assert(document.state.ensure(object, schema, { enabled = false }, ""))
+
+local function render(state)
+  local enabled = state.enabled == true
+  red_lamp.set("visible", not enabled)
+  red_status.set("visible", not enabled)
+  green_lamp.set("visible", enabled)
+  green_status.set("visible", enabled)
+end
+
+render(document.state.read(object, schema))
+document.state.on(object, schema, function(event)
+  render(event.state)
+end)
+
+button.on("activate", function(_event)
+  document.state.command(object, schema, version, "toggle", {})
+end, "Переключить общий свет")
+  </script>
 </head>
 <body>
   <vrwml mode="exclusive">
@@ -16,49 +65,32 @@
     <WorldEnvironment environment="SubResource:::Environment"/>
     <DirectionalLight3D rotation_degrees="Vector3(-55,-25,0)" light_energy="0.7"/>
 
-    <!-- Вся предметная реализация находится в странице. Knossos знает только общие
-         state/action API, state DSL и стандартные Godot-узлы. -->
+    <!-- В сцене только обычные объекты. Поведение, distributed state и bindings находятся
+         в inline Luau выше и обращаются к объектам через стабильные id. -->
     <Node3D name="LightSwitch"
             transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1.25,-4)">
-      <!-- State — лишь невизуальная часть предмета. Его bindings свободно адресуют соседей. -->
-      <VRWebReplicatedState name="State" id="demo-light" schema="demo.light-switch" version="1">
-        <StateField name="enabled" type="bool" default="false"/>
-        <StateCommand name="toggle" operation="toggle" field="enabled"/>
-
-        <StateBinding field="enabled" target="../RedLamp" property="visible"
-                      when_true="false" when_false="true"/>
-        <StateBinding field="enabled" target="../GreenLamp" property="visible"
-                      when_true="true" when_false="false"/>
-        <StateBinding field="enabled" target="../RedStatus" property="visible"
-                      when_true="false" when_false="true"/>
-        <StateBinding field="enabled" target="../GreenStatus" property="visible"
-                      when_true="true" when_false="false"/>
-      </VRWebReplicatedState>
-
-      <!-- Интеракция — отдельный потребитель state и не обязана владеть лампами. -->
-      <VRWebStateAction name="Button" state="../State" command="toggle"
-                        hint="Переключить общий свет" size="2.4:0.9">
+      <StaticBody3D id="light-button" name="Button">
         <MeshInstance3D mesh="SubResource:::ButtonMesh"
                         material_override="SubResource:::ButtonMaterial">
           <Label3D position="Vector3(0,0,0.071)" text="ПЕРЕКЛЮЧИТЬ"
                    font_size="48" outline_size="10" pixel_size="0.005"/>
         </MeshInstance3D>
         <CollisionShape3D name="Collision" shape="SubResource:::ButtonShape"/>
-      </VRWebStateAction>
+      </StaticBody3D>
 
-      <MeshInstance3D name="RedLamp" position="Vector3(0,1.65,0)"
+      <MeshInstance3D id="red-lamp" name="RedLamp" position="Vector3(0,1.65,0)"
                       mesh="SubResource:::LampMesh" material_override="SubResource:::RedMaterial">
         <OmniLight3D light_color="Color(0.95,0.08,0.05,1)" omni_range="8"
                      light_energy="4" shadow_enabled="true"/>
       </MeshInstance3D>
-      <MeshInstance3D name="GreenLamp" position="Vector3(0,1.65,0)" visible="false"
+      <MeshInstance3D id="green-lamp" name="GreenLamp" position="Vector3(0,1.65,0)" visible="false"
                       mesh="SubResource:::LampMesh" material_override="SubResource:::GreenMaterial">
         <OmniLight3D light_color="Color(0.08,0.95,0.18,1)" omni_range="8"
                      light_energy="4" shadow_enabled="true"/>
       </MeshInstance3D>
-      <Label3D name="RedStatus" position="Vector3(0,0.72,0)" text="СВЕТ: КРАСНЫЙ"
+      <Label3D id="red-status" name="RedStatus" position="Vector3(0,0.72,0)" text="СВЕТ: КРАСНЫЙ"
                modulate="Color(0.95,0.08,0.05,1)" font_size="44" outline_size="10" pixel_size="0.005"/>
-      <Label3D name="GreenStatus" position="Vector3(0,0.72,0)" text="СВЕТ: ЗЕЛЁНЫЙ"
+      <Label3D id="green-status" name="GreenStatus" position="Vector3(0,0.72,0)" text="СВЕТ: ЗЕЛЁНЫЙ"
                modulate="Color(0.08,0.95,0.18,1)" visible="false"
                font_size="44" outline_size="10" pixel_size="0.005"/>
     </Node3D>
@@ -69,7 +101,7 @@
              position="Vector3(0,3.1,-4)" font_size="32" pixel_size="0.005"/>
 
     <VRWebSpawner mode="first">
-      <SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1.6,2)"/>
+      <SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0,-1)"/>
     </VRWebSpawner>
 
     <Resource id="FloorMesh" type="BoxMesh" size="Vector3(14,0.1,14)"/>

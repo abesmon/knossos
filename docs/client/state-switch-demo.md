@@ -1,27 +1,52 @@
-# Демо общего переключателя света
+# Демо Luau + Distributed State: общий свет
 
-`vrwebresource://state_switch.html` — второй потребитель Replicated State после видео.
-Страница содержит отдельные общие `<VRWebReplicatedState>` и `<VRWebStateAction>`, а рядом
-сама объявляет кнопку, две лампы и визуальные bindings. `enabled=false` рисуется
-красным, `enabled=true` — зелёным. Нажатие в любом клиенте
-отправляет команду `toggle` authority; canonical `DELTA` меняет цвет у всех, а late join
-восстанавливается snapshot.
+`vrwebresource://state_switch.html` — эталонный пример поведения страницы на
+`vrweb-luau/1`. Он показывает сразу три части portable scripting API:
 
-Компонент намеренно не использует `SAMPLE`, временные якоря или другие особенности видео.
-У него нет клиентского класса, сцены или доменной схемы: вся реализация находится в
-[state_switch.html](../../test_pages/state_switch.html). Клиентский
-[vrweb_replicated_state.gd](../../scripts/vrweb_replicated_state.gd) — общий runtime:
-регистрирует описанную страницей схему, выполняет безопасные операции DSL (`toggle`, `set`),
-отправляет команды и применяет значения к любым доступным по относительному `NodePath` узлам
-через `<StateBinding>`. State не является контейнером представления: в демо он, action и лампы
-лежат соседями внутри обычного `Node3D` предмета.
+1. `document.query("#id")` получает opaque handles обычных VRWML-объектов;
+2. `handle.on("activate", ...)` превращает обычный `StaticBody3D` с collision shape в кнопку;
+3. `document.state` определяет схему, создаёт общий объект, отправляет команду и подписывает
+   представление на canonical distributed state.
 
-Проверка:
+В сцене нет специальных state/action/binding-тегов и невидимых behavior-узлов. Она содержит
+только обычные `StaticBody3D`, `MeshInstance3D`, `Label3D`, lights и resources. Вся предметная
+логика находится в inline Luau внутри
+[state_switch.html](../../test_pages/state_switch.html), поэтому тот же документ служит
+копируемым примером для создателей и не расширяет VRWML новой доменной конструкцией.
 
-1. Открыть `vrwebresource://state_switch.html` в двух экземплярах в одной комнате.
-2. Нажать кнопку в каждом экземпляре по очереди: оба должны показывать один цвет.
-3. Открыть третий экземпляр позже: он должен получить текущий цвет snapshot’ом.
-4. Закрыть первоначальный authority и продолжить переключение в оставшемся экземпляре.
+## Как устроен скрипт
 
-Headless-регрессии: `tests/test_state_switch.tscn` проверяет автономную страницу и общий тег,
-а `tests/test_replicated_state.gd` — два toggle и generic revision без доменных веток Store.
+Script id `demo.light-switch` является namespace wire-id. Локальные `light` и `switch`
+превращаются клиентом в `demo.light-switch/light` и `demo.light-switch/switch`, поэтому разные
+скрипты страницы не могут случайно занять state друг друга.
+
+Скрипт:
+
+- объявляет bool-поле `enabled` и команду `toggle` с Luau reducer;
+- вызывает `document.state.ensure` с начальным состоянием;
+- сразу рисует результат `document.state.read`;
+- через `document.state.on` применяет каждый snapshot/delta к `visible` четырёх scene handles;
+- по `activate` вызывает `document.state.command` вместо изменения ламп локально.
+
+Top-level скрипт запускается на общей границе `scene-ready`. Сам клик проходит полный публичный
+маршрут `RayCast -> VrwebScriptInputBridge -> Luau callback -> document.state.command -> DELTA`,
+включая standalone Store в offline mode; тест не вызывает reducer напрямую.
+
+Команда использует открытый rank threshold текущего MVP. Это осознанно соответствует текущему
+этапу, где client capability layer реализован, а user permissions и instance ACL ещё не сужают
+пул. Когда появятся следующие два слоя разрешений, пример должен запрашивать ту же команду, а
+решение о доступе будет приниматься на пересечении политик без изменения scene API.
+
+## Проверка
+
+1. Открыть страницу в двух клиентах одной комнаты.
+2. После появления перед панелью навести центр экрана на обычную 3D-кнопку и активировать её:
+   оба клиента должны показать один цвет.
+3. Открыть третий клиент позже: текущий цвет должен восстановиться snapshot’ом.
+4. Закрыть первоначальный authority и продолжить переключение в оставшемся клиенте.
+
+`tests/test_state_switch.tscn` строит реальный документ, активирует его Luau realm, проверяет
+обычный collision target, имитирует room reset и authority transition, запускает page-defined
+reducer через generic Store и подтверждает, что distributed delta возвращается в Luau
+subscription и меняет сцену. Низкоуровневые инварианты Store отдельно покрывает
+`tests/test_replicated_state.gd`.

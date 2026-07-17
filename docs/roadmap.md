@@ -262,8 +262,10 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Реализовать ownership handles, quotas, instruction/time budget, termination и отзыв
   capabilities после unmount.
 - [ ] Перенести Scripting API adapters поверх ABI; prompts fetch/storage/mic сделать deny-first.
-- [ ] Сделать sandboxed LightSwitch и hostile fixtures: infinite loop, memory growth, чужой
-  handle, path/network escape и callback после unmount.
+- [x] Перенести LightSwitch на sandboxed Luau: обычные VRWML-узлы, opaque handles,
+  `document.state`, page-defined reducer и scene subscription; специальные state/action tags удалены.
+- [ ] Расширить hostile fixtures: sustained memory growth, чужой handle, дополнительные
+  path/network escape и callback после unmount (infinite top-level/callback loops уже покрыты).
 
 Критерий: модуль неизвестного origin запускается без прав процесса, а hostile fixtures
 детерминированно ограничиваются host runtime.

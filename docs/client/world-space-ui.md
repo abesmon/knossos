@@ -60,7 +60,9 @@ tool action), а владелец сцены решает, что с ним де
 - Дублированный hit-test. Поверхность возвращает `ui_size()`, а world->UV считается один раз в
   базе. Наследники получают UV/px и не пересчитывают `to_local` сами.
 - Зависший hover. `Player._dispatch_hover` хранит текущую поверхность и явно вызывает
-  `pointer_exit` при смене цели или уходе луча.
+  `pointer_exit` при смене цели или уходе луча. При навигации RayCast может до следующего
+  physics frame помнить collider уже снятой страницы; Player и `WorldUiSurface` поэтому
+  отбрасывают цель, если Node больше не находится в scene tree.
 - Невидимые блокеры. Для canvas-панелей декоративные `Control`-узлы должны получать
   `mouse_filter = MOUSE_FILTER_IGNORE`, если они не являются hit-target; это тот же класс
   проблем, что `Raycast Target` у перекрывающих Unity Graphics.

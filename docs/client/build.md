@@ -148,10 +148,12 @@ Runtime tests запускаются сценами `tests/test_luau_runtime.tsc
 
 ## Требования / known issues
 
-- **Luau 0.6.1 + Godot 4.6.3:** upstream binary при регистрации печатает нефатальную
-  диагностику `Class 'Object' doesn't exist`; `LuaState`, sandbox и interrupt hook при этом
-  регистрируются и проходят runtime tests. Убрать сообщение нужно обновлением либо пересборкой
-  GDExtension, это не часть scripting wire contract.
+- **Luau 0.6.1 + Godot 4.6.3:** macOS arm64 binaries используют совместимый с Godot 4.6
+  `godot-cpp` и локальную минимальную правку ошибочной upstream-привязки `LuaState.to_string`;
+  для Windows/Linux тот же patch нужно применять при следующем обновлении binaries.
+  Происхождение и воспроизводимая правка описаны в
+  [README аддона](../../addons/luau_gdextension/README.md#knossos-build). Это реализационная
+  совместимость reference client, а не часть scripting wire contract.
 - **macOS x86_64:** preset использует официальный universal template Godot, но закреплённая
   Luau GDExtension содержит только arm64 slice. Текущий macOS-клиент поэтому поддерживает Apple
   Silicon; Intel Mac не входит в platform matrix scripting v1.

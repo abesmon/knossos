@@ -82,21 +82,16 @@
 HTML `<video>` может материализоваться в тот же стандартный компонент, но остаётся тегом HTML,
 а не дополнительным тегом VRWML.
 
-## Реплицируемое состояние
+## Distributed state не является VRWML-тегом
 
-Эта группа входит в стандарт, но имеет статус **evolving**: ожидаются изменения схем, команд,
-bindings, версионирования и wire-поведения.
+VRWML описывает сцену, а не предметное поведение. Схемы, команды, reducers, subscriptions и
+отображение state в свойства сцены доступны скрипту через `document.state`; отдельные
+state/action/binding-теги намеренно отсутствуют. Обычные узлы получают стабильные HTML `id`,
+после чего Luau связывает input → command → state → scene properties через opaque handles.
 
-| Тег | Краткая семантика |
-|---|---|
-| `<VRWebReplicatedState>` | Типизированное реплицируемое состояние со стабильным `id`, schema и version. |
-| `<VRWebStateAction>` | Интерактивное действие, вызывающее команду указанного state. |
-| `<StateField>` | Поле схемы с типом и default. |
-| `<StateCommand>` | Разрешённая команда ограниченного декларативного DSL. |
-| `<StateBinding>` | Отображение поля состояния в свойство объекта сцены. |
-
-Подробно: [реплицируемое состояние](../network/replicated-state.md) и
-[минимальная демонстрация](../client/state-switch-demo.md).
+Подробно: [реплицируемое состояние](../network/replicated-state.md),
+[Scripting API](scripting-api.md#distributed-state) и
+[демо общего света](../client/state-switch-demo.md).
 
 ## Изображения и контент-адресуемые данные
 

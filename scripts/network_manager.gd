@@ -529,7 +529,7 @@ func request_replicated_command(object_id: String, schema_id: String, version: i
 	_metric("command_sent_count")
 	_metric("command_sent_bytes", var_to_bytes(envelope).size())
 	_metric_max("command_max_bytes", var_to_bytes(envelope).size())
-	if has_authority():
+	if has_authority() or _is_standalone_state_authority():
 		_commit_replicated_command(request_id, object_id, schema_id, version, command, args, _my_id)
 	elif _can_rpc() and authority_id() != 0:
 		rpc_id(authority_id(), "_recv_replicated_command", request_id, object_id, schema_id, version, command, args)
@@ -554,7 +554,8 @@ func send_replicated_sample(object_id: String, schema_id: String, version: int, 
 
 func _commit_replicated_command(request_id: int, object_id: String, schema_id: String, version: int,
 		command: String, args: Dictionary, sender: int) -> void:
-	if not has_authority():
+	var standalone := _is_standalone_state_authority()
+	if not has_authority() and not standalone:
 		_send_replicated_ack(sender, request_id, false, "authority_changed", -1)
 		return
 	var seen_key := "%d:%d" % [sender, request_id]
@@ -568,9 +569,9 @@ func _commit_replicated_command(request_id: int, object_id: String, schema_id: S
 	var context := {
 		"peer_id": sender,
 		"user_id": Settings.user_id if sender == _my_id else str(_user_ids.get(sender, "")),
-		"rank": my_rank() if sender == _my_id else rank_of_peer(sender),
+		"rank": 0 if standalone else (my_rank() if sender == _my_id else rank_of_peer(sender)),
 		"verified": HomeServer.is_logged_in() if sender == _my_id else _verified.has(sender),
-		"is_authority": sender == authority_id(),
+		"is_authority": standalone or sender == authority_id(),
 		"authority_msec": Time.get_ticks_msec(),
 	}
 	var result := _replicated.commit_command(object_id, schema_id, version, command, args, context)
@@ -587,6 +588,12 @@ func _commit_replicated_command(request_id: int, object_id: String, schema_id: S
 	if _can_rpc():
 		rpc("_recv_replicated_delta", delta)
 	_finish_replicated_command(sender, seen_key, request_id, true, "accepted", revision)
+
+
+## Без signaling distributed state остаётся полноценной локальной машиной. Это не новый
+## сетевой authority: ветка существует только при явно включённом offline mode и не шлёт RPC.
+func _is_standalone_state_authority() -> bool:
+	return not Settings.online_enabled
 
 
 func _finish_replicated_command(sender: int, seen_key: String, request_id: int,

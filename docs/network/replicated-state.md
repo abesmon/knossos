@@ -441,9 +441,10 @@ authority-state и не late-join snapshot.
 чем удаляется из `NetworkManager`, остановить обобщение на переиспользуемых примитивах
 `epoch/seq/snapshot`.
 
-Критерий подтверждён вторым потребителем: self-contained страница на общем
-`<VRWebReplicatedState>` использует только bool-state, `toggle`, ACK, `DELTA` и snapshot —
-без `SAMPLE`, доменного клиентского класса и изменений generic Store. Демо и ручной сценарий
+Критерий подтверждён вторым потребителем: self-contained страница определяет через
+`document.state` bool-state и Luau reducer `toggle`, используя общий ACK/`DELTA`/snapshot путь —
+без `SAMPLE`, доменного клиентского класса, специальных VRWML-тегов и изменений generic Store.
+Тем же скриптом subscription отображается в обычные объекты сцены. Демо и ручной сценарий
 описаны в [state-switch-demo.md](../client/state-switch-demo.md).
 
 ## Источники VRChat

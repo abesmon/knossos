@@ -46,6 +46,8 @@ func notify_size_changed(new_size: Vector2) -> void:
 
 ## Мировая точка физического луча -> UV интерфейса: (0,0) сверху слева, (1,1) снизу справа.
 func world_to_ui_uv(point: Vector3) -> Vector2:
+	if not is_inside_tree():
+		return Vector2(-1.0, -1.0)
 	var size := ui_size()
 	if size.x <= 0.0 or size.y <= 0.0:
 		return Vector2(-1.0, -1.0)
@@ -59,14 +61,14 @@ func world_to_ui_uv(point: Vector3) -> Vector2:
 
 ## Контракт Player. Эти методы финализируют общую маршрутизацию и вызывают узкие hooks.
 func pointer_enter() -> void:
-	if not input_enabled or _pointer_inside:
+	if not is_inside_tree() or not input_enabled or _pointer_inside:
 		return
 	_pointer_inside = true
 	_on_ui_pointer_enter()
 
 
 func hover_at(point: Vector3) -> void:
-	if not input_enabled:
+	if not is_inside_tree() or not input_enabled:
 		return
 	if not _pointer_inside:
 		pointer_enter()
@@ -78,27 +80,29 @@ func pointer_exit() -> void:
 	if not _pointer_inside:
 		return
 	_pointer_inside = false
+	if not is_inside_tree():
+		return
 	_on_ui_pointer_exit()
 
 
 func interact_at(point: Vector3) -> void:
-	if not input_enabled:
+	if not is_inside_tree() or not input_enabled:
 		return
 	_last_pointer_uv = world_to_ui_uv(point)
 	_on_ui_accept(_last_pointer_uv)
 
 
 func scroll_by(direction: float) -> void:
-	if input_enabled:
+	if is_inside_tree() and input_enabled:
 		_on_ui_scroll(direction)
 
 
 func is_active_at(point: Vector3) -> bool:
-	return input_enabled and _ui_is_active(world_to_ui_uv(point))
+	return is_inside_tree() and input_enabled and _ui_is_active(world_to_ui_uv(point))
 
 
 func aim_hint_at(point: Vector3) -> String:
-	return _ui_hint(world_to_ui_uv(point)) if input_enabled else ""
+	return _ui_hint(world_to_ui_uv(point)) if is_inside_tree() and input_enabled else ""
 
 
 ## Hooks: наследники переопределяют только нужное поведение, не весь контракт с Player.

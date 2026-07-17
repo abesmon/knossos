@@ -44,8 +44,6 @@ const EXT_SCENE_TAG := "ExtScene"
 const MIRROR_TAG := "VRWebMirror"
 const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
 const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
-const REPLICATED_STATE_TAG := "VRWebReplicatedState"
-const STATE_ACTION_TAG := "VRWebStateAction"
 const IMAGE_TAG := "VRWebImage"
 const BLOB_TAG := "VRWebBlob"
 const SUBRESOURCE_PREFIX := "SubResource:::"
@@ -56,10 +54,6 @@ const MODE_EXCLUSIVE := "exclusive"
 const MIRROR_SCENE := preload("res://scenes/vrweb_mirror.tscn")
 const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
 const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
-const REPLICATED_STATE_SCRIPT := preload("res://scripts/vrweb_replicated_state.gd")
-const STATE_ACTION_SCRIPT := preload("res://scripts/vrweb_state_action.gd")
-
-const REPLICATED_META_TAGS := {"StateField": true, "StateCommand": true, "StateBinding": true}
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -178,7 +172,7 @@ func _build(doc: HtmlNode) -> Dictionary:
 ## Структурные/мета-теги, которые не инстанцируются как узлы сцены.
 func _is_meta_tag(elem: HtmlNode) -> bool:
 	return elem.raw_tag == RESOURCE_TAG or elem.raw_tag == EXT_RESOURCE_TAG \
-			or elem.raw_tag == SPAWNER_TAG or REPLICATED_META_TAGS.has(elem.raw_tag)
+			or elem.raw_tag == SPAWNER_TAG
 
 
 # --- Внешние ресурсы (<ExtResource>) ---
@@ -279,10 +273,6 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_video_player(elem)
 	if elem.raw_tag == VIDEO_SCREEN_TAG:
 		return _build_video_screen(elem)
-	if elem.raw_tag == REPLICATED_STATE_TAG:
-		return _build_replicated_state(elem)
-	if elem.raw_tag == STATE_ACTION_TAG:
-		return _build_state_action(elem)
 	if elem.raw_tag == IMAGE_TAG:
 		return _build_image(elem)
 	if elem.raw_tag == BLOB_TAG:
@@ -423,76 +413,6 @@ func _build_video_screen(elem: HtmlNode) -> Node:
 	node.volume = _attr_float(elem, "volume", 1.0)
 	for key in elem.attributes:
 		if VIDEO_SCREEN_RESERVED.has(key):
-			continue
-		if _property_allowed(node, str(key), str(elem.attributes[key])):
-			node.set(key, _resolve_value(elem.attributes[key]))
-	return node
-
-
-## Декларативный behavior-компонент. Страница поставляет схему, reducers ограниченного DSL,
-## bindings и всё визуальное дерево; клиент предоставляет лишь общий state/UI runtime.
-func _build_replicated_state(elem: HtmlNode) -> Node:
-	if elem.get_attr("id").is_empty() or elem.get_attr("schema").is_empty():
-		Log.warn("builder", "<VRWebReplicatedState> требует id и schema")
-		return null
-	var fields := {}
-	var initial := {}
-	var commands := {}
-	var bindings: Array[Dictionary] = []
-	for child in elem.children:
-		match child.raw_tag:
-			"StateField":
-				var field_name := child.get_attr("name")
-				var default_value = _resolve_value(child.get_attr("default", "null"))
-				fields[field_name] = {"type": child.get_attr("type"), "default": default_value}
-				initial[field_name] = default_value
-			"StateCommand":
-				commands[child.get_attr("name")] = {
-					"operation": child.get_attr("operation"), "field": child.get_attr("field"),
-					"arg": child.get_attr("arg", "value"),
-					"value": _resolve_value(child.get_attr("value", "null")),
-				}
-			"StateBinding":
-				bindings.append({
-					"field": child.get_attr("field"), "target": child.get_attr("target"),
-					"property": child.get_attr("property"),
-					"true_value": _resolve_value(child.get_attr("when_true", "true")),
-					"false_value": _resolve_value(child.get_attr("when_false", "false")),
-				})
-	var node := REPLICATED_STATE_SCRIPT.new() as VrwebReplicatedState
-	node.setup({
-		"object_id": elem.get_attr("id"), "schema_id": elem.get_attr("schema"),
-		"version": int(elem.get_attr("version", "1")), "fields": fields, "initial": initial,
-		"commands": commands, "bindings": bindings,
-		"optimistic": _attr_bool(elem, "optimistic", true),
-	})
-	for key in elem.attributes:
-		if ["id", "schema", "version", "optimistic"].has(key):
-			continue
-		if _property_allowed(node, str(key), str(elem.attributes[key])):
-			node.set(key, _resolve_value(elem.attributes[key]))
-	return node
-
-
-## Отдельная WorldUiSurface, вызывающая команду state-узла по относительному NodePath.
-func _build_state_action(elem: HtmlNode) -> Node:
-	if elem.get_attr("state").is_empty() or elem.get_attr("command").is_empty():
-		Log.warn("builder", "<VRWebStateAction> требует state и command")
-		return null
-	var node := STATE_ACTION_SCRIPT.new() as VrwebStateAction
-	node.setup({
-		"state_path": elem.get_attr("state"), "command": elem.get_attr("command"),
-		"hint": elem.get_attr("hint"), "size": _parse_size(elem.get_attr("size", "1:1")),
-		"center": _resolve_value(elem.get_attr("center", "Vector3(0,0,0)")),
-	})
-	for child in elem.children:
-		if child.is_text() or _is_meta_tag(child):
-			continue
-		var sub := _build_node(child)
-		if sub != null:
-			node.add_child(sub)
-	for key in elem.attributes:
-		if ["state", "command", "hint", "size", "center"].has(key):
 			continue
 		if _property_allowed(node, str(key), str(elem.attributes[key])):
 			node.set(key, _resolve_value(elem.attributes[key]))

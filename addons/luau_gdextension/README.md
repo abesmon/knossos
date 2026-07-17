@@ -18,6 +18,20 @@ integration into games:
 
 This extension is currently built against Luau 0.719, though the API only exposes features available from Luau 0.696 and earlier. (No specific reason, we just need to review the changelog!)
 
+## Knossos build
+
+The vendored binaries originate from `fernforestgames/luau-gdextension` 0.6.1. The macOS arm64
+binaries are rebuilt against `godot-cpp` `10.0.0-rc1`, matching the Godot 4.6 extension API,
+and apply
+[`patches/0001-fix-luastate-to-string-binding.patch`](patches/0001-fix-luastate-to-string-binding.patch).
+Upstream 0.6.1 attempts to bind the inherited `Object::to_string()` as a `LuaState` method even
+though `LuaState::to_string(int)` does not exist. Godot therefore rejects that binding with
+`Class 'Object' doesn't exist`; removing the unusable binding leaves the implemented
+`to_string_inplace(index)` API intact.
+
+Apply the same patch when refreshing Windows or Linux binaries; it is source-compatible and
+does not alter the extension ABI.
+
 ## Quick Start
 
 ### Basic Usage
