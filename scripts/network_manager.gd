@@ -95,6 +95,7 @@ const REPLICATED_SNAPSHOT_CHUNK_BYTES := 32 * 1024
 const REPLICATED_SNAPSHOT_CHUNKS_PER_FRAME := 4
 const REPLICATED_SNAPSHOT_TIMEOUT_MS := 10_000
 const REPLICATED_COMMAND_TIMEOUT_MS := 5_000
+const AUTHORITY_CLOCK_SYNC_INTERVAL := 2.0
 
 ## Ранг по умолчанию для тех, кого нет в таблице. Чем МЕНЬШЕ ранг — тем больше прав (0 ≈ админ),
 ## поэтому дефолт берём заведомо «далеко от нуля» — практически без прав. См. docs/ranks.md.
@@ -196,6 +197,12 @@ var _replicated_snapshot_seq := 0
 var _replicated_snapshot_rx := {} # один атомарно собираемый transfer
 var _replicated_metrics := {}
 var _replicated_metrics_started_ms := 0
+var _authority_clock_offset_sec := 0.0
+var _authority_clock_synchronized := false
+var _authority_clock_accum := 0.0
+var _authority_clock_request_seq := 0
+var _authority_clock_pending := {} # request_id -> local send time (seconds)
+var _authority_clock_best_rtt := INF
 # Зарезервированные id (узлы vrweb-слоя ТЕКУЩЕЙ страницы): add с таким id отклоняется —
 # анти-коллизия дедупликации персистенции (см. docs/page-persistence.md). Ставит main
 # после индексации страницы; переживает пересоздание _scene при смене комнаты.
@@ -748,6 +755,17 @@ func is_timekeeper() -> bool:
 	return has_authority()
 
 
+## Монотонная шкала времени текущего authority. У authority она совпадает с локальными
+## ticks; у остальных приближена ping/pong-оценкой с компенсацией половины RTT.
+## Вне комнаты безопасно продолжает идти по локальной шкале, но synchronized() == false.
+func authority_time_seconds() -> float:
+	return Time.get_ticks_usec() / 1_000_000.0 + _authority_clock_offset_sec
+
+
+func authority_clock_synchronized() -> bool:
+	return has_authority() or _authority_clock_synchronized
+
+
 ## Пересчитать авторитет и, если сменился, оповестить. Зовётся после любого изменения p2p-состава
 ## (открытие/закрытие p2p-канала, подъём/снос меша).
 func _refresh_authority() -> void:
@@ -760,6 +778,7 @@ func _refresh_authority() -> void:
 			_authority, a, _my_id, _my_seq, str(_connected_peers.keys()), str(_peer_seqs),
 			str(a != 0 and a == _my_id)])
 		_authority = a
+		_reset_authority_clock()
 		var is_me := a != 0 and a == _my_id
 		authority_changed.emit(a, is_me)
 		if is_me:
@@ -1229,6 +1248,7 @@ func _can_rpc() -> bool:
 func _process(_delta: float) -> void:
 	_poll_net_status(_delta)
 	_replicated_tick()
+	_authority_clock_tick(_delta)
 	if _ws == null:
 		return
 	_ws.poll()
@@ -1268,6 +1288,28 @@ func _process(_delta: float) -> void:
 	if _blob_accum >= 1.0:
 		_blob_accum = 0.0
 		_blob_tick()
+
+
+func _reset_authority_clock() -> void:
+	_authority_clock_offset_sec = 0.0
+	_authority_clock_synchronized = false
+	_authority_clock_accum = AUTHORITY_CLOCK_SYNC_INTERVAL
+	_authority_clock_pending.clear()
+	_authority_clock_best_rtt = INF
+
+
+func _authority_clock_tick(delta: float) -> void:
+	if authority_id() == 0 or has_authority() or not _can_rpc():
+		return
+	_authority_clock_accum += delta
+	if _authority_clock_accum < AUTHORITY_CLOCK_SYNC_INTERVAL:
+		return
+	_authority_clock_accum = 0.0
+	_authority_clock_request_seq += 1
+	var request_id := _authority_clock_request_seq
+	_authority_clock_pending.clear()
+	_authority_clock_pending[request_id] = Time.get_ticks_usec() / 1_000_000.0
+	rpc_id(authority_id(), "_request_authority_clock", request_id)
 
 
 ## Истечение grace-периода призраков (~4 Гц из _process). Кто не вернулся — ушёл по-настоящему.
@@ -1611,6 +1653,31 @@ func _recv_ranks(table: Dictionary) -> void:
 func _request_ranks() -> void:
 	if has_authority() and _can_rpc():
 		rpc_id(multiplayer.get_remote_sender_id(), "_recv_ranks", _ranks)
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote")
+func _request_authority_clock(request_id: int) -> void:
+	if has_authority() and _can_rpc():
+		rpc_id(multiplayer.get_remote_sender_id(), "_recv_authority_clock", request_id,
+				Time.get_ticks_usec() / 1_000_000.0)
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote")
+func _recv_authority_clock(request_id: int, authority_time: float) -> void:
+	if not sender_is_authority() or not _authority_clock_pending.has(request_id):
+		return
+	var now := Time.get_ticks_usec() / 1_000_000.0
+	var sent := float(_authority_clock_pending[request_id])
+	_authority_clock_pending.erase(request_id)
+	var rtt := maxf(0.0, now - sent)
+	var sample_offset := authority_time + rtt * 0.5 - now
+	# Первый и лучший по RTT sample принимаются сразу; остальные мягко корректируют дрейф.
+	if not _authority_clock_synchronized or rtt < _authority_clock_best_rtt:
+		_authority_clock_offset_sec = sample_offset
+		_authority_clock_best_rtt = rtt
+	else:
+		_authority_clock_offset_sec = lerpf(_authority_clock_offset_sec, sample_offset, 0.1)
+	_authority_clock_synchronized = true
 
 
 @rpc("any_peer", "reliable", "call_remote")

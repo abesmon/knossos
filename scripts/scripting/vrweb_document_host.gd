@@ -5,6 +5,7 @@ extends RefCounted
 
 const MAX_HANDLES := 256
 const MAX_TIMERS := 64
+const MAX_UPDATE_CALLBACKS := 8
 const MAX_HOST_CALLS := 10_000
 const MAX_VALUE_BYTES := 64 * 1024
 const CREATE_CLASSES := {
@@ -51,15 +52,19 @@ var _pending_sets: Array[Dictionary] = []
 var _overrides: Dictionary = {}
 var _pending_events: Array[Dictionary] = []
 var _pending_timers: Array[Dictionary] = []
+var _pending_updates: Array[Callable] = []
 var _input_bridges: Array[VrwebScriptInputBridge] = []
 var _timers: Dictionary = {}
+var _updates: Array[Callable] = []
 var _next_timer := 1
 var _state := VrwebScriptState.new()
+var _clock_snapshot: Callable
 
 
 func setup(id: String, content_hash: String, page_root: Node, targets: Dictionary,
 		base_url: String, player: Node, owner: Node, invoke: Callable,
-		previous_session: Dictionary, policy: VrwebContentPolicy) -> void:
+		previous_session: Dictionary, policy: VrwebContentPolicy,
+		clock_snapshot: Callable = Callable()) -> void:
 	script_id = id
 	script_hash = content_hash
 	_page_root = page_root
@@ -70,6 +75,7 @@ func setup(id: String, content_hash: String, page_root: Node, targets: Dictionar
 	_invoke = invoke
 	session = previous_session.duplicate(true)
 	_policy = policy
+	_clock_snapshot = clock_snapshot
 	_state.setup(script_id, _invoke)
 
 
@@ -83,7 +89,11 @@ func api() -> Dictionary:
 		"session": session,
 		"state": _state.api(),
 		"assets": {"resolve": resolve_asset},
-		"clock": {"set_timeout": set_timeout, "set_interval": set_interval, "cancel": cancel_timer},
+		"clock": {"local_time": local_time, "authority_time": authority_time,
+			"authority_ready": authority_clock_ready, "set_timeout": set_timeout,
+			"set_interval": set_interval, "cancel": cancel_timer},
+		"on_update": on_update,
+		"values": {"vector3": make_vector3, "color": make_color},
 		"player": {"get": player_get, "set_position": player_set_position},
 		"log": {"debug": log_debug, "info": log_info, "warning": log_warning,
 			"error": log_error},
@@ -106,9 +116,11 @@ func commit() -> bool:
 		_connect_event(event.node, event.name, event.callback, event.hint)
 	for timer in _pending_timers:
 		_start_timer(float(timer.seconds), timer.callback, bool(timer.repeat))
+	_updates.append_array(_pending_updates)
 	_pending_sets.clear()
 	_pending_events.clear()
 	_pending_timers.clear()
+	_pending_updates.clear()
 	_overrides.clear()
 	_staging = false
 	return true
@@ -123,6 +135,8 @@ func close(preserve_replicated_state := false) -> void:
 	_input_bridges.clear()
 	for timer_id in _timers.keys():
 		cancel_timer(timer_id)
+	_updates.clear()
+	_pending_updates.clear()
 	for node in _owned.values():
 		if is_instance_valid(node):
 			node.queue_free()
@@ -134,6 +148,7 @@ func close(preserve_replicated_state := false) -> void:
 	_page_root = null
 	_player = null
 	_owner = null
+	_clock_snapshot = Callable()
 
 
 func restore_replicated_state() -> bool:
@@ -154,8 +169,8 @@ func retire_for_replacement(replacement: VrwebDocumentHost) -> void:
 func query(selector: String):
 	if not _allow_call() or not selector.begins_with("#"):
 		return null
-	var node = _targets.get(selector.trim_prefix("#"))
-	return _handle_for(node) if node is Node and is_instance_valid(node) else null
+	var object = _targets.get(selector.trim_prefix("#"))
+	return _handle_for(object) if object is Object and is_instance_valid(object) else null
 
 
 func query_all(selector: String) -> Array:
@@ -192,36 +207,36 @@ func create(type_name: String, properties: Dictionary = {}):
 func get_property(handle_id: int, property: String):
 	if not _allow_call():
 		return null
-	var node := _node(handle_id)
-	if node == null or BLOCKED_PROPERTIES.has(property) or not _has_property(node, property):
+	var object := _object(handle_id)
+	if object == null or BLOCKED_PROPERTIES.has(property) or not _has_property(object, property):
 		return null
 	var key := "%d:%s" % [handle_id, property]
-	var value = _overrides.get(key, node.get(property))
+	var value = _overrides.get(key, object.get(property))
 	return value if _portable(value) else null
 
 
 func set_property(handle_id: int, property: String, value) -> bool:
 	if not _allow_call() or not _portable(value) or var_to_bytes(value).size() > MAX_VALUE_BYTES:
 		return false
-	var node := _node(handle_id)
-	if node == null or BLOCKED_PROPERTIES.has(property) or not _has_property(node, property) \
-			or not _compatible_property_value(node, property, value):
+	var object := _object(handle_id)
+	if object == null or BLOCKED_PROPERTIES.has(property) or not _has_property(object, property) \
+			or not _compatible_property_value(object, property, value):
 		return false
 	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_property(
-			node.get_class(), property, var_to_str(value),
+			object.get_class(), property, var_to_str(value),
 			{"source": "script", "script_id": script_id})):
 		return false
 	if _staging:
-		_pending_sets.append({"node": node, "property": property, "value": value})
+		_pending_sets.append({"node": object, "property": property, "value": value})
 		_overrides["%d:%s" % [handle_id, property]] = value
 		return true
-	return _apply_set(node, property, value)
+	return _apply_set(object, property, value)
 
 
 func call_method(handle_id: int, method: String, arguments: Array = []):
 	if not _allow_call() or not SAFE_METHODS.has(method) or arguments.size() > 8:
 		return null
-	var node := _node(handle_id)
+	var node := _object(handle_id) as Node
 	if node == null or not node.has_method(method):
 		return null
 	if _staging:
@@ -232,7 +247,7 @@ func call_method(handle_id: int, method: String, arguments: Array = []):
 func on_event(handle_id: int, event_name: String, callback: Callable, hint := "") -> bool:
 	if not _allow_call() or not callback.is_valid():
 		return false
-	var node := _node(handle_id)
+	var node := _object(handle_id) as Node
 	if node == null or event_name != "activate":
 		return false
 	if _staging:
@@ -255,6 +270,57 @@ func set_timeout(seconds: float, callback: Callable) -> int:
 
 func set_interval(seconds: float, callback: Callable) -> int:
 	return _timer(seconds, callback, true)
+
+
+func on_update(callback: Callable) -> bool:
+	if not _allow_call() or not callback.is_valid() \
+			or _updates.size() + _pending_updates.size() >= MAX_UPDATE_CALLBACKS:
+		return false
+	if _staging:
+		_pending_updates.append(callback)
+	else:
+		_updates.append(callback)
+	return true
+
+
+func update(delta: float, clock: Dictionary) -> void:
+	if not _valid or _staging or not _invoke.is_valid():
+		return
+	var event := {
+		"delta": delta,
+		"local_time": float(clock.get("local_time", 0.0)),
+		"authority_time": float(clock.get("authority_time", 0.0)),
+		"authority_ready": bool(clock.get("authority_ready", false)),
+	}
+	for callback in _updates.duplicate():
+		if _valid:
+			_invoke.call(callback, event)
+
+
+func begin_invocation() -> void:
+	# Лимит host calls относится к одному контролируемому входу в VM. Иначе корректный
+	# per-frame update неизбежно исчерпал бы пожизненный счётчик.
+	_calls = 0
+
+
+func local_time() -> float:
+	return float(_clock().get("local_time", 0.0)) if _allow_call() else 0.0
+
+
+func authority_time() -> float:
+	return float(_clock().get("authority_time", 0.0)) if _allow_call() else 0.0
+
+
+func authority_clock_ready() -> bool:
+	return bool(_clock().get("authority_ready", false)) if _allow_call() else false
+
+
+func make_vector3(x: float, y: float, z: float) -> Vector3:
+	return Vector3(x, y, z) if _allow_call() else Vector3.ZERO
+
+
+func make_color(r: float, g: float, b: float, a := 1.0) -> Color:
+	return Color(r, g, b, a) if _allow_call() else Color.TRANSPARENT
 
 
 func cancel_timer(timer_id: int) -> bool:
@@ -322,15 +388,15 @@ func log_error(message) -> void:
 			str(message).left(4096)])
 
 
-func _handle_for(node: Node) -> Dictionary:
-	var instance_id := node.get_instance_id()
+func _handle_for(object: Object) -> Dictionary:
+	var instance_id := object.get_instance_id()
 	var handle_id := int(_reverse_handles.get(instance_id, 0))
 	if handle_id == 0:
 		if _handles.size() >= MAX_HANDLES:
 			return {}
 		handle_id = _next_handle
 		_next_handle += 1
-		_handles[handle_id] = node
+		_handles[handle_id] = object
 		_reverse_handles[instance_id] = handle_id
 	return {
 		"id": handle_id,
@@ -343,9 +409,9 @@ func _handle_for(node: Node) -> Dictionary:
 	}
 
 
-func _node(handle_id: int) -> Node:
-	var node = _handles.get(handle_id)
-	return node as Node if node is Node and is_instance_valid(node) else null
+func _object(handle_id: int) -> Object:
+	var object = _handles.get(handle_id)
+	return object as Object if object is Object and is_instance_valid(object) else null
 
 
 func _allow_call() -> bool:
@@ -381,11 +447,19 @@ func _compatible_property_value(node: Object, property: String, value) -> bool:
 	return false
 
 
-func _apply_set(node: Node, property: String, value) -> bool:
+func _apply_set(node: Object, property: String, value) -> bool:
 	if not is_instance_valid(node) or not _compatible_property_value(node, property, value):
 		return false
 	node.set(property, value)
 	return true
+
+
+func _clock() -> Dictionary:
+	if _clock_snapshot.is_valid():
+		var value = _clock_snapshot.call()
+		if value is Dictionary:
+			return value
+	return {"local_time": 0.0, "authority_time": 0.0, "authority_ready": false}
 
 
 func _forget_owned(handle_id: int, immediate: bool) -> void:

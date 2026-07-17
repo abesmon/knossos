@@ -11,7 +11,7 @@ func _ready() -> void:
 	var declarations := VrwebScriptDeclaration.collect(doc,
 			"vrwebresource://state_switch.html")
 	_eq(declarations.errors.is_empty(), true, "lighting demo has a valid Luau declaration")
-	_eq(declarations.scripts.size(), 1, "lighting behavior is one portable page script")
+	_eq(declarations.scripts.size(), 2, "state and per-frame update coexist in one scene")
 
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 	var built := VrwebBuilder.build(doc, "vrwebresource://state_switch.html", policy)
@@ -25,6 +25,11 @@ func _ready() -> void:
 			"button is an ordinary queryable StaticBody3D")
 	_eq(red_lamp != null and green_lamp != null, true,
 			"lamps are ordinary queryable scene nodes")
+	var local_ball := targets.get("local-ball") as MeshInstance3D
+	var local_label := targets.get("local-clock-label") as Label3D
+	var local_material := targets.get("LocalBallMaterial") as StandardMaterial3D
+	_eq(local_ball != null and local_label != null and local_material != null, true,
+			"update demo exposes both nodes and a material resource")
 
 	var runtime := VrwebLuauRuntime.new()
 	add_child(runtime)
@@ -38,6 +43,14 @@ func _ready() -> void:
 			"Luau registers the ordinary body as an activation target")
 	_eq(red_lamp.visible and not green_lamp.visible, true,
 			"script renders the initial distributed state")
+	var initial_color := local_material.albedo_color
+	runtime._process(0.25)
+	_eq(local_label.text.begins_with("LOCAL SCENE TIME\n0.25"), true,
+			"on_update receives the shared local scene time")
+	_eq(not local_material.albedo_color.is_equal_approx(initial_color), true,
+			"a resource handle updates the material from Luau")
+	_eq(not local_ball.position.is_equal_approx(Vector3(-3, 1.55, -4)), true,
+			"on_update drives an ordinary scene node")
 
 	# Entering/replacing a room resets objects after scripts may have activated. The bridge must
 	# restore its declarations on the same authority transition used by real clients.
@@ -82,6 +95,9 @@ func _targets(doc: HtmlNode, built: Dictionary) -> Dictionary:
 		var node = (built.nodes as Dictionary).get(record.elem)
 		if node != null:
 			result[node_id] = node
+	for resource_id in built.get("resources", {}):
+		if not result.has(resource_id):
+			result[resource_id] = built.resources[resource_id]
 	return result
 
 

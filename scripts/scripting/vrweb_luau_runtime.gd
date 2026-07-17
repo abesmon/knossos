@@ -22,6 +22,18 @@ var _policy: VrwebContentPolicy
 var _deadline_by_script: Dictionary = {}
 var _limit_reason_by_script: Dictionary = {}
 var _closed := false
+var _scene_time := 0.0
+
+
+func _process(delta: float) -> void:
+	if _closed:
+		return
+	_scene_time += delta
+	var clock := _clock_snapshot()
+	for realm in _realms.values().duplicate():
+		var host: VrwebDocumentHost = (realm as Dictionary).get("host")
+		if host != null:
+			host.update(delta, clock)
 
 
 func _exit_tree() -> void:
@@ -35,6 +47,7 @@ func setup(page_root: Node, targets: Dictionary, base_url: String, player: Node,
 	_base_url = base_url
 	_player = player
 	_policy = policy
+	_scene_time = 0.0
 
 
 func activate(scripts: Array) -> Dictionary:
@@ -152,7 +165,8 @@ func _prepare(declaration: Dictionary, previous_session: Dictionary) -> Dictiona
 	var invoke := func(callback: Callable, event = {}, wants_result := false):
 		return _invoke_script(script_id, callback, event, wants_result)
 	host.setup(script_id, str(declaration.get("hash", source.sha256_text())), _page_root,
-			_targets, _base_url, _player, self, invoke, previous_session, _policy)
+			_targets, _base_url, _player, self, invoke, previous_session, _policy,
+			_clock_snapshot)
 	state.register_library("document", host.api())
 	state.pop(1)
 	var bytecode: PackedByteArray = Luau.compile(source)
@@ -191,6 +205,7 @@ func _invoke_script(script_id: String, callback: Callable, event, wants_result :
 	var state = realm.state
 	if state == null or not state.is_valid():
 		return null
+	(realm.host as VrwebDocumentHost).begin_invocation()
 	_deadline_by_script[script_id] = Time.get_ticks_msec() + CALLBACK_BUDGET_MS
 	_limit_reason_by_script.erase(script_id)
 	# Push the original Luau function back into its VM. Calling LuaCallable.call() directly
@@ -264,3 +279,11 @@ func _dispose_realm(realm: Dictionary, preserve_replicated_state: bool) -> void:
 
 static func _error(phase: String, message: String) -> Dictionary:
 	return {"ok": false, "phase": phase, "error": message, "realm": {}}
+
+
+func _clock_snapshot() -> Dictionary:
+	return {
+		"local_time": _scene_time,
+		"authority_time": NetworkManager.authority_time_seconds(),
+		"authority_ready": NetworkManager.authority_clock_synchronized(),
+	}

@@ -19,9 +19,15 @@ Top-level код всегда входит в VM на lifecycle-границе `
 
 Knossos v1 разрешает создание безопасного подмножества 3D nodes и методы `show`, `hide`, `play`,
 `stop`. Свойства проходят тот же content-policy фильтр, что атрибуты VRWML. HTML `id` адресует
-материализованный объект независимо от его Godot `name`. Запись read-only, служебных и
+материализованный объект независимо от его Godot `name`; id декларативного `<Resource>` адресует
+тот же ресурс через такой же opaque handle. Поэтому скрипт может, например, менять
+`StandardMaterial3D.albedo_color`, не получая прямую engine-ссылку. Запись read-only, служебных и
 несовместимых по типу свойств отклоняется до commit. Неуспешный `document.create` транзакционно
 удаляет заготовку, поэтому частично созданный объект не остаётся в сцене.
+
+Для переносимого создания значений доступны `document.values.vector3(x, y, z)` и
+`document.values.color(r, g, b, a)`. Они возвращают типизированные значения host, пригодные для
+`handle.set`, и не раскрывают конструкторы движка.
 
 ## Session
 
@@ -62,6 +68,11 @@ canonical snapshot по обычным правилам; специальной 
 - `document.clock.set_timeout(seconds, callback)`;
 - `document.clock.set_interval(seconds, callback)`;
 - `document.clock.cancel(timer_id)`;
+- `document.clock.local_time()` — время активной сцены в секундах от её materialize;
+- `document.clock.authority_time()` — монотонная шкала текущего authority;
+- `document.clock.authority_ready()` — синхронизирована ли authority-шкала с удалённым host;
+- `document.on_update(callback)` — callback каждого render frame с
+  `{delta, local_time, authority_time, authority_ready}`;
 - `document.player.get("position" | "flying")`;
 - `document.player.set_position(vector)`;
 - `document.log.debug/info/warning/error(value)`;
@@ -71,11 +82,18 @@ canonical snapshot по обычным правилам; специальной 
 Capability names MVP: `vrweb/core/1`, `vrweb/scene/1`, `vrweb/state/1`, `vrweb/player/1`,
 `vrweb/assets/1`, `vrweb/clock/1`, `vrweb/log/1`.
 
+`local_time` общее для всех script realms одной сцены, но начинается заново при навигации.
+`authority_time` у host совпадает с его монотонными ticks, а у остальных клиентов оценивается
+периодическим ping/pong с компенсацией половины RTT. Вне сетевой комнаты шкала продолжает идти
+локально, но `authority_ready == false`. Она предназначена для вычисления производного состояния
+вроде фазы анимации; canonical игровые решения по-прежнему должны проходить через
+`document.state` и authority validation.
+
 ## Ошибки и лимиты
 
 Недоступная операция возвращает `nil`/`false`; скрипт не получает fallback-доступ к движку.
 Knossos ограничивает один source 256 KiB, страницу 32 скриптами, realm 256 handles, 64 timers,
-10 000 host calls, 75 ms top-level и 25 ms на callback. Текущий memory watchdog использует soft
+10 000 host calls на один контролируемый вход VM, 75 ms top-level и 25 ms на callback. Текущий memory watchdog использует soft
 budget 16 MiB. Эти числа — политика reference client, не wire contract стандарта.
 
 Ошибки callback и CPU timeout локализуются в одном realm: он отключается и очищает выданные им
