@@ -20,13 +20,11 @@ extends RefCounted
 
 const SUB_PREFIX := VrwebFormat.SUBRESOURCE_PREFIX
 const EXT_PREFIX := VrwebFormat.EXTRESOURCE_PREFIX
+const META_PAGE_SCRIPTS := "vrweb_page_scripts"
+const META_ELEMENT_ID := "vrweb_id"
 
 ## Свойства, которые никогда не экспортируем (служебные/неинстанцируемые читателем).
 const SKIP_PROPS := {"owner": true, "name": true, "script": true, "scene_file_path": true}
-const META_SCRIPT_MODE := "vrweb_script_mode"
-const META_SCRIPT_ID := "vrweb_script_id"
-const SCRIPT_MODE_INLINE := "inline"
-const SCRIPT_MODE_PACKAGE := "package"
 
 var _sub_order: Array[String] = []          # id'ы суб-ресурсов в порядке появления
 var _sub_def: Dictionary = {}               # id -> Resource
@@ -39,12 +37,8 @@ var _ext_by_res: Dictionary = {}            # VrwebExtResource -> id (дедуп
 var _ext_seq := 0
 
 var _defaults: Dictionary = {}              # class -> экземпляр-эталон (Node освобождаем в конце)
-var _inline_scripts: Array[Dictionary] = [] # [{id,base,source}] для <head>
-var _inline_seq := 0
-var _package_defs: Array[Dictionary] = []
-var _package_seq := 0
-var _module_head_lines: Array[String] = []
-var _report := {"ok": true, "packages": [], "assets": [], "warnings": [], "errors": [],
+var _page_scripts: Array[Dictionary] = []
+var _report := {"ok": true, "scripts": [], "assets": [], "warnings": [], "errors": [],
 	"profile": VrwebCompatibility.PROFILE_COMPATIBLE,
 	"policy_version": VrwebCompatibility.POLICY_VERSION}
 var _standalone := false
@@ -109,6 +103,7 @@ func _export(root: Node, mode: String, output_path: String) -> String:
 	_output_path = output_path
 	var safe_mode := VrwebFormat.normalized_mode(mode)
 	_validate_world_basics(root)
+	_collect_page_scripts(root)
 
 	# Сначала строим узлы (попутно наполняются таблицы суб-/внешних ресурсов).
 	var body_lines: Array[String] = []
@@ -128,7 +123,6 @@ func _export(root: Node, mode: String, output_path: String) -> String:
 		_emit_ext(ext_id, _ext_def[ext_id], res_lines)
 	_validate_budgets()
 	_write_asset_manifest(output_path)
-	_write_packages(output_path)
 
 	_free_defaults()
 
@@ -140,14 +134,19 @@ func _export(root: Node, mode: String, output_path: String) -> String:
 	out.append("<head>")
 	out.append("  <meta charset=\"utf-8\">")
 	out.append("  <title>VRWeb export</title>")
-	for module_line in _module_head_lines:
-		out.append("  " + module_line)
-	for script_def in _inline_scripts:
-		out.append("  <script type=\"%s\" id=\"%s\" data-base=\"%s\" data-mode=\"%s\">" \
-				% [_escape_attr(script_def.mime), _escape_attr(script_def.id),
-					_escape_attr(script_def.base), _escape_attr(script_def.runtime)])
-		out.append(str(script_def.source))
-		out.append("  </script>")
+	for script_def in _page_scripts:
+		var attrs := ' type="%s" id="%s"' % [_escape_attr(script_def.mime),
+				_escape_attr(script_def.id)]
+		if not str(script_def.src).is_empty():
+			attrs += ' src="%s"' % _escape_attr(script_def.src)
+		if not str(script_def.integrity).is_empty():
+			attrs += ' integrity="%s"' % _escape_attr(script_def.integrity)
+		if str(script_def.source).is_empty():
+			out.append("  <script%s></script>" % attrs)
+		else:
+			out.append("  <script%s>" % attrs)
+			out.append(str(script_def.source))
+			out.append("  </script>")
 	out.append("</head>")
 	out.append("<body>")
 	out.append(pad + "<vrwml mode=\"%s\">" % safe_mode)
@@ -176,8 +175,6 @@ func _export_vrwml(root: Node, output_path: String) -> String:
 	for ext_id in _ext_order:
 		_emit_ext(ext_id, _ext_def[ext_id], res_lines)
 	_write_asset_manifest(output_path)
-	if not _package_defs.is_empty() or not _inline_scripts.is_empty():
-		_report_error("standalone VRWML не включает исполняемые Script/module definitions")
 	_free_defaults()
 
 	var out: Array[String] = ["<vrwml>"]
@@ -209,9 +206,6 @@ func _export_vrweb_block(root: Node, mode: String, output_path: String) -> Strin
 		_emit_ext(ext_id, _ext_def[ext_id], res_lines)
 	_validate_budgets()
 	_write_asset_manifest(output_path)
-	_write_packages(output_path)
-	if not _module_head_lines.is_empty() or not _inline_scripts.is_empty():
-		_report_error("lossless HTML save не может менять Script/module definitions вне <vrwml>")
 	_free_defaults()
 
 	var out: Array[String] = ["<vrwml mode=\"%s\">" % safe_mode]
@@ -239,28 +233,9 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 		return
 
 	var public_class := VrwebExportRegistry.public_name(node)
-	var script_mode := str(node.get_meta(META_SCRIPT_MODE, ""))
-	if public_class == "" and _standalone \
-			and script_mode in [SCRIPT_MODE_INLINE, SCRIPT_MODE_PACKAGE]:
-		_report_error("Script узла %s нельзя встроить в data-only VRWML" % _node_label(node))
-		return
-
-	if public_class == "" and script_mode == SCRIPT_MODE_INLINE:
-		if _build_inline_component(node, depth, out):
-			return
-	if public_class == "" and script_mode == SCRIPT_MODE_PACKAGE:
-		if _build_package_component(node, depth, out):
-			return
-
-	# Scripting modules требуют явного opt-in: молча превратить scripted node в базовый ClassDB-тег
-	# особенно опасно — HTML выглядит рабочим, но всё поведение потеряно.
 	if public_class == "" and node.get_script() != null:
-		if _standalone:
-			_report_error("Script узла %s не имеет public VRWML-класса" % _node_label(node))
-		elif _profile == VrwebCompatibility.PROFILE_STRICT:
-			_report_error("Script узла %s не экспортирован; выберите inline/package" % _node_label(node))
-		else:
-			_report_warning("Script узла %s не экспортирован; выберите inline/package" % _node_label(node))
+		_report_compatibility_issue("локальный Godot Script узла %s не переносим и не экспортирован" \
+				% _node_label(node))
 
 	var cls := public_class if public_class != "" else node.get_class()
 	if _profile == VrwebCompatibility.PROFILE_STRICT and public_class == "" \
@@ -279,92 +254,26 @@ func _build_node(node: Node, depth: int, out: Array[String]) -> void:
 	out.append("%s</%s>" % [pad, cls])
 
 
-func _build_inline_component(node: Node, depth: int, out: Array[String]) -> bool:
-	var script = node.get_script()
-	var id := str(node.get_meta(META_SCRIPT_ID, ""))
-	if id.is_empty():
-		id = "inline_%d" % _inline_seq
-		_inline_seq += 1
-	var prepared := VrwebInlineExporter.prepare(script, id, node.get_class())
-	if not bool(prepared.ok):
-		_report_compatibility_issue("inline Script узла %s: %s" % [
-			_node_label(node), prepared.error])
-		return false
-	_inline_scripts.append(prepared.definition)
-	var pad := "  ".repeat(depth)
-	var parts: Array[String] = ["module=\"#%s\"" % _escape_attr(id), "class=\"default\""]
-	parts.append_array(_diff_attrs(node, node.get_class(), {}))
-	var attrs := " " + " ".join(parts)
-	var kids := node.get_children()
-	if kids.is_empty():
-		out.append("%s<VRWebComponent%s/>" % [pad, attrs])
-		return true
-	out.append("%s<VRWebComponent%s>" % [pad, attrs])
-	for child in kids:
-		_build_node(child, depth + 1, out)
-	out.append("%s</VRWebComponent>" % pad)
-	return true
-
-
-func _build_package_component(node: Node, depth: int, out: Array[String]) -> bool:
-	var script = node.get_script()
-	if not (script is GDScript):
-		_report_error("package Script узла %s не является GDScript" % _node_label(node))
-		return false
-	var id := str(node.get_meta(META_SCRIPT_ID, ""))
-	if id.is_empty():
-		id = "package_%d" % _package_seq
-		_package_seq += 1
-	var metadata := VrwebModuleMetadata.from_node(node, id)
-	var normalized := VrwebModuleMetadata.normalize(metadata)
-	if not bool(normalized.ok):
-		_report_error("package %s: %s" % [id, "; ".join(normalized.errors)])
-		return false
-	_package_defs.append({"id": id, "script": script, "base": node.get_class(),
-		"metadata": normalized.value})
-	_emit_component_node(node, id, depth, out)
-	return true
-
-
-func _emit_component_node(node: Node, module_id: String, depth: int, out: Array[String]) -> void:
-	var pad := "  ".repeat(depth)
-	var parts: Array[String] = ["module=\"#%s\"" % _escape_attr(module_id), "class=\"default\""]
-	parts.append_array(_diff_attrs(node, node.get_class(), {}))
-	var attrs := " " + " ".join(parts)
-	if node.get_children().is_empty():
-		out.append("%s<VRWebComponent%s/>" % [pad, attrs])
+func _collect_page_scripts(root: Node) -> void:
+	if root == null:
 		return
-	out.append("%s<VRWebComponent%s>" % [pad, attrs])
-	for child in node.get_children():
-		_build_node(child, depth + 1, out)
-	out.append("%s</VRWebComponent>" % pad)
-
-
-func _write_packages(output_path: String) -> void:
 	var ids := {}
-	for definition in _package_defs:
+	for raw in root.get_meta(META_PAGE_SCRIPTS, []):
+		if not raw is Dictionary:
+			_report_error("vrweb_page_scripts должен содержать Dictionary")
+			continue
+		var prepared := VrwebInlineExporter.prepare(raw)
+		if not bool(prepared.ok):
+			_report_error("page script: %s" % prepared.error)
+			continue
+		var definition: Dictionary = prepared.definition
 		if ids.has(definition.id):
-			_report_error("дублирующийся package id %s" % definition.id)
+			_report_error("дублирующийся page script id %s" % definition.id)
 			continue
 		ids[definition.id] = true
-		if output_path.is_empty():
-			_report_error("package %s требует output_path" % definition.id)
-			continue
-		var filename := str(definition.id) + ".vrmod"
-		var package_path := output_path.get_base_dir().path_join(filename)
-		var result := VrwebPackageExporter.build(definition.script, definition.id,
-				package_path, definition.base, VrwebModuleMetadata.DEFAULT_REQUIRES,
-				VrwebModuleMetadata.DEFAULT_OPTIONAL, definition.metadata)
-		if not bool(result.ok):
-			_report_error("package %s: %s" % [definition.id, result.error])
-			continue
-		_report.packages.append({"id": definition.id, "file": filename, "hash": result.hash,
-			"integrity": result.integrity, "files": result.files, "assets": result.assets,
-			"version": definition.metadata.version,
-			"permissions": definition.metadata.permissions,
-			"requires": definition.metadata.requires, "optional": definition.metadata.optional})
-		_module_head_lines.append('<VRWebModule id="%s" src="%s" integrity="%s" mode="trusted-gdscript"/>' \
-				% [_escape_attr(definition.id), _escape_attr(filename), _escape_attr(result.integrity)])
+		_page_scripts.append(definition)
+		_report.scripts.append({"id": definition.id,
+			"kind": "linked" if not str(definition.src).is_empty() else "inline"})
 
 
 func _report_error(message: String) -> void:
@@ -404,6 +313,9 @@ func _node_attrs(node: Node, cls: String) -> String:
 	var bindings: Dictionary = node.get_meta(VrwebExtResource.META_BINDINGS, {})
 	var skip_props := bindings.duplicate()
 	var parts: Array[String] = []
+	var element_id := str(node.get_meta(META_ELEMENT_ID, "")).strip_edges()
+	if not element_id.is_empty():
+		parts.append("id=\"%s\"" % _escape_attr(element_id))
 	# В standalone-документе имена участвуют в NodePath аппликаторов и потому семантичны.
 	# HTML world-export исторически их опускал — его output не меняем этой миграцией.
 	if _standalone and str(node.name) != "":

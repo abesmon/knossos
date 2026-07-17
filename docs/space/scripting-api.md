@@ -1,76 +1,63 @@
-# VRWeb Scripting API v1
+# VRWeb scripting API (`vrweb-luau/1`)
 
-`context` — переносимый контракт между scripting module и VRWeb-клиентом. Trusted GDScript также
-может пользоваться публичным Godot API, но внутренние классы/autoload-ы Knossos не являются API
-и не получают гарантий совместимости. Для trusted runtime `context` — compatibility boundary,
-а не security sandbox.
+Скрипт получает global table `document`. Все объекты сцены представлены opaque handles; их нельзя
+преобразовать в Godot `Object` или сохранить как движковую ссылку.
 
-## Capabilities
+## Scene
 
-| Capability | Facade | Статус |
-|---|---|---|
-| `vrweb/core/1` | `mount(context)`, `unmount()`, identity/lifecycle | stable |
-| `vrweb/scene/1` | `context.scene.root/find/is_valid` | stable, минимальный |
-| `vrweb/state/1` | `context.state` replicated schema/object/command/read/subscriptions | stable |
-| `vrweb/assets/1` | `context.assets.has/load/text/bytes` | stable |
-| `vrweb/timers/1` | `context.timers.start/cancel/cancel_all` | stable |
-| `vrweb/input/1` | `context.input.on_activate/off_activate` | stable, только activate |
-| `vrweb/log/1` | `context.log.debug/info/warning/error` | stable |
-| `vrweb/features/1` | `context.features.has/require` | stable |
-| `godot/engine/4` | публичный API Godot 4 в `trusted-gdscript` | runtime extension |
+- `document.query("#id") -> handle?`
+- `document.query_all("#id") -> {handle}`
+- `document.create(type, properties) -> handle?`
+- `handle.get(property)` / `handle.set(property, value)`
+- `handle.call(method, arguments)`
+- `handle.on("activate", callback, hint)`
+- `handle.destroy()` — только для созданного этим script realm объекта.
 
-Старые `context.has("lifecycle/1"|"scene-root/1"|"replicated-state/1"|...)` оставлены как
-совместимые aliases. Новый код использует `context.features.has("vrweb/.../1")`.
+Knossos v1 разрешает создание безопасного подмножества 3D nodes и методы `show`, `hide`, `play`,
+`stop`. Свойства проходят тот же content-policy фильтр, что атрибуты VRWML. HTML `id` адресует
+материализованный объект независимо от его Godot `name`. Запись read-only, служебных и
+несовместимых по типу свойств отклоняется до commit. Неуспешный `document.create` транзакционно
+удаляет заготовку, поэтому частично созданный объект не остаётся в сцене.
 
-Имя `context.log` остаётся частью стабильного контракта. В host-реализации facade разрешается
-динамически, чтобы не затенять глобальную функцию Godot `log()`, но для module-кода это по-прежнему
-обычное свойство с методами `debug/info/warning/error`.
+## Session
 
-## Manifest
+`document.session` — ограниченная по размеру сериализуемая table одной script identity. Она
+переносится при успешной hot replacement и исчезает при закрытии страницы. Также доступны
+`session_get(key, fallback)` и `session_set(key, value)`.
 
-Package объявляет обязательные и опциональные capabilities:
+## Distributed state
 
-```json
-{
-  "format": 1,
-  "id": "demo.lights",
-  "runtime": "trusted-gdscript",
-  "requires": ["vrweb/core/1", "vrweb/scene/1", "godot/engine/4"],
-  "optional": ["vrweb/state/1", "vrweb/input/1"],
-  "exports": {"default": {"script": "light_switch.gd", "base": "StaticBody3D"}}
-}
-```
+`document.state` использует тот же replicated-state subsystem, что декларативные state tags:
 
-Неизвестная обязательная capability останавливает только данный модуль до инстанцирования.
-Неизвестная optional capability видна через feature detection. Ошибка модуля не должна ломать
-статическую часть страницы.
+- `define(schema_id, definition)`;
+- `ensure(object_id, schema_id, initial, owner_user_id)`;
+- `read(object_id, schema_id)` и `revision(...)`;
+- `command(object_id, schema_id, version, command, args)`;
+- `on(object_id, schema_id, callback)`.
 
-## Input
+Wire ids namespaced script id. Регистрация и top-level commands staged до успешного запуска.
 
-`context.input.on_activate(target, callback, hint)` принимает только `target` из ветки
-компонента. В Knossos target должен быть физическим collider, на который попадает луч игрока.
-Host связывает его со своим input protocol; модуль не обращается к `Player`:
+## Остальной host API
 
-```gdscript
-func mount(context):
-    context.input.on_activate(self, func(_point):
-        context.state.command("demo", "switch", 1, "toggle")
-    , "Toggle shared light")
-```
+- `document.assets.resolve(relative_url)`;
+- `document.clock.set_timeout(seconds, callback)`;
+- `document.clock.set_interval(seconds, callback)`;
+- `document.clock.cancel(timer_id)`;
+- `document.player.get("position" | "flying")`;
+- `document.player.set_position(vector)`;
+- `document.log.debug/info/warning/error(value)`;
+- `document.features.has(capability)`;
+- `document.features.require(capability)`.
 
-Hover, drag, grab, axes, `fetch` и `storage` не входят в v1: capability расширяется после
-появления реального потребителя.
+Capability names MVP: `vrweb/core/1`, `vrweb/scene/1`, `vrweb/state/1`, `vrweb/player/1`,
+`vrweb/assets/1`, `vrweb/clock/1`, `vrweb/log/1`.
 
-## Package-demo
+## Ошибки и лимиты
 
-Открыть `vrwebresource://package_script.html`. Исходник —
-[`tests/fixtures/package_demo/light_switch.gd`](../../tests/fixtures/package_demo/light_switch.gd),
-готовый пакет — [`test_pages/lights.vrmod`](../../test_pages/lights.vrmod). Пересборка:
+Недоступная операция возвращает `nil`/`false`; скрипт не получает fallback-доступ к движку.
+Knossos ограничивает один source 256 KiB, страницу 32 скриптами, realm 256 handles, 64 timers,
+10 000 host calls, 75 ms top-level и 25 ms на callback. Текущий memory watchdog использует soft
+budget 16 MiB. Эти числа — политика reference client, не wire contract стандарта.
 
-```bash
-HOME=/tmp/knossos-godot-home godot --headless --path . \
-  --log-file /tmp/knossos-package-demo.log --script tests/build_package_demo.gd
-```
-
-Команда печатает integrity и hash. При изменении пакета новое значение integrity нужно перенести
-в `test_pages/package_script.html`; trust по старому exact hash намеренно не наследуется.
+Ошибки callback и CPU timeout локализуются в одном realm: он отключается и очищает выданные им
+handlers/timers/owned objects. Остальные скрипты и декларативная сцена продолжают работать.

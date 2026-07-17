@@ -45,16 +45,6 @@ static func build() -> Dictionary:
 	tags.append(_tag(VrwebFormat.SPAWN_POINT_TAG, "A spawn pose inside VRWebSpawner.", [
 		_attr("transform", "Godot Transform3D Variant literal."),
 	]))
-	tags.append(_tag("VRWebModule", "Trusted GDScript package declaration.", [
-		_attr("id", "Stable module id."),
-		_attr("src", "Relative or absolute .vrmod URL."),
-		_attr("integrity", "sha256-BASE64 integrity value."),
-		_attr("mode", "Runtime trust mode.", ["trusted-gdscript"]),
-	]))
-	tags.append(_tag("VRWebComponent", "Node implemented by an inline or packaged module.", [
-		_attr("module", "Module id, or #id for an inline script."),
-		_attr("class", "Exported module class; inline modules use default."),
-	] + _class_attributes("Node3D", true)))
 	for class_name_ in _sorted_keys(VrwebCompatibility.NODE_ALLOWLIST):
 		tags.append(_tag(class_name_,
 				"Godot %s node allowed by the local strict Maker Kit policy." % class_name_,

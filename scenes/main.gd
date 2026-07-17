@@ -7,7 +7,6 @@ extends Node
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
-const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/scripting_modules/scripting_module_permission_dialog.gd")
 
 @onready var _world: Node3D = $world
 @onready var _ui: MainUI = $UI
@@ -25,9 +24,8 @@ var _fetcher: PageFetcher
 # Загрузчик внешних CSS (docs/css-cascade.md). Постоянный (не в _world): стили нужны до
 # сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
 var _css_fetcher: CssFetcher
-var _module_fetcher: ScriptingModuleFetcher
-var _script_permission_dialog: ScriptingModulePermissionDialog
-var _script_permission_focus_token := 0
+var _script_fetcher: VrwebScriptFetcher
+var _script_runtime: VrwebLuauRuntime
 var _address_focus_token := 0
 var _settings_focus_token := 0
 var _chat_focus_token := 0
@@ -91,7 +89,7 @@ var _base_url: String = ""
 var _page_meta: Dictionary = {}
 # Фактические hashes executable modules текущей страницы. Пока runtime поддерживает inline
 # allow-all; структура уже пригодна для compatibility/trust UI следующих этапов.
-var _scripting_module_hashes: Dictionary = {}
+var _script_hashes: Dictionary = {}
 var _content_policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 # ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
 # консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
@@ -146,8 +144,8 @@ func _ready() -> void:
 
 	_css_fetcher = CssFetcher.new()
 	add_child(_css_fetcher)
-	_module_fetcher = ScriptingModuleFetcher.new()
-	add_child(_module_fetcher)
+	_script_fetcher = VrwebScriptFetcher.new()
+	add_child(_script_fetcher)
 
 	_player = PLAYER_SCENE.instantiate()
 	_player.aim_target_changed.connect(_on_aim_target_changed)
@@ -334,12 +332,8 @@ func _on_cancel() -> void:
 ## его выставит вызывающий (_on_cancel снимает, _navigate тут же поднимает под новую загрузку).
 func _cancel_load() -> void:
 	_fetcher.cancel()
-	if _module_fetcher != null:
-		_module_fetcher.cancel()
-	if is_instance_valid(_script_permission_dialog):
-		_script_permission_dialog.queue_free()
-		_script_permission_dialog = null
-	_restore_mouse_after_script_permission()
+	if _script_fetcher != null:
+		_script_fetcher.cancel()
 	_nav_id += 1
 
 
@@ -530,98 +524,32 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		else:
 			css_texts.append(css_by_url.get(PageFetcher.resolve_url(ref["href"], base_url), ""))
 	StyleResolver.resolve(doc, css_texts)
-	var module_collection := ScriptingModuleCollector.collect(doc, base_url)
-	for module_error in module_collection.errors:
-		Log.warn("modules", str(module_error))
+	var collection := VrwebScriptDeclaration.collect(doc, base_url)
+	for script_error in collection.errors:
+		Log.warn("scripts", str(script_error))
 	var nav := _nav_id
-	_set_status("Загрузка модулей (%d)…" % module_collection.modules.size())
-	_module_fetcher.fetch_all(module_collection.modules, final_url, func(module_result: Dictionary):
+	_set_status("Загрузка скриптов (%d)…" % collection.scripts.size())
+	_script_fetcher.fetch_all(collection.scripts, func(script_result: Dictionary):
 		if nav == _nav_id:
-			_materialize_page(doc, final_url, base_url, t0, module_result))
+			_materialize_page(doc, final_url, base_url, t0, script_result))
 
 
 func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
-		module_result: Dictionary) -> void:
+		script_result: Dictionary) -> void:
 	# Собственный синтаксис VRWeb: блок <vrwml> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
-	for module_error in module_result.errors:
-		Log.warn("modules", "%s: %s" % [str(module_error.get("module_id", "")),
-				str(module_error.get("code", ""))])
-	var fetched_modules: Array = module_result.modules
-	var runnable_modules: Array = []
-	for module in fetched_modules:
-		if str(module.get("kind", "")) == "package":
-			var unpacked := ScriptingModulePackage.unpack(module)
-			if bool(unpacked.ok):
-				runnable_modules.append(unpacked.module)
-			else:
-				Log.warn("modules", "%s: package %s" % [str(module.get("id", "")),
-						str(unpacked.error)])
-		else:
-			runnable_modules.append(module)
-	_authorize_scripting_modules(runnable_modules, final_url, func(allowed_modules: Array):
-		if not is_inside_tree() or final_url != _current_url:
-			return
-		_finish_materialize_page(doc, final_url, base_url, t0, allowed_modules))
-
-
-## Разделяет уже integrity-проверенные модули на известные allow/block и неизвестные. В ask
-## неизвестные показываются одним preflight; до ответа registry.prepare (компиляция) не зовётся.
-func _authorize_scripting_modules(modules: Array, page_url: String, done: Callable) -> void:
-	var origin := ScriptingModuleIntegrity.origin_of(page_url)
-	if origin.is_empty():
-		origin = page_url.get_base_dir()
-	var allowed: Array = []
-	var pending: Array = []
-	for module in modules:
-		var decision := Settings.scripting_module_decision(origin, str(module.get("id", "")),
-				str(module.get("hash", "")))
-		if decision == "allow":
-			allowed.append(module)
-		elif decision != "block":
-			pending.append(module)
-	if pending.is_empty():
-		done.call(allowed)
-		return
-	_set_status("Ожидание разрешения для %d скриптов…" % pending.size())
-	_script_permission_focus_token = _player.claim_mouse_focus("scripting_module_permission")
-	_script_permission_dialog = SCRIPT_PERMISSION_DIALOG.new()
-	add_child(_script_permission_dialog)
-	_script_permission_dialog.decisions_submitted.connect(func(decisions: Dictionary):
-		_script_permission_dialog = null
-		_restore_mouse_after_script_permission()
-		for module in pending:
-			var choice: Dictionary = decisions.get(str(module.get("id", "")), {})
-			var allow := bool(choice.get("allow", false))
-			if bool(choice.get("remember", false)):
-				Settings.remember_scripting_module_decision(origin, module, "allow" if allow else "block")
-			if allow:
-				allowed.append(module)
-		done.call(allowed), CONNECT_ONE_SHOT)
-	_script_permission_dialog.present(pending, page_url)
-
-
-func _restore_mouse_after_script_permission() -> void:
-	if is_instance_valid(_player):
-		_player.release_mouse_focus(_script_permission_focus_token)
-	_script_permission_focus_token = 0
+	for script_error in script_result.errors:
+		Log.warn("scripts", "%s: %s" % [str(script_error.get("script_id", "")),
+				str(script_error.get("code", ""))])
+	_finish_materialize_page(doc, final_url, base_url, t0, script_result.scripts)
 
 
 func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
-		runnable_modules: Array) -> void:
+		scripts: Array) -> void:
 	_set_loading(false)
 	_set_status("Сборка пространства…")
-	var module_registry := ScriptingModuleRegistry.new()
-	var module_prepared := module_registry.prepare(
-			runnable_modules, ScriptingModuleRegistry.ScriptMode.ALLOW_ALL)
-	for module_error in module_prepared.errors:
-		Log.warn("modules", str(module_error))
-	_scripting_module_hashes.clear()
-	for module in runnable_modules:
-		if not str(module.get("hash", "")).is_empty():
-			_scripting_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
-	var vrweb := VrwebBuilder.build(doc, base_url, module_registry, _content_policy)
+	var vrweb := VrwebBuilder.build(doc, base_url, _content_policy)
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
 	_vrweb_index = SceneHtml.build_page_index(doc)
@@ -635,6 +563,22 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
 	_rebuild_world(space, final_url, vrweb, base_url)
+	_script_runtime = VrwebLuauRuntime.new()
+	_script_runtime.name = "VrwebLuauRuntime"
+	_world.add_child(_script_runtime)
+	var script_root: Node = vrweb.get("root")
+	if script_root == null:
+		var generated_root := Node3D.new()
+		generated_root.name = "ScriptObjects"
+		_world.add_child(generated_root)
+		script_root = generated_root
+	_script_runtime.setup(script_root, _build_script_targets(vrweb), base_url, _player,
+			_content_policy)
+	var script_activation := _script_runtime.activate(scripts)
+	for script_error in script_activation.errors:
+		Log.warn("scripts", "%s/%s: %s" % [str(script_error.script_id),
+				str(script_error.phase), str(script_error.message)])
+	_script_hashes = _script_runtime.active_hashes()
 	# Переход назад/вперёд: возвращаем игрока туда, где он стоял на этой странице, поверх
 	# дефолтного спавна из _rebuild_world. Мир детерминирован по URL, поза остаётся валидной.
 	if _pending_restore_pose != null:
@@ -783,6 +727,10 @@ func _leave_loading_hub() -> void:
 ## Удаляет всё содержимое страницы, сохраняя локального Player как контроллер следующего мира.
 ## remove_child нужен сразу: queue_free удаляет из дерева только в конце кадра.
 func _clear_world() -> void:
+	if is_instance_valid(_script_runtime):
+		_script_runtime.close()
+	_script_runtime = null
+	_script_hashes.clear()
 	_world_gen = null
 	_html_layer = null
 	_page_space = {}
@@ -796,6 +744,21 @@ func _clear_world() -> void:
 			continue
 		_world.remove_child(child)
 		child.queue_free()
+
+
+## Stable document id -> materialized object map shared by scripting and live overlays.
+func _build_script_targets(vrweb: Dictionary) -> Dictionary:
+	var targets := {}
+	var node_map: Dictionary = vrweb.get("nodes", {})
+	for node_id in _vrweb_index.get("nodes", {}):
+		var record: Dictionary = _vrweb_index["nodes"][node_id]
+		var built = node_map.get(record.get("elem"))
+		if built != null:
+			targets[node_id] = built
+	for resource_id in vrweb.get("resources", {}):
+		if not targets.has(resource_id):
+			targets[resource_id] = vrweb["resources"][resource_id]
+	return targets
 
 
 func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:

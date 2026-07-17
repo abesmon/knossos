@@ -11,7 +11,7 @@ func _ready() -> void:
   <Resource id="Box" type="BoxMesh" size="Vector3(1,1,1)"/>
 </vrwml>
 """)
-	var built := VrwebBuilder.build(doc, "https://example.test/world", null, policy)
+	var built := VrwebBuilder.build(doc, "https://example.test/world", policy)
 	_eq(built.root != null, true, "allow-all policy preserves document materialization")
 	_eq(built.root.get_node_or_null("FromDocument") != null, true,
 			"document declaration remains allowed")

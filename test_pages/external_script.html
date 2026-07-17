@@ -2,16 +2,15 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>VRWeb external GDScript module</title>
-  <script type="application/vrweb+gdscript" id="external.tiny"
-          src="external_tiny.gd" data-base="Node3D"></script>
+  <title>VRWeb linked Luau script</title>
+  <script type="application/vrweb+luau" id="external.tiny"
+		  src="external_tiny.luau"></script>
 </head>
 <body>
   <vrwml mode="exclusive">
-    <VRWebComponent module="#external.tiny" class="default"
-                    name="ExternalComponent" marker="from-html" position="Vector3(0,1.7,-3)">
-      <Label3D name="ChildLabel" text="Loading external script..." font_size="48"/>
-    </VRWebComponent>
+    <Node3D id="external-root" name="ExternalRoot" position="Vector3(0,1.7,-3)">
+      <Label3D id="external-label" name="ExternalLabel" text="Loading external script..." font_size="48"/>
+    </Node3D>
 
     <Node3D name="Ground" position="Vector3(0,-0.1,0)">
       <MeshInstance3D mesh="SubResource:::GroundMesh" material_override="SubResource:::GroundMaterial"/>

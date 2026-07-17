@@ -2,52 +2,41 @@
 class_name VrwebInlineExporter
 extends RefCounted
 
-## Portable validation/preparation for the trusted single-file HTML delivery form. Tree and
-## property serialization remain VrwebExporter concerns; this class owns the code boundary.
+## Validates a portable page-script declaration for the HTML exporter.
 
-const MIME := "application/vrweb+gdscript"
-const RUNTIME := "trusted-gdscript"
+const MIME := "application/vrweb+luau"
+const MAX_SOURCE_BYTES := 256 * 1024
+const MAX_ID_BYTES := 128
 
 
-static func prepare(script: Variant, module_id: String, base_class: String) -> Dictionary:
-	if not (script is GDScript) or str(script.source_code).is_empty():
-		return _error("inline Script не является source GDScript")
-	var metadata := VrwebModuleMetadata.normalize({
-		"id": module_id,
-		"version": VrwebModuleMetadata.DEFAULT_VERSION,
-		"permissions": [],
-		"requires": VrwebModuleMetadata.DEFAULT_REQUIRES,
-		"optional": VrwebModuleMetadata.DEFAULT_OPTIONAL,
-	})
-	if not bool(metadata.ok):
-		return _error("; ".join(metadata.errors))
-	var source := str(script.source_code)
-	var lowered := source.to_lower()
-	if lowered.contains("</script"):
-		return _error("source содержит </script; используйте package")
-	if _has_directive(source, "@tool"):
-		return _error("@tool недопустим в inline module; используйте package")
-	if _has_directive(source, "class_name"):
-		return _error("class_name недопустим: публичное имя задаёт module id")
-	if source.contains("res://") or source.contains("user://"):
-		return _error("абсолютная resource-ссылка недопустима в inline module; используйте package")
-	if _matches(source, "(?m)^\\s*extends\\s+['\"]"):
-		return _error("extends внешнего script недопустим в inline module; используйте package")
-	if _matches(source, "\\b(?:preload|load)\\s*\\("):
-		return _error("inline module не поддерживает load/preload dependencies; используйте package")
+static func prepare(raw: Dictionary) -> Dictionary:
+	var script_id := str(raw.get("id", ""))
+	var source := str(raw.get("source", ""))
+	var src := str(raw.get("src", "")).strip_edges()
+	if not _valid_id(script_id):
+		return _error("script id отсутствует или недопустим")
+	if src.is_empty() == source.is_empty():
+		return _error("нужно указать ровно одно из source или src")
+	if source.to_utf8_buffer().size() > MAX_SOURCE_BYTES:
+		return _error("source превышает лимит")
+	if source.to_lower().contains("</script"):
+		return _error("inline source содержит </script; используйте linked script")
 	return {"ok": true, "error": "", "definition": {
-		"id": module_id, "base": base_class, "source": source,
-		"mime": MIME, "runtime": RUNTIME,
+		"id": script_id, "source": source, "src": src,
+		"integrity": str(raw.get("integrity", "")).strip_edges(), "mime": MIME,
 	}}
 
 
-static func _has_directive(source: String, directive: String) -> bool:
-	return _matches(source, "(?m)^\\s*%s(?:\\s|$)" % directive)
-
-
-static func _matches(source: String, pattern: String) -> bool:
-	var regex := RegEx.new()
-	return regex.compile(pattern) == OK and regex.search(source) != null
+static func _valid_id(value: String) -> bool:
+	if value.is_empty() or value.to_utf8_buffer().size() > MAX_ID_BYTES:
+		return false
+	for character in value:
+		if not (character >= "a" and character <= "z") \
+				and not (character >= "A" and character <= "Z") \
+				and not (character >= "0" and character <= "9") \
+				and character not in [".", "_", "-"]:
+			return false
+	return true
 
 
 static func _error(message: String) -> Dictionary:

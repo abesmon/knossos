@@ -27,19 +27,12 @@
 | Открыть `.html`/`.htm` из FileSystem | открывает `<vrwml>` как editable scene, а HTML вокруг — как видимый read-only procedural preview |
 | **Сохранить импортированный HTML** / Save | заменяет только исходный `<vrwml>…</vrwml>`, не нормализуя остальной HTML |
 
-### Аудит пользовательских скриптов
+### Page scripts
 
-`script` не сериализуется как обычное свойство. Автор явно выбирает режим scripted node:
-
-| Режим | Экспорт |
-|---|---|
-| `off` (по умолчанию) | Script не публикуется; diagnostics сообщает о потере поведения |
-| `inline` | source попадает в `<script type="application/vrweb+gdscript">`, узел — в `<VRWebComponent module="#id" class="default">` |
-| `package` | GDScript и literal relative file-зависимости собираются в sibling `.vrmod`; HTML ссылается через `<VRWebModule integrity="sha256-…">` |
-
-Exporter отвечает только за подготовку source/package и structured diagnostics. Семантика
-`VRWebModule`/`VRWebComponent`, manifest, trust, ограничения GDScript, lifecycle и runtime
-принадлежат [единому документу модулей](space/scripting-modules.md).
+Godot `Script` узла не переносим и не сериализуется. HTML exporter читает metadata корня
+`vrweb_page_scripts`: массив словарей `{id, source}` либо `{id, src, integrity?}`. Он выпускает
+обычные `<script type="application/vrweb+luau">`; queryable scene id задаётся metadata узла
+`vrweb_id`. Подробнее — [VRWeb scripting](space/scripting.md).
 
 ---
 
@@ -236,7 +229,7 @@ external-resource tooling.
 [едином roadmap](roadmap.md#p1--exporter-и-внешние-ресурсы).
 
 Оставшиеся release-проверки Maker Kit также ведутся в
-[общем roadmap](roadmap.md#p1--vrweb-maker-kit-будущая-release-проверка). Format constants, public-class
-registry и package integrity находятся в переносимом addon.
+[общем roadmap](roadmap.md#p1--vrweb-maker-kit-будущая-release-проверка). Format constants,
+public-class registry и page-script exporter находятся в переносимом addon.
 Rich HTML preview, avatar import и external preview вынесены в Knossos integration adapter,
 который подключается только в референсном проекте через `vrweb/tools/integration_script`.

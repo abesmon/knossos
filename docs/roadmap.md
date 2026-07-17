@@ -18,18 +18,18 @@
 
 ## Где проект находится сейчас
 
-**Текущий продуктовый этап: поздний Milestone 3 — Custom Worlds hardening и подготовка
-Trusted Modules MVP.**
+**Текущий продуктовый этап: поздний Milestone 3 — Custom Worlds hardening и переносимый
+Luau scripting MVP.**
 
 Уже работают singleplayer 3D browser, multiplayer с текстом и голосом, идентичность домашних
 серверов, аватары, декларативные VRWeb-сцены, видео, replicated state, persistence, editor
-exporter и базовый trusted scripting vertical slice. Активная работа сосредоточена на четырёх
+exporter и sandboxed page scripting vertical slice. Активная работа сосредоточена на четырёх
 связанных направлениях:
 
 1. безопасный opt-in профиль декларативного контента;
-2. multiplayer-совместимость scripting modules;
+2. доставка realtime script revisions и multiplayer-совместимость hashes;
 3. navigation/redirect hardening и hostile regressions;
-4. E2E и platform matrix для Trusted Modules MVP.
+4. E2E и platform matrix для Luau runtime.
 
 ## Продуктовые milestones
 
@@ -61,17 +61,16 @@ exporter и базовый trusted scripting vertical slice. Активная р
 - editor exporter и preview;
 - home server, подтверждённая идентичность и анонимный режим;
 - persistence и personal spaces;
-- inline/src/package scripting modules, `.vrmod`, integrity/cache/trust/lifecycle;
-- public Scripting API v1 и self-contained package-demo.
+- inline/linked Luau, opt-in integrity, isolated realms и staged lifecycle;
+- portable `document` API v1, client quotas и атомарная hot replacement.
 
-До завершения milestone остаются P0/P1-блоки ниже и server-to-server federation. Trusted
-GDScript остаётся явно доверенным режимом с правами процесса; настоящий sandbox относится к
-отдельному Milestone 4.
+До завершения milestone остаются P0/P1-блоки ниже и server-to-server federation. Скриптинг
+страницы больше не зависит от Godot; user permissions и instance ACL остаются следующими слоями.
 
-### Milestone 4 — Sandboxed extensibility и расширение экосистемы — будущее
+### Milestone 4 — Расширение sandboxed extensibility и экосистемы — будущее
 
-- capability sandbox без raw Godot Object;
-- безопасный запуск модулей неизвестного происхождения;
+- WASM как отдельный эффективный runtime profile при появлении сценария;
+- user permissions и instance ACL поверх capability pool клиента;
 - расширенные представления клиента: VR/full-body и облегчённый voice-only клиент;
 - дальнейшие федеративные и social-возможности поверх открытых контрактов.
 
@@ -99,33 +98,32 @@ GDScript остаётся явно доверенным режимом с пра
 Связанные контракты: [content-policy.md](space/content-policy.md),
 [security.md](security.md), [vrwml-tags.md](space/vrwml-tags.md).
 
-### P0 — Scripting preflight и transport boundaries
+### P0 — Scripting transport boundaries
 
-- [ ] Показывать runtime и permissions каждого пакета в preflight; сохранить default deny и
-  добавить UI integration test.
-- [ ] Завершить redirect policy: повторно проверять origin/integrity на каждом переходе и
-  запрещать downgrade.
-- [ ] Не принимать executable bytes от пира как авторитетный источник: каждый клиент получает
-  URL/hash из документа, скачивает сам и применяет собственную policy.
-- [ ] Добавить hostile fixtures: raw script, неверный manifest JSON, ZIP traversal/collision,
-  zip bomb, oversized asset и отмену навигации во время fetch/compile.
+- [ ] Завершить redirect policy для linked scripts и запрещать downgrade.
+- [ ] Не принимать source bytes от пира как авторитетный источник: каждый клиент получает
+  URL/hash из документа, скачивает сам и применяет собственные limits.
+- [ ] Добавить hostile fixtures: oversized source, malformed integrity, cancellation во время
+  fetch/compile, callback timeout и memory pressure.
+- [ ] Оценить hard allocator ceiling в Luau GDExtension; это client hardening без изменения
+  стандарта.
 
-### P1 — Module identity и multiplayer compatibility
+### P1 — Script identity и multiplayer compatibility
 
-- [ ] Включить ordered `(module id, runtime, hash)` в room/page identity.
+- [ ] Включить ordered `(script id, runtime profile, hash)` в room/page identity.
 - [ ] При mismatch показывать явный compatibility outcome.
 - [ ] Не регистрировать несовместимую replicated schema молча.
-- [ ] Проверить двумя чистыми клиентами package-переключатель, late join, смену authority,
+- [ ] Проверить двумя чистыми клиентами state-driven script behavior, late join, смену authority,
   refresh, reconnect и уход со страницы.
 
-Критерий готовности: одинаковые hashes синхронизируют модульный переключатель; другой hash
+Критерий готовности: одинаковые hashes синхронизируют поведение; другой hash
 получает видимый отказ/несовместимость до сетевой регистрации схемы.
 
 ### P1 — Navigation pipeline
 
-- [ ] Проверять navigation generation token на стадиях fetch → validate → trust → compile →
+- [ ] Проверять navigation generation token на стадиях fetch → integrity → compile →
   mount/materialize.
-- [ ] Добавить loading/cancel UI с текущей стадией и модулем.
+- [ ] Добавить loading/cancel UI с текущей стадией и script id.
 - [ ] Локализовать compile/mount failure: статическая часть страницы продолжает работать.
 - [ ] Покрыть refresh/navigation во время fetch и поздние callbacks после unmount.
 
@@ -136,10 +134,7 @@ GDScript остаётся явно доверенным режимом с пра
   `load()`/`preload()`.
 - [ ] Проверить bundled images/audio/glTF/GLB и сложные import options в editor/export builds
   на macOS, Windows и Linux.
-- [ ] Подтвердить byte-identical `.vrmod` ZIP на поддерживаемых платформах.
 - [ ] Добавить в export report явные skipped files с причинами и полный dependency graph.
-- [ ] Добавить явную диагностику autoload/native libs и выхода package dependencies за полный
-  разрешённый graph.
 - [ ] Запускать preview через обычный runtime и content policy клиента.
 - [ ] Добавить save-hook, автоматически снимающий preview-свойства перед сохранением.
 - [ ] Добавить экспорт declarative events/действий после фиксации их контракта.
@@ -154,17 +149,15 @@ GDScript остаётся явно доверенным режимом с пра
 ### P2 — Release confidence
 
 - [ ] E2E: exporter → HTTP fixture → чистая exported build → два multiplayer-клиента.
-- [ ] Покрыть local/HTTP/redirect, inline/src/package, две версии и два модуля с одинаковыми
-  внутренними именами.
-- [ ] Добавить debug UI активных модулей, безопасные логи `origin/module/hash` и метрики
+- [ ] Покрыть local/HTTP/redirect, inline/linked и две ревизии с одинаковыми script ids.
+- [ ] Добавить debug UI активных scripts, безопасные логи `origin/script/hash` и метрики
   download/compile/mount.
-- [ ] После MVP определить широкие origin rules и импорт подписанных trust lists/repositories,
-  не меняющих локальные решения без явной подписки пользователя.
+- [ ] Спроектировать user permissions и instance ACL как пересечение с capability pool клиента.
 - [ ] Подтвердить runtime compilation и структурированные ошибки в CI-артефактах трёх платформ.
-- [ ] Проверить каталог только из `index.html` и `lights.vrmod` в чистой сборке и полную очистку
+- [ ] Проверить каталог из HTML и linked `.luau` в чистой сборке и полную очистку
   nodes/signals/timers при навигации.
 
-`context.fetch` и namespaced `context.storage` с quota добавляются после появления первого
+`document.fetch` и persistent namespaced storage с quota добавляются после появления первого
 реального потребителя; они не блокируют текущий Scripting API v1.
 
 ## Multiplayer, identity и persistence
@@ -210,7 +203,7 @@ GDScript остаётся явно доверенным режимом с пра
   поддерживаемого набора мутаций.
 - [ ] GC persisted overlay objects после подтверждения, что база всех peers достигла нужной rev.
 - [ ] Пользовательская policy доверия действиям неподтверждённых peers.
-- [ ] Выдать rank scripting modules через версионированную capability после определения модели
+- [ ] Выдать право публикации script revisions через версионированную capability после определения модели
   доверия.
 
 ## Client и media

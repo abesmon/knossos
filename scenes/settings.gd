@@ -133,15 +133,10 @@ var _page_meta: Dictionary = {}
 ## превью (отбрасываем колбэки, пришедшие после смены инстанса).
 var _thumb_loader: ImageLoader = null
 var _thumb_url: String = ""
-var _security_tab: ScrollContainer
-var _script_policy: OptionButton
-var _script_rules: VBoxContainer
-var _script_rules_empty: Label
 
 
 func _ready() -> void:
 	hide()
-	_build_security_tab()
 	_setup_tabs()
 	_save.pressed.connect(_on_save)
 	_cancel.pressed.connect(_close)
@@ -270,7 +265,6 @@ func open(instance_url: String = "", page_meta: Dictionary = {}) -> void:
 	_refresh_users()
 	_update_world_availability()
 	_refresh_world()
-	_refresh_security_rules()
 	show()
 	# Чат-лог добавляется в UI позже настроек, поэтому по умолчанию рисуется поверх них.
 	# Поднимаем оверлей на передний план среди сиблингов, чтобы настройки перекрывали всё.
@@ -341,7 +335,6 @@ func _setup_tabs() -> void:
 	_tabs.move_child(_world_tab, 1)
 	_tabs.move_child(_users_tab, 2)
 	_tabs.move_child(_account_tab, 4)  # после «Сети» — обе про серверы
-	_tabs.move_child(_security_tab, 5)
 	var titles := {
 		"GeneralSettings": "Основные",
 		"WorldSettings": "Мир",
@@ -356,108 +349,6 @@ func _setup_tabs() -> void:
 		var ctrl := _tabs.get_tab_control(i)
 		if ctrl != null and titles.has(ctrl.name):
 			_tabs.set_tab_title(i, titles[ctrl.name])
-
-
-# --- Безопасность и приватность ---
-
-func _build_security_tab() -> void:
-	_security_tab = ScrollContainer.new()
-	_security_tab.name = "SecuritySettings"
-	_security_tab.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_tabs.add_child(_security_tab)
-	var content := VBoxContainer.new()
-	content.name = "Content"
-	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 12)
-	_security_tab.add_child(content)
-	var title := Label.new()
-	title.text = "Код страниц"
-	title.add_theme_font_size_override("font_size", 18)
-	content.add_child(title)
-	var warning := Label.new()
-	warning.text = "VRWeb-модули могут выполнять код с правами Knossos. Integrity подтверждает неизменность файла, но не его безопасность."
-	warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warning.add_theme_color_override("font_color", Color(1.0, 0.72, 0.28))
-	content.add_child(warning)
-	var policy_row := HBoxContainer.new()
-	var policy_label := Label.new()
-	policy_label.text = "Запуск скриптов"
-	policy_label.custom_minimum_size.x = 190
-	policy_row.add_child(policy_label)
-	_script_policy = OptionButton.new()
-	_script_policy.add_item("Спрашивать для неизвестных (рекомендуется)", 0)
-	_script_policy.add_item("Разрешать все", 1)
-	_script_policy.add_item("Запрещать все", 2)
-	_script_policy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	policy_row.add_child(_script_policy)
-	content.add_child(policy_row)
-	var behavior := Label.new()
-	behavior.text = "Решение хранится для origin страницы, id модуля и точного SHA-256. После обновления скрипта Knossos спросит снова. Закрытие запроса безопасно запрещает все неизвестные ресурсы."
-	behavior.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	behavior.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
-	content.add_child(behavior)
-	var rules_header := HBoxContainer.new()
-	var rules_title := Label.new()
-	rules_title.text = "Сохранённые решения"
-	rules_title.add_theme_font_size_override("font_size", 16)
-	rules_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rules_header.add_child(rules_title)
-	var clear := Button.new()
-	clear.text = "Удалить все решения"
-	clear.pressed.connect(func(): Settings.clear_scripting_module_rules(); _refresh_security_rules())
-	rules_header.add_child(clear)
-	content.add_child(rules_header)
-	_script_rules = VBoxContainer.new()
-	_script_rules.add_theme_constant_override("separation", 8)
-	content.add_child(_script_rules)
-	_script_rules_empty = Label.new()
-	_script_rules_empty.text = "Сохранённых разрешений и запретов пока нет."
-	content.add_child(_script_rules_empty)
-
-
-func _refresh_security_rules() -> void:
-	if _script_policy == null:
-		return
-	var policy_index: int = {
-		Settings.SCRIPT_POLICY_ASK: 0,
-		Settings.SCRIPT_POLICY_ALLOW_ALL: 1,
-		Settings.SCRIPT_POLICY_BLOCK_ALL: 2,
-	}.get(Settings.scripting_module_policy, 0)
-	_script_policy.select(policy_index)
-	for child in _script_rules.get_children():
-		child.queue_free()
-	_script_rules_empty.visible = Settings.scripting_module_rules.is_empty()
-	var keys := Settings.scripting_module_rules.keys()
-	keys.sort_custom(func(a, b):
-		return int(Settings.scripting_module_rules[a].get("updated_at", 0)) > int(Settings.scripting_module_rules[b].get("updated_at", 0)))
-	for key in keys:
-		var rule: Dictionary = Settings.scripting_module_rules[key]
-		var row := HBoxContainer.new()
-		var info := VBoxContainer.new()
-		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var headline := Label.new()
-		headline.text = ("Разрешено" if str(rule.get("decision", "")) == "allow" else "Запрещено") \
-				+ " · " + str(rule.get("module_id", "")) + " · " + str(rule.get("origin", ""))
-		headline.add_theme_color_override("font_color", Color(0.45, 0.85, 0.55) \
-				if str(rule.get("decision", "")) == "allow" else Color(0.95, 0.55, 0.5))
-		info.add_child(headline)
-		var details := Label.new()
-		details.text = "%s · SHA-256 %s…" % [str(rule.get("resource_url", "inline")), str(rule.get("hash", "")).left(12)]
-		details.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		details.tooltip_text = str(rule.get("resource_url", "")) + "\nSHA-256: " + str(rule.get("hash", ""))
-		details.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
-		info.add_child(details)
-		row.add_child(info)
-		var forget := Button.new()
-		forget.text = "Забыть"
-		forget.pressed.connect(_forget_security_rule.bind(str(key)))
-		row.add_child(forget)
-		_script_rules.add_child(row)
-
-
-func _forget_security_rule(key: String) -> void:
-	Settings.forget_scripting_module_rule(key)
-	_refresh_security_rules()
 
 
 # --- Раздел «Мир» (инфо об инстансе) ---
@@ -1181,8 +1072,6 @@ func _on_save() -> void:
 	# Пустой адрес аватара → дефолт из пака (vrwebavatar://1).
 	var avatar := _avatar.text.strip_edges()
 	Settings.avatar_uri = avatar if avatar != "" else Settings.DEFAULT_AVATAR_URI
-	Settings.scripting_module_policy = [Settings.SCRIPT_POLICY_ASK, Settings.SCRIPT_POLICY_ALLOW_ALL,
-			Settings.SCRIPT_POLICY_BLOCK_ALL][_script_policy.selected]
 	Settings.save()
 	_close()
 

@@ -17,7 +17,7 @@ func _import_scene(path: String, _flags: int, _options: Dictionary) -> Object:
 		return null
 	var policy := AvatarVrwmlPolicy.new()
 	var base_url := PageFetcher.LOCAL_SCHEME + ProjectSettings.globalize_path(path)
-	var built := VrwebBuilder.build(HtmlParser.parse(text), base_url, null, policy)
+	var built := VrwebBuilder.build(HtmlParser.parse(text), base_url, policy)
 	var holder := built.get("root") as Node3D
 	if policy.has_errors():
 		push_warning("VRWML import skipped unsupported parts: %s (%s)" % [path, policy.summary()])

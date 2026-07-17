@@ -22,11 +22,6 @@ var _integration_slot: VBoxContainer
 var _prop_edit: LineEdit
 var _url_edit: LineEdit
 var _type_opt: OptionButton
-var _module_id_edit: LineEdit
-var _module_version_edit: LineEdit
-var _module_permissions_edit: LineEdit
-var _module_requires_edit: LineEdit
-var _module_optional_edit: LineEdit
 var _status: Label
 var _file_dialog: EditorFileDialog
 var _knossos_file_dialog: EditorFileDialog
@@ -87,27 +82,6 @@ func _build_dock() -> void:
 	_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_dock_scroll.add_child(_dock)
 
-	_dock.add_child(_heading("Script выбранного узла"))
-	var trusted_note := Label.new()
-	trusted_note.text = "Trusted GDScript получает права процесса. permissions — описание для review, не sandbox. Inline: один файл; package: зависимости и manifest."
-	trusted_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_dock.add_child(trusted_note)
-	_dock.add_child(_button("Экспортировать inline", _on_script_inline_pressed))
-	_dock.add_child(_button("Экспортировать package", _on_script_package_pressed))
-	_dock.add_child(_button("Не экспортировать Script", _on_script_off_pressed))
-	_module_id_edit = _module_edit("module id (например, acme.lights)")
-	_dock.add_child(_module_id_edit)
-	_module_version_edit = _module_edit("version (SemVer, например 1.0.0)")
-	_dock.add_child(_module_version_edit)
-	_module_permissions_edit = _module_edit("permissions через запятую")
-	_dock.add_child(_module_permissions_edit)
-	_module_requires_edit = _module_edit("required capabilities через запятую")
-	_dock.add_child(_module_requires_edit)
-	_module_optional_edit = _module_edit("optional capabilities через запятую")
-	_dock.add_child(_module_optional_edit)
-	_dock.add_child(_button("Применить metadata модуля", _on_module_metadata_pressed))
-
-	_dock.add_child(_sep())
 	_dock.add_child(_heading("Внешний ресурс → выбранный узел"))
 	_prop_edit = LineEdit.new()
 	_prop_edit.placeholder_text = "свойство (напр. texture); пусто = ExtScene"
@@ -292,8 +266,8 @@ func _on_export_path_chosen(path: String) -> void:
 	var warnings: Array = report.get("warnings", [])
 	var suffix := "; warnings: %d — смотрите Output" % warnings.size() \
 			if not warnings.is_empty() else ""
-	_say("Экспортировано: %s; packages: %d%s" % [
-		path, report.get("packages", []).size(), suffix])
+	_say("Экспортировано: %s; scripts: %d%s" % [
+		path, report.get("scripts", []).size(), suffix])
 	_show_export_review(report, path, true)
 
 
@@ -392,15 +366,12 @@ func _show_export_review(report: Dictionary, path: String, written: bool) -> voi
 		"Output: %s" % path,
 		"Profile: %s (policy %s)" % [report.get("profile", ""),
 			report.get("policy_version", "")],
-		"Packages: %d" % report.get("packages", []).size(),
+		"Scripts: %d" % report.get("scripts", []).size(),
 		"Assets: %d" % report.get("assets", []).size(),
 	]
 	var output_file: Dictionary = report.get("output_file", {})
 	if not output_file.is_empty():
 		lines.append("Output SHA-256: %s" % output_file.get("sha256", ""))
-	for package in report.get("packages", []):
-		lines.append("Package: %s; SHA-256: %s; files: %d" % [
-			package.get("file", ""), package.get("hash", ""), package.get("files", []).size()])
 	var asset_manifest: Dictionary = report.get("asset_manifest", {})
 	if not asset_manifest.is_empty():
 		lines.append("Asset manifest: %s; SHA-256: %s" % [asset_manifest.get("file", ""),
@@ -429,94 +400,8 @@ func _sha256_text(content: String) -> String:
 	return context.finish().hex_encode()
 
 
-func _on_script_inline_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if not (node.get_script() is GDScript):
-		_say("У выбранного узла нет GDScript.")
-		return
-	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_INLINE)
-	_mark_dirty()
-	_say("Script «%s» будет экспортирован inline." % node.name)
-
-
-func _on_script_off_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if node.has_meta(VrwebExporter.META_SCRIPT_MODE):
-		node.remove_meta(VrwebExporter.META_SCRIPT_MODE)
-	_mark_dirty()
-	_say("Script «%s» не будет экспортирован." % node.name)
-
-
-func _on_script_package_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if not (node.get_script() is GDScript):
-		_say("У выбранного узла нет GDScript.")
-		return
-	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_PACKAGE)
-	_mark_dirty()
-	_say("Script «%s» будет экспортирован в .vrmod." % node.name)
-
-
 func _on_selection_changed() -> void:
-	_load_module_metadata(_selected_node())
-
-
-func _load_module_metadata(node: Node) -> void:
-	if _module_id_edit == null:
-		return
-	var enabled := node != null and node.get_script() is GDScript
-	for field in [_module_id_edit, _module_version_edit, _module_permissions_edit,
-			_module_requires_edit, _module_optional_edit]:
-		field.editable = enabled
-	if not enabled:
-		_module_id_edit.text = ""
-		_module_version_edit.text = ""
-		_module_permissions_edit.text = ""
-		_module_requires_edit.text = ""
-		_module_optional_edit.text = ""
-		return
-	var metadata := VrwebModuleMetadata.from_node(node, _module_fallback_id(node))
-	_module_id_edit.text = metadata.id
-	_module_version_edit.text = metadata.version
-	_module_permissions_edit.text = VrwebModuleMetadata.list_text(metadata.permissions)
-	_module_requires_edit.text = VrwebModuleMetadata.list_text(metadata.requires)
-	_module_optional_edit.text = VrwebModuleMetadata.list_text(metadata.optional)
-
-
-func _on_module_metadata_pressed() -> void:
-	var node := _selected_node()
-	if node == null or not (node.get_script() is GDScript):
-		_say("Выберите узел с GDScript.")
-		return
-	var errors := VrwebModuleMetadata.apply_to_node(node, {
-		"id": _module_id_edit.text,
-		"version": _module_version_edit.text,
-		"permissions": VrwebModuleMetadata.parse_list(_module_permissions_edit.text),
-		"requires": VrwebModuleMetadata.parse_list(_module_requires_edit.text),
-		"optional": VrwebModuleMetadata.parse_list(_module_optional_edit.text),
-	})
-	if not errors.is_empty():
-		_say("Metadata не сохранена: %s" % "; ".join(errors))
-		return
-	_mark_dirty()
-	_say("Metadata модуля «%s» сохранена." % _module_id_edit.text)
-
-
-func _module_fallback_id(node: Node) -> String:
-	var candidate := str(node.name).to_snake_case()
-	var safe := ""
-	for character in candidate:
-		safe += character if character.to_lower() in \
-				"abcdefghijklmnopqrstuvwxyz0123456789_.-" else "_"
-	if safe.is_empty() or not safe[0].to_lower() in "abcdefghijklmnopqrstuvwxyz_":
-		safe = "module_" + safe
-	return safe
+	pass
 
 
 func _on_bind_pressed() -> void:
@@ -599,7 +484,6 @@ func _save_external_data() -> void:
 func _on_editor_scene_changed(root: Node) -> void:
 	if _integration != null and _integration.has_method("on_scene_changed"):
 		_integration.call("on_scene_changed", root)
-	_load_module_metadata(null)
 
 
 func _selected_node() -> Node:
@@ -627,13 +511,6 @@ func _button(text: String, handler: Callable) -> Button:
 	button.text = text
 	button.pressed.connect(handler)
 	return button
-
-
-func _module_edit(placeholder: String) -> LineEdit:
-	var edit := LineEdit.new()
-	edit.placeholder_text = placeholder
-	edit.editable = false
-	return edit
 
 
 func _sep() -> HSeparator:

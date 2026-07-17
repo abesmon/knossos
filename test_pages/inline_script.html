@@ -2,25 +2,19 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>VRWeb inline module</title>
-  <script type="application/vrweb+gdscript" id="demo.inline" data-base="Node3D">
-extends Node3D
-var marker := "source-default"
-func answer() -> int: return 42
-func presentation_text() -> String: return "INLINE SCRIPT: %s = %d" % [marker, answer()]
-func _ready() -> void:
-    var label := get_node_or_null("ChildLabel") as Label3D
-    if label != null:
-        label.text = presentation_text()
-        label.modulate = Color(0.35, 1.0, 0.65)
+  <title>VRWeb inline Luau script</title>
+  <script type="application/vrweb+luau" id="demo.inline">
+local label = document.query("#inline-label")
+if label then
+  label.set("text", "INLINE LUAU SCRIPT: 42")
+end
   </script>
 </head>
 <body>
   <vrwml mode="exclusive">
-    <VRWebComponent module="#demo.inline" class="default" name="InlineComponent"
-                    marker="from-html" position="Vector3(0,1.7,-3)">
-      <Label3D name="ChildLabel" text="Loading inline script..." font_size="48"/>
-    </VRWebComponent>
+    <Node3D id="inline-root" name="InlineRoot" position="Vector3(0,1.7,-3)">
+      <Label3D id="inline-label" name="InlineLabel" text="Loading inline script..." font_size="48"/>
+    </Node3D>
 
     <Node3D name="Ground" position="Vector3(0,-0.1,0)">
       <MeshInstance3D mesh="SubResource:::GroundMesh" material_override="SubResource:::GroundMaterial"/>

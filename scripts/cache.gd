@@ -8,8 +8,7 @@ extends Object
 
 ## Каталоги кэша (как объявлены в AvatarResolver.CACHE_DIR, VrwebVideoPlayer.CACHE_DIR
 ## и BlobStore.CACHE_DIR).
-const DIRS := ["user://avatar_cache/", "user://video_cache/", "user://blob_cache/",
-	"user://scripting_module_cache/"]
+const DIRS := ["user://avatar_cache/", "user://video_cache/", "user://blob_cache/"]
 
 
 ## Суммарный размер всех каталогов кэша в байтах.

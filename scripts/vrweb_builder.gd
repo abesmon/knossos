@@ -46,7 +46,6 @@ const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
 const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
 const REPLICATED_STATE_TAG := "VRWebReplicatedState"
 const STATE_ACTION_TAG := "VRWebStateAction"
-const COMPONENT_TAG := "VRWebComponent"
 const IMAGE_TAG := "VRWebImage"
 const BLOB_TAG := "VRWebBlob"
 const SUBRESOURCE_PREFIX := "SubResource:::"
@@ -77,6 +76,7 @@ const SPAWN_MODE_FIRST := "first"
 ## Атрибуты <Resource>/<ExtResource>, которые задают сам ресурс, а не его свойства.
 ## src — атрибут-ссылка у <ExtScene>.
 const RESOURCE_RESERVED := {"id": true, "type": true, "path": true, "src": true}
+const NODE_RESERVED := {"id": true}
 
 ## Атрибуты <VRWebMirror>, которые задают сам объект, а не свойства узла Node3D.
 const MIRROR_RESERVED := {"size": true, "resolution_scale": true, "srgb_decode": true}
@@ -96,7 +96,6 @@ var _resources: Dictionary = {}     # id -> Resource (встроенные SubRe
 var _ext_defs: Dictionary = {}      # id -> { type: String, url: String } (внешние ресурсы)
 var _ext_targets: Array = []        # [{ obj: Object, prop: String, id: String }] — куда вставить ext
 var _node_map: Dictionary = {}      # HtmlNode (элемент) -> Node — провенанс для эфемерного оверлея
-var _scripting_modules = null             # ScriptingModuleRegistry, подготовленный до materialization
 var _content_policy: VrwebContentPolicy
 var _policy_context: Dictionary = {}
 
@@ -111,11 +110,10 @@ var _policy_context: Dictionary = {}
 ##     По нему эфемерный оверлей (vrweb-patch/vrweb-node, см. docs/space-console.md)
 ##     адресует РЕАЛЬНЫЕ узлы сцены;
 ##   resources — { id -> Resource }: суб-ресурсы страницы (для резолва ссылок из оверлея).
-static func build(doc: HtmlNode, base_url: String = "", scripting_modules = null,
+static func build(doc: HtmlNode, base_url: String = "",
 		content_policy: VrwebContentPolicy = null) -> Dictionary:
 	var b := VrwebBuilder.new()
 	b._base_url = base_url
-	b._scripting_modules = scripting_modules
 	b._content_policy = content_policy if content_policy != null else VrwebContentPolicy.new()
 	b._policy_context = {"source": VrwebContentPolicy.SOURCE_DOCUMENT, "base_url": base_url}
 	return b._build(doc)
@@ -285,8 +283,6 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_replicated_state(elem)
 	if elem.raw_tag == STATE_ACTION_TAG:
 		return _build_state_action(elem)
-	if elem.raw_tag == COMPONENT_TAG:
-		return _build_page_component(elem)
 	if elem.raw_tag == IMAGE_TAG:
 		return _build_image(elem)
 	if elem.raw_tag == BLOB_TAG:
@@ -327,7 +323,7 @@ func _route_audio_to_world(node: Node) -> void:
 ## и будет вставлен асинхронно. Остальное резолвится и ставится немедленно.
 func _apply_attributes(obj: Object, elem: HtmlNode) -> void:
 	for key in elem.attributes:
-		if RESOURCE_RESERVED.has(key):
+		if RESOURCE_RESERVED.has(key) or obj is Node and NODE_RESERVED.has(key):
 			continue
 		var raw: String = elem.attributes[key]
 		if not _property_allowed(obj, str(key), raw):
@@ -500,34 +496,6 @@ func _build_state_action(elem: HtmlNode) -> Node:
 			continue
 		if _property_allowed(node, str(key), str(elem.attributes[key])):
 			node.set(key, _resolve_value(elem.attributes[key]))
-	return node
-
-
-## Материализует только заранее собранный и разрешённый export. Загрузка, trust и компиляция
-## намеренно находятся вне Builder, чтобы страница не исполнила код в обход preflight.
-func _build_page_component(elem: HtmlNode) -> Node:
-	var module_id := elem.get_attr("module")
-	var export_name := elem.get_attr("class", "default")
-	if _scripting_modules == null:
-		Log.warn("builder", "<VRWebComponent %s:%s> пропущен: modules не подготовлены" \
-				% [module_id, export_name])
-		return null
-	var result: Dictionary = _scripting_modules.instantiate_export(module_id, export_name)
-	if not str(result.get("error", "")).is_empty():
-		Log.warn("builder", str(result.error))
-		return null
-	var node: Node = result.node
-	for key in elem.attributes:
-		if key in ["module", "class"]:
-			continue
-		if _property_allowed(node, str(key), str(elem.attributes[key])):
-			node.set(key, _resolve_value(elem.attributes[key]))
-	for child in elem.children:
-		if child.is_text() or _is_meta_tag(child):
-			continue
-		var sub := _build_node(child)
-		if sub != null:
-			node.add_child(sub)
 	return node
 
 

@@ -196,6 +196,11 @@ build_mac() {
   else
     warn "Не нашёл libgdffmpeg в .app — видеоплеер может не работать"
   fi
+  if find "$app/Contents" -name 'libgdluau.darwin.arm64.dylib' | grep -q .; then
+    ok "Luau GDExtension в бандле"
+  else
+    die "Не нашёл Luau GDExtension в .app — page scripting недоступен"
+  fi
 
   step "Добавляю helper и инструкцию для первого запуска"
   cp "$MACOS_PACKAGE_FILES/Open Knossos.command" "$dir/"
@@ -224,6 +229,11 @@ build_win() {
     ok "FFmpeg dll рядом с exe"
   else
     warn "Не нашёл ffmpeg dll рядом с exe — видеоплеер может не работать"
+  fi
+  if [[ -f "$dir/gdluau.windows.amd64.dll" ]]; then
+    ok "Luau dll рядом с exe"
+  else
+    die "Не нашёл Luau dll рядом с exe — page scripting недоступен"
   fi
 
   step "Упаковка в zip"
@@ -254,6 +264,11 @@ build_linux() {
     ok "WebRTC/TwoVoIP so рядом с бинарём"
   else
     warn "Не нашёл WebRTC/TwoVoIP so рядом с бинарём — мультиплеер/голос могут не работать"
+  fi
+  if [[ -f "$dir/libgdluau.linux.x86_64.so" ]]; then
+    ok "Luau so рядом с бинарём"
+  else
+    die "Не нашёл Luau so рядом с бинарём — page scripting недоступен"
   fi
 
   step "Упаковка в zip"

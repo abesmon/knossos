@@ -10,7 +10,7 @@ GDScript-классы, структуру Godot-сцен, конкретные A
 [client/implementation.md](../client/implementation.md).
 При расхождении документов нормативным источником для процедурной генерации и организации
 пространства считается `space/`; `client/` фиксирует только текущее поведение реализации.
-Public API внешних scripting modules и capability contract — в [scripting-api.md](scripting-api.md).
+Public page scripting API и capability contract — в [scripting-api.md](scripting-api.md).
 Единая passthrough/audit boundary декларативного контента — в
 [content-policy.md](content-policy.md).
 
