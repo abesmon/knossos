@@ -20,6 +20,8 @@
   per-frame update, local/authority clocks, ресурсы, input и Distributed State.
 - [remote-call-demo.md](remote-call-demo.md) — адресованные Remote Call, локальные правила
   authority/rank и реактивные панели участников инстанса.
+- [remote-data-demo.md](remote-data-demo.md) — композиция `fetch → decode → apply`, динамические
+  текст/изображения/mesh/audio и authority-синхронизация выбора через Remote Call.
 - [gif-support.md](gif-support.md) — собственный декодер GIF на GDScript, анимация через
   `AnimatedTexture`.
 - [godot-coreaudio-input-rate-bug.md](godot-coreaudio-input-rate-bug.md) — заметка о баге Godot

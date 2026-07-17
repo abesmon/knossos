@@ -8,6 +8,7 @@ const MAX_TIMERS := 64
 const MAX_UPDATE_CALLBACKS := 8
 const MAX_HOST_CALLS := 10_000
 const MAX_VALUE_BYTES := 64 * 1024
+const ASSETS_SCRIPT := preload("res://scripts/scripting/vrweb_script_assets.gd")
 const CREATE_CLASSES := {
 	"Node3D": true, "MeshInstance3D": true, "StaticBody3D": true, "Area3D": true,
 	"CollisionShape3D": true, "Label3D": true, "OmniLight3D": true,
@@ -28,6 +29,7 @@ const CAPABILITIES := {
 	"vrweb/players/1": true,
 	"vrweb/player/1": true,
 	"vrweb/assets/1": true,
+	"vrweb/assets/2": true,
 	"vrweb/clock/1": true,
 	"vrweb/log/1": true,
 }
@@ -62,6 +64,7 @@ var _next_timer := 1
 var _state := VrwebScriptState.new()
 var _remote := VrwebScriptRemote.new()
 var _players := VrwebScriptPlayers.new()
+var _assets = ASSETS_SCRIPT.new()
 var _clock_snapshot: Callable
 
 
@@ -83,6 +86,7 @@ func setup(id: String, content_hash: String, page_root: Node, targets: Dictionar
 	_state.setup(script_id, _invoke)
 	_remote.setup(script_id, _invoke)
 	_players.setup(_invoke)
+	_assets.setup(script_id, _base_url, _owner, _invoke, _apply_asset, _policy)
 
 
 func api() -> Dictionary:
@@ -96,7 +100,7 @@ func api() -> Dictionary:
 		"state": _state.api(),
 		"remote": _remote.api(),
 		"players": _players.api(),
-		"assets": {"resolve": resolve_asset},
+		"assets": _assets.api(),
 		"clock": {"local_time": local_time, "authority_time": authority_time,
 			"authority_ready": authority_clock_ready, "set_timeout": set_timeout,
 			"set_interval": set_interval, "cancel": cancel_timer},
@@ -114,7 +118,7 @@ func commit() -> bool:
 		return false
 	if not _state.commit():
 		return false
-	if not _remote.commit() or not _players.commit():
+	if not _remote.commit() or not _players.commit() or not _assets.commit():
 		return false
 	for handle_id in _owned:
 		var node: Node = _owned[handle_id]
@@ -156,6 +160,7 @@ func close(preserve_replicated_state := false) -> void:
 	_state.close(not preserve_replicated_state)
 	_remote.close()
 	_players.close()
+	_assets.close()
 	_invoke = Callable()
 	_page_root = null
 	_player = null
@@ -443,12 +448,16 @@ func _has_property(node: Object, property: String) -> bool:
 
 func _compatible_property_value(node: Object, property: String, value) -> bool:
 	var expected := TYPE_NIL
+	var expected_class := ""
 	for info in node.get_property_list():
 		if str(info.name) == property:
 			expected = int(info.type)
+			expected_class = str(info.get("class_name", ""))
 			break
 	var actual := typeof(value)
 	if expected == actual:
+		if expected == TYPE_OBJECT and value is Object and not expected_class.is_empty():
+			return (value as Object).is_class(expected_class)
 		return true
 	if expected == TYPE_FLOAT and actual == TYPE_INT:
 		return true
@@ -464,6 +473,21 @@ func _apply_set(node: Object, property: String, value) -> bool:
 		return false
 	node.set(property, value)
 	return true
+
+
+func _apply_asset(resource_id: int, target: Dictionary, property: String) -> bool:
+	if not _allow_call() or not target.has("id") or BLOCKED_PROPERTIES.has(property):
+		return false
+	var object := _object(int(target.get("id", 0)))
+	var value: Resource = _assets.resource(resource_id)
+	if object == null or value == null or not _has_property(object, property) \
+			or not _compatible_property_value(object, property, value):
+		return false
+	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_property(
+			object.get_class(), property, "OpaqueResource",
+			{"source": "script", "script_id": script_id})):
+		return false
+	return _apply_set(object, property, value)
 
 
 func _clock() -> Dictionary:

@@ -345,6 +345,36 @@ func auth_header_for(url: String) -> String:
 	return "Authorization: Bearer " + access_token
 
 
+## Подписанные заголовки identity для защищённого GET внешнего ресурса. Сертификат публичен,
+## но proof подтверждает владение его приватным ключом и привязан к точному URL. Timestamp и
+## nonce дают серверу обычную anti-replay проверку с коротким окном.
+const DATA_REQUEST_PROOF_PREFIX := "vrweb-data-request.v1"
+
+
+func data_identity_headers_for(url: String) -> PackedStringArray:
+	if not has_certificate() or not url.begins_with("https://") \
+			or url.contains("\r") or url.contains("\n"):
+		return PackedStringArray()
+	var timestamp := int(Time.get_unix_time_from_system())
+	var nonce := Marshalls.raw_to_base64(Crypto.new().generate_random_bytes(16))
+	var payload := data_request_proof_payload("GET", url, timestamp, nonce)
+	var proof := sign_challenge(payload.to_utf8_buffer())
+	if proof.is_empty():
+		return PackedStringArray()
+	return PackedStringArray([
+		"X-VRWeb-Identity-Certificate: " + Marshalls.raw_to_base64(cert_json.to_utf8_buffer()),
+		"X-VRWeb-Identity-Certificate-Signature: " + cert_signature,
+		"X-VRWeb-Identity-Timestamp: " + str(timestamp),
+		"X-VRWeb-Identity-Nonce: " + nonce,
+		"X-VRWeb-Identity-Proof: " + Marshalls.raw_to_base64(proof),
+	])
+
+
+static func data_request_proof_payload(method: String, url: String, timestamp: int,
+		nonce: String) -> String:
+	return "%s\n%s\n%s\n%d\n%s" % [DATA_REQUEST_PROOF_PREFIX, method, url, timestamp, nonce]
+
+
 ## access_token для join сигналинга — только когда сигналинг живёт на нашем же домашнем
 ## сервере (монолит): токен привязывает WS-сессию к аккаунту, по ней сервер видит
 ## «хозяин дома» (presence-gate). Чужому сигналингу токен не показываем.

@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 import vrweb_scene
+from client_identity import DATA_REQUEST_PROOF_PREFIX
 from spaces_api import PROOF_PREFIX
 
 CREDS = {"nickname": "alice", "password": "secret123"}
@@ -246,6 +247,38 @@ def test_page_policies(client):
         ws.send_json({"type": "join", "room": room, "nick": "A", "access_token": token})
         assert ws.receive_json()["type"] == "peers"
         assert client.get(path).status_code == 403
+
+
+def test_private_page_accepts_signed_get_identity(client):
+    """Владелец файла видит certificate address и проверяет proof точного GET URL."""
+    token = _register(client)["access_token"]
+    url = _home(client, token)["url"]
+    path = "/s/" + _slug(url)
+    _set_policy(client, token, "private")
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub_b64 = base64.b64encode(key.public_key().public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo)).decode()
+    cert = client.post("/api/v1/identity/certify", json={"public_key": pub_b64},
+                       headers=_auth(token)).json()
+    ts = int(time.time())
+    nonce = base64.b64encode(secrets.token_bytes(16)).decode()
+    payload = "%s\nGET\n%s\n%d\n%s" % (DATA_REQUEST_PROOF_PREFIX, url, ts, nonce)
+    proof = base64.b64encode(key.sign(payload.encode(), padding.PKCS1v15(),
+                                      hashes.SHA256())).decode()
+    headers = {
+        "X-VRWeb-Identity-Certificate": base64.b64encode(
+            cert["certificate_json"].encode()).decode(),
+        "X-VRWeb-Identity-Certificate-Signature": cert["signature"],
+        "X-VRWeb-Identity-Timestamp": str(ts),
+        "X-VRWeb-Identity-Nonce": nonce,
+        "X-VRWeb-Identity-Proof": proof,
+    }
+    assert client.get(path, headers=headers).status_code == 200
+    replay = client.get(path, headers=headers)
+    assert replay.status_code == 401
+    assert replay.json()["error"]["code"] == "replay"
 
 
 def test_room_gate_denies_guest_when_closed(client):

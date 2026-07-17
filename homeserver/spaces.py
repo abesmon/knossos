@@ -188,7 +188,7 @@ def access_allowed(db: Database, cfg: Config, hub, space: sqlite3.Row, address: 
     """Пускать ли предъявителя address ("" — аноним) на страницу/в комнату.
     Владельца и редакторов пускаем всегда; гостей — по политике: public — всегда,
     when-home — пока владелец в комнате (сервер видит это в СВОЁМ сигналинге),
-    private — никогда (федеративный auth фетча — v2)."""
+    private — только владелец/allowlist с Bearer или проверенным signed GET."""
     owner = owner_address(db, cfg, space)
     if address != "" and (address == owner or address in editors(db, space["id"])):
         return True

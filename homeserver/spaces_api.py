@@ -10,8 +10,8 @@
   GET  /api/v1/spaces/flush        — capability-запрос (?url=…&address=…)
   POST /api/v1/spaces/flush        — флаш дельты эфемерного слоя
 
-Auth флаша — два пути: Bearer-токен (локальный пользователь этого сервера; так входит
-владелец) или федеративная пара сертификат+proof (редактор с чужого домашнего сервера).
+Auth страницы/флаша — два пути: Bearer-токен (локальный пользователь этого сервера) или
+федеративная пара сертификат+proof. GET подписывает точный URL, POST — payload дельты.
 """
 
 from __future__ import annotations
@@ -64,16 +64,22 @@ def rotate_home_space(request: Request) -> dict:
 
 # --- Страница пространства ---
 
-def _requester_address(request: Request) -> str:
-    """Локальный предъявитель страницы: Bearer (Godot-клиент) или cookie (браузер)."""
+def _requester_address(request: Request, canonical_url: str = "") -> str:
+    """Предъявитель страницы: локальный Bearer/cookie или федеративный signed GET."""
     st = request.app.state
     auth = request.headers.get("authorization", "")
     token = auth[7:].strip() if auth.lower().startswith("bearer ") else \
         request.cookies.get("vrweb_session", "")
-    if token == "":
-        return ""
-    user = accounts.session_user(st.db, token, st.cfg.session_ttl_days)
-    return "%s@%s" % (user["nickname"], st.cfg.domain) if user is not None else ""
+    if token != "":
+        user = accounts.session_user(st.db, token, st.cfg.session_ttl_days)
+        return "%s@%s" % (user["nickname"], st.cfg.domain) if user is not None else ""
+    if canonical_url != "" and request.headers.get("x-vrweb-identity-certificate", "") != "":
+        try:
+            return client_identity.verify_data_request_headers(
+                request.headers, request.method, canonical_url, st.cfg.domain, st.keys)
+        except client_identity.IdentityError as e:
+            raise api_error(401, e.code, e.message) from None
+    return ""
 
 
 @router.get("/s/{slug}", response_class=HTMLResponse)
@@ -82,7 +88,9 @@ def space_page(request: Request, slug: str) -> HTMLResponse:
     space = spaces.space_by_slug(st.db, slug)
     if space is None:
         raise api_error(404, "not_found", "Пространство не найдено.")
-    if not spaces.access_allowed(st.db, st.cfg, st.hub, space, _requester_address(request)):
+    canonical_url = spaces.space_url(st.cfg, space)
+    if not spaces.access_allowed(st.db, st.cfg, st.hub, space,
+                                 _requester_address(request, canonical_url)):
         # Отличимо от 404 сознательно: гостю понятен UX «хозяина нет дома».
         raise api_error(403, "space_closed", "Хозяина нет дома — пространство закрыто.")
     return HTMLResponse(spaces.page_html(st.cfg, space))

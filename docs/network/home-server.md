@@ -269,6 +269,39 @@ POST /api/v1/identity/certify
 > (шаг 2 — свежий челлендж) — и владелец ксерокопии это повторить не может, потому что «лицо»
 > (`PRIV_A`) есть только у настоящей Алисы. Одной печати недостаточно — нужны оба шага.
 
+## Подписанный GET защищённых ресурсов
+
+Тот же сертификат применяется к файлам/API, владелец которых ограничивает чтение по identity,
+allowlist или квоте. Luau запрашивает такой ресурс явно через `document.assets.fetch_with` или
+`load_with` с `credentials = "include"`. Для URL собственного Home Server используется обычный
+origin-scoped Bearer. Внешний HTTPS origin получает:
+
+```text
+X-VRWeb-Identity-Certificate: <base64(certificate_json UTF-8)>
+X-VRWeb-Identity-Certificate-Signature: <подпись Home Server, base64>
+X-VRWeb-Identity-Timestamp: <unix seconds>
+X-VRWeb-Identity-Nonce: <16 случайных байт, base64>
+X-VRWeb-Identity-Proof: <RSA-SHA256 proof, base64>
+```
+
+Клиент подписывает точные UTF-8 байты:
+
+```text
+vrweb-data-request.v1\nGET\n<absolute-url>\n<timestamp>\n<nonce-base64>
+```
+
+Владелец ресурса выполняет те же два шага, что peer verifier: проверяет подпись Home Server над
+`certificate_json`, затем берёт `public_key` из сертификата и проверяет `Proof` над строкой выше.
+Дополнительно он обязан проверить совпадение фактических method/URL, окно timestamp (рекомендуется
+±5 минут) и одноразовость nonce внутри этого окна. После этого поле `address` сертификата —
+проверяемая identity для ACL, квоты и аудита. Отказ выражается обычным HTTP `401`/`403`.
+
+Identity не предъявляется по HTTP без TLS и не уходит внешнему origin по умолчанию: сертификат
+содержит стабильный глобальный адрес и является чувствительным с точки зрения приватности.
+Credentialed GET также не следует redirect автоматически — иначе Bearer или сертификат мог бы
+утечь другому origin. Клиент получает 3xx и должен явно запросить следующий URL с новым nonce и
+proof, уже привязанным к нему.
+
 ## Клиент (Godot)
 
 Клиентская сторона живёт в двух местах:
@@ -276,7 +309,8 @@ POST /api/v1/identity/certify
 - **`HomeServer`** (autoload, [../scripts/home_server.gd](../../scripts/home_server.gd)) —
   всё «между клиентом и серверами»: discovery своего сервера, логин/регистрация/логаут
   (Bearer-токен), генерация RSA-ключа, получение/продление сертификата, проверка подписи
-  сервера на чужих сертификатах и кэш `signing_keys` доменов.
+  сервера на чужих сертификатах, signed GET proof для защищённых ресурсов и кэш
+  `signing_keys` доменов.
 - **`NetworkManager`** — всё «между пирами»: предъявление сертификата при открытии
   p2p-канала (вместе с карточкой идентичности), челлендж владения ключом, сигнал
   `identity_verified(id, address)` и `verified_address_of(peer_id)` для UI.

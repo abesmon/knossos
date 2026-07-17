@@ -13,26 +13,41 @@ const MAX_CONCURRENT := 4
 const USER_AGENT := "VRWeb/0.1 (Godot; +knossos)"
 const MAX_BYTES := 48 * 1024 * 1024   # потолок размера ресурса, байт (защита от DoS)
 
-var _cache: Dictionary = {}     # url -> PackedByteArray (пусто = не удалось)
-var _waiters: Dictionary = {}   # url -> Array[Callable]
-var _queue: Array[String] = []
+## A dedicated consumer may lower the ceiling (script fetch uses 2 MiB). Keeping the limit on
+## the shared loader building block means oversized bodies are rejected before entering cache.
+var max_bytes := MAX_BYTES
+
+var _cache: Dictionary = {}     # request key -> {body, status, result}
+var _waiters: Dictionary = {}   # request key -> Array[Callable]
+var _queue: Array[Dictionary] = []
 var _active: int = 0
 
 
 ## Просит сырые байты для url. Когда готовы (или не удалось — тогда пустой массив) — зовёт
 ## on_ready(PackedByteArray). Дубликаты одного url коалесцируются, результат кэшируется.
-func request_bytes(url: String, on_ready: Callable) -> void:
+func request_bytes(url: String, on_ready: Callable,
+		headers: PackedStringArray = PackedStringArray()) -> void:
+	request_response(url, func(response): on_ready.call(response.body), headers)
+
+
+## Вариант для клиентов, которым кроме тела нужен HTTP status (например, script fetch различает
+## 401/403 и transport failure). Заголовки входят в cache key, поэтому anonymous и identity
+## ответы одного URL никогда не смешиваются.
+func request_response(url: String, on_ready: Callable,
+		headers: PackedStringArray = PackedStringArray()) -> void:
 	if url == "":
-		on_ready.call(PackedByteArray())
+		on_ready.call({"body": PackedByteArray(), "status": 0,
+			"result": HTTPRequest.RESULT_CANT_CONNECT})
 		return
-	if _cache.has(url):
-		on_ready.call(_cache[url])
+	var key := _request_key(url, headers)
+	if _cache.has(key):
+		on_ready.call(_cache[key])
 		return
-	if _waiters.has(url):
-		_waiters[url].append(on_ready)
+	if _waiters.has(key):
+		_waiters[key].append(on_ready)
 		return
-	_waiters[url] = [on_ready]
-	_queue.append(url)
+	_waiters[key] = [on_ready]
+	_queue.append({"key": key, "url": url, "headers": headers.duplicate()})
 	_pump()
 
 
@@ -87,43 +102,62 @@ func _pump() -> void:
 		_start(_queue.pop_front())
 
 
-func _start(url: String) -> void:
+func _start(request: Dictionary) -> void:
 	_active += 1
+	var key := str(request.key)
+	var url := str(request.url)
 	# Локальные ресурсы (vrweblocal/vrwebresource) читаем синхронно через FileAccess.
 	if PageFetcher.is_local(url):
 		var body := PackedByteArray()
 		var path := PageFetcher.to_file_path(url)
 		if path != "" and FileAccess.file_exists(path):
-			body = FileAccess.get_file_as_bytes(path)
-		_finish(url, body)
+			var file := FileAccess.open(path, FileAccess.READ)
+			if file != null and file.get_length() <= max_bytes:
+				body = file.get_buffer(file.get_length())
+		_finish(key, {"body": body, "status": 200 if not body.is_empty() else 0,
+			"result": HTTPRequest.RESULT_SUCCESS if not body.is_empty() \
+			else HTTPRequest.RESULT_REQUEST_FAILED})
 		return
 	var http := HTTPRequest.new()
 	http.use_threads = true
 	http.accept_gzip = true
-	http.body_size_limit = MAX_BYTES
+	http.body_size_limit = max_bytes
+	# Credential headers must never be forwarded to another origin by an automatic redirect.
+	# The caller receives 3xx and may explicitly re-issue a newly signed request to the next URL.
+	if not (request.headers as PackedStringArray).is_empty():
+		http.max_redirects = 0
 	add_child(http)
 	http.request_completed.connect(
-		func(result, code, _headers, body): _on_done(url, http, result, code, body)
+		func(result, code, _headers, body): _on_done(key, http, result, code, body)
 	)
-	var err := http.request(url, ["User-Agent: " + USER_AGENT])
+	var headers: PackedStringArray = request.headers
+	headers = headers.duplicate()
+	headers.append("User-Agent: " + USER_AGENT)
+	var err := http.request(url, headers)
 	if err != OK:
-		_on_done(url, http, HTTPRequest.RESULT_CANT_CONNECT, 0, PackedByteArray())
+		_on_done(key, http, HTTPRequest.RESULT_CANT_CONNECT, 0, PackedByteArray())
 
 
-func _on_done(url: String, http: HTTPRequest, result: int, code: int, body: PackedByteArray) -> void:
+func _on_done(key: String, http: HTTPRequest, result: int, code: int,
+		body: PackedByteArray) -> void:
 	http.queue_free()
-	var ok := result == HTTPRequest.RESULT_SUCCESS and code < 400 and not body.is_empty()
-	_finish(url, body if ok else PackedByteArray())
+	var ok := result == HTTPRequest.RESULT_SUCCESS and code >= 200 and code < 300 \
+			and not body.is_empty()
+	_finish(key, {"body": body if ok else PackedByteArray(), "status": code, "result": result})
 
 
-func _finish(url: String, body: PackedByteArray) -> void:
+func _finish(key: String, response: Dictionary) -> void:
 	_active -= 1
-	_cache[url] = body
-	for cb in _waiters.get(url, []):
+	_cache[key] = response
+	for cb in _waiters.get(key, []):
 		if cb.is_valid():
-			cb.call(body)
-	_waiters.erase(url)
+			cb.call(response)
+	_waiters.erase(key)
 	_pump()
+
+
+static func _request_key(url: String, headers: PackedStringArray) -> String:
+	return url if headers.is_empty() else url + "#headers=" + "\n".join(headers).sha256_text()
 
 
 # --- Статические декодеры: байты -> ресурс/сцена Godot ---

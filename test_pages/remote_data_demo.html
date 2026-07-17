@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — Remote data building blocks</title>
+  <script type="application/vrweb+luau" id="demo.remote-data">
+local SCRIPT_ID = "demo.remote-data"
+local image = document.query("#slide-material")
+local caption = document.query("#caption")
+local status = document.query("#status")
+local local_button = document.query("#local-next")
+local synced_button = document.query("#synced-next")
+
+if not image or not caption or not status or not local_button or not synced_button then
+  error("remote data demo ids are missing")
+end
+
+local slides = {
+  { image = "https://placehold.co/960x540/243b55/ffffff.png?text=Remote+slide+1",
+    text = "https://jsonplaceholder.typicode.com/posts/1" },
+  { image = "https://placehold.co/960x540/355c7d/ffffff.png?text=Remote+slide+2",
+    text = "https://jsonplaceholder.typicode.com/posts/2" },
+  { image = "https://placehold.co/960x540/6c5b7b/ffffff.png?text=Remote+slide+3",
+    text = "https://jsonplaceholder.typicode.com/posts/3" },
+  { image = "https://placehold.co/960x540/c06c84/ffffff.png?text=Remote+slide+4",
+    text = "https://jsonplaceholder.typicode.com/posts/4" },
+  { image = "https://placehold.co/960x540/f67280/ffffff.png?text=Raw+bytes+decoded",
+    text = "https://jsonplaceholder.typicode.com/posts/5", raw = true },
+}
+
+local current = 0
+local generation = 0
+
+local function show(index)
+  current = ((index - 1) % #slides) + 1
+  generation = generation + 1
+  local request_generation = generation
+  local slide = slides[current]
+  status.set("text", string.format("Загрузка %d / %d…", current, #slides))
+
+  local function apply_result(event)
+    if request_generation ~= generation then return end
+    if event.ok and event.resource and event.resource.apply(image, "albedo_texture") then
+      status.set("text", string.format("Слайд %d / %d · image ready", current, #slides))
+    else
+      status.set("text", "Ошибка изображения: " .. tostring(event.error))
+    end
+  end
+
+  if slide.raw then
+    -- Те же блоки можно переставить: сначала получить/обработать bytes, затем создать ресурс.
+    document.assets.fetch(slide.image, "bytes", function(event)
+      if request_generation ~= generation then return end
+      local resource = event.ok and document.assets.decode(event.data, "image") or nil
+      apply_result({ ok = resource ~= nil, resource = resource,
+        error = event.error ~= "" and event.error or "decode_failed" })
+    end)
+  else
+    -- Сокращённая композиция fetch + decode для обычного случая.
+    document.assets.load(slide.image, "image", apply_result)
+  end
+
+  document.assets.fetch(slide.text, "json", function(event)
+    if request_generation ~= generation then return end
+    if event.ok then
+      caption.set("text", string.format("REMOTE JSON #%d\n%s", current, event.data.title))
+    else
+      caption.set("text", "Ошибка текста: " .. tostring(event.error))
+    end
+  end)
+end
+
+local_button.on("activate", function(_event)
+  show(current + 1)
+end, "Следующий слайд только на этом клиенте")
+
+assert(document.remote.expose("show-slide", { version = 1, args = { "int" } },
+  function(event)
+    -- Transport подтверждает caller; семантическое право остаётся правилом страницы.
+    if event.caller.is_authority then
+      show(event.args[1])
+    else
+      status.set("text", "Синхронизация отклонена: caller не authority")
+    end
+  end))
+
+synced_button.on("activate", function(_event)
+  local me = document.players.local_info()
+  if not me.is_authority then
+    status.set("text", "Только authority может синхронизировать загрузку")
+    return
+  end
+  local next_index = (current % #slides) + 1
+  for _, player in ipairs(document.players.all()) do
+    document.remote.call(player.peer_id, SCRIPT_ID, "show-slide", 1, { next_index })
+  end
+end, "Следующий слайд на всех клиентах (authority)")
+
+show(1)
+  </script>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <WorldEnvironment environment="SubResource:::Environment"/>
+    <DirectionalLight3D rotation_degrees="Vector3(-45,-20,0)" light_energy="0.8"/>
+    <MeshInstance3D position="Vector3(0,2,-5)" mesh="SubResource:::ScreenMesh"
+                    material_override="SubResource:::slide-material"/>
+    <Label3D id="caption" position="Vector3(0,0.3,-4.8)" text="REMOTE DATA"
+             font_size="34" outline_size="10" pixel_size="0.0045" width="1400"/>
+    <Label3D id="status" position="Vector3(0,-0.25,-4.8)" text="starting…"
+             font_size="28" outline_size="8" pixel_size="0.004"/>
+
+    <StaticBody3D id="local-next" position="Vector3(-2,-1,-4.5)">
+      <MeshInstance3D mesh="SubResource:::ButtonMesh" material_override="SubResource:::LocalMaterial">
+        <Label3D position="Vector3(0,0,0.11)" text="LOCAL NEXT" font_size="34" pixel_size="0.004"/>
+      </MeshInstance3D>
+      <CollisionShape3D shape="SubResource:::ButtonShape"/>
+    </StaticBody3D>
+    <StaticBody3D id="synced-next" position="Vector3(2,-1,-4.5)">
+      <MeshInstance3D mesh="SubResource:::ButtonMesh" material_override="SubResource:::SyncMaterial">
+        <Label3D position="Vector3(0,0,0.11)" text="AUTHORITY SYNC" font_size="30" pixel_size="0.004"/>
+      </MeshInstance3D>
+      <CollisionShape3D shape="SubResource:::ButtonShape"/>
+    </StaticBody3D>
+    <Label3D position="Vector3(0,4.3,-5)" text="REMOTE DATA · FETCH → DECODE → APPLY"
+             font_size="46" outline_size="10" pixel_size="0.005"/>
+
+    <VRWebSpawner mode="first"><SpawnerPoint position="Vector3(0,0,1)"/></VRWebSpawner>
+    <Resource id="ScreenMesh" type="QuadMesh" size="Vector2(7.1,4)"/>
+    <Resource id="slide-material" type="StandardMaterial3D" shading_mode="0" cull_mode="2"/>
+    <Resource id="ButtonMesh" type="BoxMesh" size="Vector3(3.2,0.8,0.2)"/>
+    <Resource id="ButtonShape" type="BoxShape3D" size="Vector3(3.2,0.8,0.25)"/>
+    <Resource id="LocalMaterial" type="StandardMaterial3D" albedo_color="Color(0.12,0.48,0.8,1)"/>
+    <Resource id="SyncMaterial" type="StandardMaterial3D" albedo_color="Color(0.85,0.42,0.12,1)"/>
+    <Resource id="Environment" type="Environment" background_mode="2"
+              background_color="Color(0.02,0.03,0.06,1)" ambient_light_source="3"
+              ambient_light_color="Color(0.25,0.3,0.5,1)" ambient_light_energy="0.6"/>
+  </vrwml>
+</body>
+</html>

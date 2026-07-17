@@ -142,8 +142,9 @@ macOS, Windows и Linux и запускает `tests/run_maker_portability.py`. 
 реально попали в билд, и предупреждает, если нет (иначе видео или голос молча не заведутся).
 Для Luau проверка обязательная и останавливает сборку при отсутствии нужной библиотеки.
 
-Runtime tests запускаются сценами `tests/test_luau_runtime.tscn` и
-`tests/test_vrweb_scripting.tscn`. `tests/run_luau_http_test.py` поднимает локальный HTTP fixture
+Runtime tests запускаются сценами `tests/test_luau_runtime.tscn`,
+`tests/test_vrweb_scripting.tscn` и `tests/test_remote_data.tscn`.
+`tests/run_luau_http_test.py` поднимает локальный HTTP fixture
 и дополнительно проверяет настоящий redirect, SRI, загрузку source и исполнение linked script.
 
 ## Требования / known issues
