@@ -40,7 +40,7 @@
 
 ## Реализованная модель page scripting
 
-Luau исполняется в отдельных sandboxed VM без Godot objects, ОС, файловой системы и прямой сети.
+Luau каждой страницы исполняется в её sandboxed VM без Godot objects, ОС, файловой системы и прямой сети.
 Скрипт видит только `document` с opaque handles и versioned capabilities. Knossos дополнительно
 ограничивает CPU, память, число handles, timers и host calls. Подробнее —
 [space/scripting.md](space/scripting.md).
@@ -56,7 +56,7 @@ per-site permission prompts для core API вроде locomotion. Capability з
 
 | Поверхность | Риск | Статус | Где подробно |
 |---|---|---|---|
-| **Luau page scripts** | Зацикливание, расход памяти или злоупотребление выданным API | **Изолирован:** отдельная VM, opaque handles, staged commit, deadlines и client quotas; hard allocator ceiling ещё не реализован | [space/scripting.md](space/scripting.md) |
+| **Luau page scripts** | Зацикливание, расход памяти или злоупотребление выданным API | **Изолирован от клиента:** одна sandboxed VM на страницу, opaque handles, staged commit, deadlines и client quotas; hard allocator ceiling ещё не реализован | [space/scripting.md](space/scripting.md) |
 | **Page remote calls** | Пир вызывает локальный endpoint; изменённый клиент может вызвать любой опубликованный endpoint, не соблюдая проверки на своей стороне | **Изолирован:** transport закрепляет caller/target, script/endpoint/version, wire limits и rate limit; принимающий handler автора задаёт смысловой allow/deny и может использовать только безопасный `document` API | [space/scripting-api.md](space/scripting-api.md#адресованные-remote-calls) |
 | **VRWML страницы** | `VrwebBuilder` инстанцирует через `ClassDB` любой класс Godot и ставит любые свойства из атрибутов недоверенной страницы: исполнение кода (`script`/GDExtension), свойства-пути → чтение ФС, сетевые узлы (SSRF/DoS) | **Принят** | [space/vrwml-tags.md](space/vrwml-tags.md) → «Принятое допущение» |
 | **Эфемерные действия пиров** | `vrweb-node` из действий пиров строится тем же `VrwebBuilder.build_element` — тот же риск, даже без захода на злонамеренную страницу | **Принят** | [network/ephemeral-changes.md](network/ephemeral-changes.md), [client/space-console.md](client/space-console.md) |

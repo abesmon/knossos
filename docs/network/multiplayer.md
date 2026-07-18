@@ -130,7 +130,7 @@ query. Контракт пока не стандартизирован; рабо
 **Page Remote Call.** Luau capability `document.remote` использует отдельный reliable RPC
 `_recv_script_remote_call(script_id, endpoint, version, args)`. Получатель сам берёт sender id из
 WebRTC transport, проверяет переносимые типы, размер 8 KiB и лимит 20 сообщений/с от peer, после
-чего адресует событие только активному realm совпадающего `script_id`. Transport не решает, имеет
+чего адресует событие только активному page realm совпадающего `script_id`. Transport не решает, имеет
 ли caller право на действие: локальный handler страницы проверяет `event.caller` и при допуске
 использует обычный sandboxed host API. События не проходят через authority, не сохраняются и не
 имеют late-join replay. Page-facing контракт — в

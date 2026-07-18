@@ -61,7 +61,7 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - editor exporter и preview;
 - home server, подтверждённая идентичность и анонимный режим;
 - persistence и personal spaces;
-- inline/linked Luau, opt-in integrity, isolated realms и staged lifecycle;
+- inline/linked Luau, общий browser-like page realm, opt-in integrity и staged lifecycle;
 - portable `document` API v1, client quotas и атомарная hot replacement.
 
 До завершения milestone остаются P0/P1-блоки ниже и server-to-server federation. Скриптинг

@@ -39,6 +39,7 @@ func _test_page_runtime() -> void:
 	var source := """
 assert(Object == nil and FileAccess == nil and os == nil and debug == nil)
 assert(require == nil and loadstring == nil)
+assert(SharedUtils ~= nil and SharedUtils.increment(40) == 42)
 local lamp = document.query("#lamp")
 assert(lamp ~= nil)
 assert(lamp.set("visible", "not-a-bool") == false)
@@ -55,14 +56,28 @@ lamp.on("activate", function(_event)
     lamp.set("visible", true)
 end, "Switch")
 """
+	var utility_source := """
+SharedUtils = {}
+function SharedUtils.increment(value)
+    return value + 2
+end
+"""
 	var unsupported := runtime.activate([{"id": "wrong.profile", "profile": "other/1",
 		"kind": "inline", "source": "return 1", "hash": ""}])
 	_eq(unsupported.ok, false, "unsupported runtime profile is rejected")
-	var activated := runtime.activate([{"id": "page.lamp", "profile": "vrweb-luau/1",
-		"kind": "inline", "source": source, "hash": source.sha256_text()}])
+	var activated := runtime.activate([
+		{"id": "page.utils", "profile": "vrweb-luau/1", "kind": "linked",
+			"source": utility_source, "hash": utility_source.sha256_text()},
+		{"id": "page.lamp", "profile": "vrweb-luau/1", "kind": "inline",
+			"source": source, "hash": source.sha256_text()},
+	])
 	_eq(activated.ok, true, "page script activates")
+	_eq(activated.activated, ["page.utils", "page.lamp"],
+			"linked utility and inline consumer execute in document order")
 	_eq(lamp.visible, false, "top-level mutation commits after successful execution")
 	_eq(runtime.session_of("page.lamp").get("count"), 1, "document.session is captured")
+	_eq(runtime.session_of("page.utils").get("count"), 1,
+			"document.session is shared by all script tags on the page")
 	var duplicate := runtime.activate([{"id": "page.lamp", "profile": "vrweb-luau/1",
 		"kind": "inline", "source": "return 1", "hash": ""}])
 	_eq(duplicate.ok, false, "an active script id cannot be overwritten through activate")
@@ -88,6 +103,7 @@ document.state.define("lamp_state", { version = 1, fields = {}, commands = {} })
 			"failed commit preserves active revision")
 
 	var replacement := """
+assert(SharedUtils.increment(40) == 42)
 local lamp = document.query("#lamp")
 document.session.count = (document.session.count or 0) + 1
 lamp.on("activate", function(_event)

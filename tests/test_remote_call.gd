@@ -34,7 +34,7 @@ func _ready() -> void:
 	var declarations := VrwebScriptDeclaration.collect(doc,
 			"vrwebresource://remote_call.html")
 	_eq(declarations.errors.is_empty(), true, "remote call demo has a valid declaration")
-	_eq(declarations.scripts.size(), 1, "remote call demo has one isolated script realm")
+	_eq(declarations.scripts.size(), 1, "remote call demo has one page script")
 
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 	var built := VrwebBuilder.build(doc, "vrwebresource://remote_call.html", policy)

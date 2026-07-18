@@ -3,30 +3,44 @@
 <head>
   <meta charset="utf-8">
   <title>VRWeb linked Luau script</title>
-  <!-- MODEL: owns private state and exposes a typed endpoint. -->
+  <!-- UTILITY/MODEL: declares the global SpeedModel class for later scripts. -->
   <script type="application/vrweb+luau" id="demo.external.model"
           src="external_model.luau"></script>
-  <!-- VIEW: exposes its own endpoint and renders values received from the model. -->
+  <!-- VIEW: uses SpeedModel and declares SpinnerView in the same page realm. -->
   <script type="application/vrweb+luau" id="demo.external.view"
           src="external_tiny.luau"></script>
-  <!-- CONTROLLER: inline on purpose, to show composition with two linked modules. -->
+  <!-- CONTROLLER: inline on purpose; it constructs and connects both classes above. -->
   <script type="application/vrweb+luau" id="demo.external.controller">
-local MODEL_SCRIPT_ID = "demo.external.model"
 local button = document.query("#external-button")
-local status = document.query("#controller-status")
+local controller_status = document.query("#controller-status")
+local model_status = document.query("#model-status")
+local spinner = document.query("#external-spinner")
+local label = document.query("#external-label")
+local view_status = document.query("#view-status")
 
-if not button or not status then
+if not button or not controller_status or not model_status
+    or not spinner or not label or not view_status then
   error("inline controller scene ids are missing")
 end
 
+-- Both globals were declared by the two preceding linked files.
+assert(SpeedModel and SpinnerView)
+local model = SpeedModel.new({ 0.5, 1.0, 2.0 })
+local view = SpinnerView.new(model, spinner, label, view_status)
+view:start()
+model_status.set("text", string.format(
+  "1 · external_model.luau\nSpeedModel instance = %.1fx",
+  model:current_speed()))
+
 button.on("activate", function(_event)
-  local me = document.players.local_info()
-  local sent = document.remote.call(
-    me.peer_id, MODEL_SCRIPT_ID, "cycle-speed", 1, {})
-  status.set("text", sent
-    and "3 · INLINE CONTROLLER → MODEL: cycle-speed()"
-    or "3 · INLINE CONTROLLER: вызов не отправлен")
-end, "Переключить скорость linked-модуля")
+  local speed = model:cycle_speed()
+  view:show_speed()
+  model_status.set("text", string.format(
+    "1 · external_model.luau\nSpeedModel instance = %.1fx",
+    speed))
+  controller_status.set("text",
+    "3 · INLINE: model:cycle_speed() → view:show_speed()")
+end, "Переключить скорость общей Luau-модели")
   </script>
 </head>
 <body>
@@ -38,9 +52,9 @@ end, "Переключить скорость linked-модуля")
                       mesh="SubResource:::SpinnerMesh"
                       material_override="SubResource:::SpinnerMaterial"/>
       <Label3D id="model-status" position="Vector3(-2.8,0.75,0)"
-               text="1 · EXTERNAL MODEL: loading..." font_size="27"/>
+               text="1 · external_model.luau: loading..." font_size="27"/>
       <Label3D id="view-status" position="Vector3(2.8,0.75,0)"
-               text="2 · EXTERNAL VIEW: loading..." font_size="27"/>
+               text="2 · external_tiny.luau: loading..." font_size="27"/>
       <StaticBody3D id="external-button" position="Vector3(0,-1.15,0)">
         <MeshInstance3D mesh="SubResource:::ButtonMesh"
                         material_override="SubResource:::ButtonMaterial">
@@ -50,7 +64,7 @@ end, "Переключить скорость linked-модуля")
         <CollisionShape3D shape="SubResource:::ButtonShape"/>
       </StaticBody3D>
       <Label3D id="controller-status" position="Vector3(0,-1.75,0)"
-               text="3 · INLINE CONTROLLER: нажмите кнопку" font_size="27"/>
+               text="3 · INLINE: создал model + view; нажмите кнопку" font_size="27"/>
     </Node3D>
 
     <Node3D name="Ground" position="Vector3(0,-0.1,0)">

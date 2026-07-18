@@ -15,7 +15,7 @@ Top-level код всегда входит в VM на lifecycle-границе `
 - `handle.get(property)` / `handle.set(property, value)`
 - `handle.call(method, arguments)`
 - `handle.on("activate", callback, hint)`
-- `handle.destroy()` — только для созданного этим script realm объекта.
+- `handle.destroy()` — только для созданного page realm объекта.
 
 Knossos v1 разрешает создание безопасного подмножества 3D nodes и методы `show`, `hide`, `play`,
 `stop`. Свойства проходят тот же content-policy фильтр, что атрибуты VRWML. HTML `id` адресует
@@ -31,7 +31,8 @@ Knossos v1 разрешает создание безопасного подмн
 
 ## Session
 
-`document.session` — ограниченная по размеру сериализуемая table одной script identity. Она
+`document.session` — ограниченная по размеру сериализуемая table страницы, общая для всех её
+script tags. Она
 переносится при успешной hot replacement и исчезает при закрытии страницы. Также доступны
 `session_get(key, fallback)` и `session_set(key, value)`.
 
@@ -45,7 +46,8 @@ Knossos v1 разрешает создание безопасного подмн
 - `command(object_id, schema_id, version, command, args)`;
 - `on(object_id, schema_id, callback)`.
 
-Wire ids namespaced script id. Регистрация и top-level commands staged до успешного запуска.
+Wire ids namespaced identity page realm (в v1 это `id` первого валидного script tag). Регистрация
+и top-level commands staged до успешного запуска страницы.
 Живой realm сохраняет свои schema/object registrations при подключении или смене комнаты:
 сетевой reset очищает локальный Store, после чего client bridge повторяет идемпотентную
 регистрацию на `authority_changed`. Начальное значение действует до canonical snapshot от
@@ -64,14 +66,10 @@ canonical snapshot по обычным правилам; специальной 
 
 ## Адресованные remote calls
 
-Capability `vrweb/remote/1` реализует мимолётные адресованные вызовы между script realm на
-выбранных клиентах. Обычный сетевой сценарий связывает realm одного `script_id` на разных
-клиентах. Это event, а не replicated state: вызов не хранится, не имеет snapshot и не
-воспроизводится late joiner.
-
-Тот же адрес включает `target_script_id`, поэтому страница может использовать endpoint как
-типизированный контракт между разными script realm. Вызов на локальный `peer_id` доставляется
-deferred внутри клиента; Lua-глобалы и `document.session` при этом не становятся общими.
+Capability `vrweb/remote/1` реализует мимолётные адресованные вызовы между page realms на
+выбранных клиентах. `target_script_id` адресует identity целевого page realm; локальный код одной
+страницы взаимодействует обычными globals и вызовами функций, без RPC. Это event, а не replicated
+state: вызов не хранится, не имеет snapshot и не воспроизводится late joiner.
 
 Для мимолётных адресованных действий, особенно над локальным игроком, нужен отдельный путь, не
 превращающий вызов в replicated state. Автор страницы регистрирует локальный endpoint с
@@ -256,7 +254,7 @@ Capability names MVP: `vrweb/core/1`, `vrweb/scene/1`, `vrweb/state/1`, `vrweb/r
 `vrweb/players/1`, `vrweb/player/1`, `vrweb/assets/1`, `vrweb/assets/2`, `vrweb/clock/1`,
 `vrweb/log/1`.
 
-`local_time` общее для всех script realms одной сцены, но начинается заново при навигации.
+`local_time` общее для page realm и начинается заново при навигации.
 `authority_time` у host совпадает с его монотонными ticks, а у остальных клиентов оценивается
 периодическим ping/pong с компенсацией половины RTT. Вне сетевой комнаты шкала продолжает идти
 локально, но `authority_ready == false`. Она предназначена для вычисления производного состояния
@@ -266,9 +264,9 @@ Capability names MVP: `vrweb/core/1`, `vrweb/scene/1`, `vrweb/state/1`, `vrweb/r
 ## Ошибки и лимиты
 
 Недоступная операция возвращает `nil`/`false`; скрипт не получает fallback-доступ к движку.
-Knossos ограничивает один source 256 KiB, страницу 32 скриптами, realm 256 handles, 64 timers,
+Knossos ограничивает один source 256 KiB, страницу 32 скриптами, page realm 256 handles, 64 timers,
 10 000 host calls на один контролируемый вход VM, 75 ms top-level и 25 ms на callback. Текущий memory watchdog использует soft
 budget 16 MiB. Эти числа — политика reference client, не wire contract стандарта.
 
-Ошибки callback и CPU timeout локализуются в одном realm: он отключается и очищает выданные им
-handlers/timers/owned objects. Остальные скрипты и декларативная сцена продолжают работать.
+Ошибка callback и CPU timeout закрывают общий page realm и очищают выданные им
+handlers/timers/owned objects. Декларативная сцена продолжает работать.

@@ -1,8 +1,8 @@
 # Единое демо Luau: update, clocks, resources и Distributed State
 
 `vrwebresource://state_switch.html` — эталонный пример поведения страницы на
-`vrweb-luau/1`. Вместо нескольких изолированных сцен он показывает пересечение API в одном
-пространстве двумя независимыми script realms:
+`vrweb-luau/1`. Он показывает пересечение API в одном пространстве двумя script tags общего
+page realm:
 
 1. `document.query("#id")` получает opaque handles обычных VRWML-объектов;
 2. `handle.on("activate", ...)` превращает обычный `StaticBody3D` с collision shape в кнопку;
@@ -39,7 +39,7 @@ opaque handles. Скрипт создаёт переносимые `Color`/`Vect
 
 ## Distributed State в той же сцене
 
-Script id `demo.light-switch` является namespace wire-id. Локальные `light` и `switch`
+Первый script id `demo.light-switch` является namespace wire-id page realm. Локальные `light` и `switch`
 превращаются клиентом в `demo.light-switch/light` и `demo.light-switch/switch`, поэтому разные
 скрипты страницы не могут случайно занять state друг друга.
 
@@ -63,7 +63,7 @@ Top-level скрипты запускаются на общей границе `
    прийти в общую фазу.
 6. Закрыть первоначальный authority и продолжить переключение в оставшемся клиенте.
 
-`tests/test_state_switch.tscn` строит реальный документ, активирует оба Luau realm, проверяет
+`tests/test_state_switch.tscn` строит реальный документ, активирует оба Luau script в общем realm, проверяет
 обычный collision target, один update frame и изменение ресурса, имитирует room reset и authority
 transition, запускает page-defined reducer через generic Store и подтверждает, что distributed
 delta возвращается в Luau subscription и меняет сцену. Низкоуровневые инварианты Store отдельно

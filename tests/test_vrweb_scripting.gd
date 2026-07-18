@@ -94,7 +94,7 @@ func _test_fetch() -> void:
 	_eq(result.errors.is_empty(), true, "linked source fetch succeeds")
 	_eq(result.scripts.size(), 3, "linked sources and inline controller are materialized")
 	if result.scripts.size() == 3:
-		_eq(str(result.scripts[0].source).contains("document.query"), true,
+		_eq(str(result.scripts[0].source).contains("SpeedModel"), true,
 				"fetcher returns source, never bytecode")
 		var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 		var built := VrwebBuilder.build(doc, "vrwebresource://external_script.html", policy)
@@ -113,14 +113,15 @@ func _test_fetch() -> void:
 		runtime.script_failed.connect(func(id, phase, message):
 			script_errors.append({"id": id, "phase": phase, "message": message}))
 		runtime.setup(page_root, targets, "vrwebresource://external_script.html", null, policy)
-		_eq(runtime.activate(result.scripts).ok, true,
-				"three modular declarations execute through the page runtime")
+		var activation := runtime.activate(result.scripts)
+		_eq(activation.ok, true,
+				"three modular declarations execute through the page runtime (%s)" % str(activation))
 		_eq((targets.get("external-label") as Label3D).text,
 				"2 LINKED FILES + 1 INLINE SCRIPT",
 				"linked view mutates its VRWML target by id")
-		await get_tree().process_frame
-		_eq((targets.get("view-status") as Label3D).text.contains("apply-speed(1.0)"), true,
-				"linked model calls the linked view endpoint after activation")
+		_eq((targets.get("view-status") as Label3D).text.contains(
+				"SpinnerView uses SpeedModel: 1.0x"), true,
+				"second linked file uses the class declared by the first")
 		var spinner := targets.get("external-spinner") as MeshInstance3D
 		runtime._process(0.25)
 		_eq(not spinner.position.is_equal_approx(Vector3.ZERO), true,
@@ -128,15 +129,15 @@ func _test_fetch() -> void:
 		var button := targets.get("external-button") as StaticBody3D
 		var bridge = button.get_meta(VrwebScriptInputBridge.META, null)
 		_eq(bridge is VrwebScriptInputBridge and bridge.dispatch(Vector3.ZERO), true,
-				"inline controller invokes the linked model")
-		await get_tree().process_frame
-		await get_tree().process_frame
-		_eq((targets.get("model-status") as Label3D).text.contains("private speed = 2.0x"),
-				true, "linked model updates its private state")
-		_eq((targets.get("view-status") as Label3D).text.contains("apply-speed(2.0)"), true,
-				"model forwards the new value to the linked view")
+				"inline controller uses both linked classes")
+		_eq((targets.get("model-status") as Label3D).text.contains(
+				"SpeedModel instance = 2.0x"), true,
+				"inline controller updates the linked SpeedModel instance")
+		_eq((targets.get("view-status") as Label3D).text.contains(
+				"SpinnerView uses SpeedModel: 2.0x"), true,
+				"linked SpinnerView reads the same model instance")
 		_eq(script_errors.is_empty(), true,
-				"cross-realm endpoint chain completes without script errors")
+				"shared page realm composition completes without script errors")
 		runtime.close()
 		runtime.queue_free()
 		page_root.queue_free()
