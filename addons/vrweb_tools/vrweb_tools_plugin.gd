@@ -19,6 +19,12 @@ const EDITOR_LAUNCH_MODE_SETTING := "vrweb_maker/launch_mode"
 var _dock: VBoxContainer
 var _dock_scroll: ScrollContainer
 var _integration_slot: VBoxContainer
+var _script_opt: OptionButton
+var _script_id_edit: LineEdit
+var _script_source_edit: TextEdit
+var _script_src_edit: LineEdit
+var _script_integrity_edit: LineEdit
+var _element_id_edit: LineEdit
 var _prop_edit: LineEdit
 var _url_edit: LineEdit
 var _type_opt: OptionButton
@@ -32,6 +38,7 @@ var _launch_mode_opt: OptionButton
 var _pending_launch_path := ""
 var _portable_html_importer: EditorSceneFormatImporter
 var _integration: Object
+var _refreshing_authoring_ui := false
 
 
 func _enter_tree() -> void:
@@ -98,6 +105,34 @@ func _build_dock() -> void:
 	_dock.add_child(_button("Убрать привязку", _on_unbind_pressed))
 
 	_dock.add_child(_sep())
+	_dock.add_child(_heading("Luau-скрипты мира"))
+	_script_opt = OptionButton.new()
+	_script_opt.item_selected.connect(_on_script_selected)
+	_dock.add_child(_script_opt)
+	_script_id_edit = LineEdit.new()
+	_script_id_edit.placeholder_text = "id скрипта, например world.behavior"
+	_dock.add_child(_script_id_edit)
+	_script_source_edit = TextEdit.new()
+	_script_source_edit.placeholder_text = "inline Luau source"
+	_script_source_edit.custom_minimum_size.y = 150
+	_dock.add_child(_script_source_edit)
+	_script_src_edit = LineEdit.new()
+	_script_src_edit.placeholder_text = "или linked src, например behavior.luau"
+	_dock.add_child(_script_src_edit)
+	_script_integrity_edit = LineEdit.new()
+	_script_integrity_edit.placeholder_text = "integrity для linked script (необязательно)"
+	_dock.add_child(_script_integrity_edit)
+	_dock.add_child(_button("Сохранить скрипт", _on_save_script_pressed))
+	_dock.add_child(_button("Удалить выбранный скрипт", _on_remove_script_pressed))
+
+	_dock.add_child(_sep())
+	_dock.add_child(_heading("Queryable id → выбранный узел"))
+	_element_id_edit = LineEdit.new()
+	_element_id_edit.placeholder_text = "id для document.query(\"#id\")"
+	_dock.add_child(_element_id_edit)
+	_dock.add_child(_button("Сохранить id узла", _on_save_element_id_pressed))
+
+	_dock.add_child(_sep())
 	_dock.add_child(_heading("Build & Run · production runtime"))
 	_knossos_path_edit = LineEdit.new()
 	_knossos_path_edit.placeholder_text = "Knossos executable или macOS .app"
@@ -113,6 +148,7 @@ func _build_dock() -> void:
 	_launch_mode_opt.select(1 if saved_mode == VrwebLauncher.MODE_DEEPLINK else 0)
 	_dock.add_child(_launch_mode_opt)
 	_dock.add_child(_button("Build & Run in Knossos", _on_build_run_pressed))
+	_dock.add_child(_button("Открыть руководство разработчика", _on_open_guide_pressed))
 
 	_integration_slot = VBoxContainer.new()
 	_integration_slot.name = "Integration"
@@ -401,7 +437,136 @@ func _sha256_text(content: String) -> String:
 
 
 func _on_selection_changed() -> void:
-	pass
+	_refresh_element_id()
+
+
+func _refresh_authoring_ui() -> void:
+	if _script_opt == null:
+		return
+	_refreshing_authoring_ui = true
+	_script_opt.clear()
+	_script_opt.add_item("Новый скрипт…")
+	var root := EditorInterface.get_edited_scene_root()
+	if root != null:
+		for raw in root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, []):
+			if raw is Dictionary:
+				_script_opt.add_item(str(raw.get("id", "без id")))
+	_script_opt.select(0)
+	_clear_script_editor()
+	_refreshing_authoring_ui = false
+	_refresh_element_id()
+
+
+func _clear_script_editor() -> void:
+	_script_id_edit.text = ""
+	_script_source_edit.text = ""
+	_script_src_edit.text = ""
+	_script_integrity_edit.text = ""
+
+
+func _on_script_selected(index: int) -> void:
+	if _refreshing_authoring_ui:
+		return
+	_clear_script_editor()
+	if index <= 0:
+		return
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
+		return
+	var scripts: Array = root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, [])
+	if index - 1 >= scripts.size() or not scripts[index - 1] is Dictionary:
+		return
+	var raw: Dictionary = scripts[index - 1]
+	_script_id_edit.text = str(raw.get("id", ""))
+	_script_source_edit.text = str(raw.get("source", ""))
+	_script_src_edit.text = str(raw.get("src", ""))
+	_script_integrity_edit.text = str(raw.get("integrity", ""))
+
+
+func _on_save_script_pressed() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
+		_say("Нет открытой сцены для скрипта.")
+		return
+	var raw := {"id": _script_id_edit.text.strip_edges(),
+		"source": _script_source_edit.text, "src": _script_src_edit.text.strip_edges(),
+		"integrity": _script_integrity_edit.text.strip_edges()}
+	var prepared := VrwebInlineExporter.prepare(raw)
+	if not bool(prepared.get("ok", false)):
+		_say("Скрипт не сохранён: %s." % prepared.get("error", "неверное объявление"))
+		return
+	var scripts: Array = root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, []).duplicate(true)
+	var target := _script_opt.selected - 1
+	for index in scripts.size():
+		if index != target and scripts[index] is Dictionary \
+				and str(scripts[index].get("id", "")) == str(raw.id):
+			_say("Скрипт не сохранён: id %s уже используется." % raw.id)
+			return
+	if target >= 0 and target < scripts.size():
+		scripts[target] = raw
+	else:
+		scripts.append(raw)
+	root.set_meta(VrwebExporter.META_PAGE_SCRIPTS, scripts)
+	_mark_dirty()
+	_refresh_authoring_ui()
+	_say("Скрипт %s сохранён в сцене; выполните Build & Run для проверки в sandbox." % raw.id)
+
+
+func _on_remove_script_pressed() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	var target := _script_opt.selected - 1
+	if root == null or target < 0:
+		_say("Выберите существующий скрипт.")
+		return
+	var scripts: Array = root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, []).duplicate(true)
+	if target >= scripts.size():
+		return
+	var script_id := str(scripts[target].get("id", "")) if scripts[target] is Dictionary else ""
+	scripts.remove_at(target)
+	if scripts.is_empty():
+		root.remove_meta(VrwebExporter.META_PAGE_SCRIPTS)
+	else:
+		root.set_meta(VrwebExporter.META_PAGE_SCRIPTS, scripts)
+	_mark_dirty()
+	_refresh_authoring_ui()
+	_say("Скрипт %s удалён из сцены." % script_id)
+
+
+func _refresh_element_id() -> void:
+	if _element_id_edit == null:
+		return
+	var selected := EditorInterface.get_selection().get_selected_nodes()
+	_element_id_edit.text = "" if selected.is_empty() else str(
+			selected[0].get_meta(VrwebExporter.META_ELEMENT_ID, ""))
+
+
+func _on_save_element_id_pressed() -> void:
+	var node := _selected_node()
+	if node == null:
+		return
+	var value := _element_id_edit.text.strip_edges()
+	if value.is_empty():
+		node.remove_meta(VrwebExporter.META_ELEMENT_ID)
+		_say("Queryable id узла «%s» удалён." % node.name)
+	elif not VrwebInlineExporter.valid_id(value):
+		_say("Id узла недопустим: используйте латиницу, цифры, точку, '_' или '-'.")
+		return
+	else:
+		node.set_meta(VrwebExporter.META_ELEMENT_ID, value)
+		_say("Узел «%s» доступен скриптам как #%s." % [node.name, value])
+	_mark_dirty()
+
+
+func _on_open_guide_pressed() -> void:
+	for path in ["res://DEVELOPER_GUIDE.md", "res://docs/maker-workflow.md"]:
+		if FileAccess.file_exists(path):
+			var error := OS.shell_open(ProjectSettings.globalize_path(path))
+			if error == OK:
+				_say("Открыто руководство разработчика.")
+			else:
+				_say("Не удалось открыть руководство (код %d): %s" % [error, path])
+			return
+	_say("Руководство не найдено в проекте; откройте README Maker Kit.")
 
 
 func _on_bind_pressed() -> void:
@@ -482,6 +647,7 @@ func _save_external_data() -> void:
 
 
 func _on_editor_scene_changed(root: Node) -> void:
+	_refresh_authoring_ui()
 	if _integration != null and _integration.has_method("on_scene_changed"):
 		_integration.call("on_scene_changed", root)
 

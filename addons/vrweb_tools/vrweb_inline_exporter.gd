@@ -39,5 +39,9 @@ static func _valid_id(value: String) -> bool:
 	return true
 
 
+static func valid_id(value: String) -> bool:
+	return _valid_id(value)
+
+
 static func _error(message: String) -> Dictionary:
 	return {"ok": false, "error": message, "definition": {}}

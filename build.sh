@@ -295,6 +295,7 @@ build_maker_kit() {
   rm -rf "$stage/.godot" "$stage/dist"
   cp -R "$ROOT/addons/vrweb_tools" "$stage/addons/vrweb_tools"
   cp "$ROOT/packaging/maker-kit/README.md" "$stage/README.md"
+  cp -R "$ROOT/docs" "$stage/docs"
   cp "$ROOT/packaging/maker-kit/vscode-settings.json" "$stage/.vscode/settings.json"
   cp "$ROOT/schemas/vrweb-html-data.json" "$stage/schemas/vrweb-html-data.json"
   stage_maker_changelog "$stage/CHANGELOG.md"
@@ -375,6 +376,7 @@ verify_maker_kit_archive() {
   fi
   [[ -s "$project/dist/world.html" && -s "$project/dist/report.json" \
       && -s "$project/compatibility.json" \
+      && -s "$project/docs/maker-workflow.md" \
       && -s "$project/schemas/vrweb-html-data.json" ]] || {
     tail -30 "$log" >&2
     rm -rf "$work"

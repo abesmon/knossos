@@ -6,6 +6,9 @@ Godot 4.6 project/addon. Knossos не требуется для сборки HTM
 
 ## Начало работы
 
+Полная пошаговая инструкция находится в `docs/maker-workflow.md`; её также можно открыть кнопкой
+**Открыть руководство разработчика** в dock VRWeb.
+
 1. Откройте этот каталог как Godot project либо скопируйте `addons/vrweb_tools` в существующий
    Godot 4.6 project.
 2. Включите **VRWeb Tools** в Project Settings → Plugins.
@@ -14,6 +17,9 @@ Godot 4.6 project/addon. Knossos не требуется для сборки HTM
 
 Переносимое поведение добавляется в HTML как inline/linked
 `<script type="application/vrweb+luau">`; локальные Godot scripts не публикуются.
+Добавлять и редактировать объявления, а также queryable id узлов можно прямо в dock VRWeb —
+ручная правка metadata не требуется. Relative linked scripts нужно положить рядом с output
+самостоятельно; для первого self-contained мира используйте inline source.
 `compatibility.json` фиксирует совместимые версии Maker Kit, Knossos, Godot и
 локальной VRWML policy. Изменения и миграции перечисляются в общем `CHANGELOG.md` release train.
 
