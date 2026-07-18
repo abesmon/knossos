@@ -175,6 +175,10 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Реализовать server-to-server federation signaling, чтобы пользователи разных signaling
   servers попадали в один mesh.
 - [ ] Стандартизировать приватный query-параметр, рабочий вариант `vrweb-instance=<code>`.
+- [ ] Обкатать server-provided adaptive representations через request header с рабочим именем
+  `VRWeb-Capability-Code`, не меняя URL/room key и не создавая registry конкретных codes заранее.
+- [ ] Зафиксировать cache contract (`Vary`), redirect policy и HTTP test vectors negotiation.
+- [ ] Определить минимальный проверяемый network ABI вариантов в Maker Kit.
 - [ ] Добавить явный compatibility/discovery contract для сторонних клиентов и серверов.
 
 ### P2 — Personal spaces и persistence vNext

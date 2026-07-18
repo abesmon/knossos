@@ -46,6 +46,7 @@ const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
 const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
 const IMAGE_TAG := "VRWebImage"
 const BLOB_TAG := "VRWebBlob"
+const WORLD_UI_CANVAS_TAG := "WorldUiCanvas"
 const SUBRESOURCE_PREFIX := "SubResource:::"
 const EXTRESOURCE_PREFIX := "ExtResource:::"
 const MODE_COMBINE := "combine"
@@ -54,6 +55,7 @@ const MODE_EXCLUSIVE := "exclusive"
 const MIRROR_SCENE := preload("res://scenes/vrweb_mirror.tscn")
 const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
 const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
+const WORLD_UI_CANVAS_SCENE := preload("res://actors/world_ui/world_ui_canvas.tscn")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -84,6 +86,7 @@ const VIDEO_SCREEN_RESERVED := {
 ## Атрибуты <VRWebImage>, которые задают саму картинку, а не свойства узла Node3D.
 ## width/height — желаемый размер квада в МЕТРАХ (0/нет = натуральный размер текстуры).
 const IMAGE_RESERVED := {"src": true, "alt": true, "width": true, "height": true}
+const WORLD_UI_CANVAS_RESERVED := {"size": true, "viewport_size": true}
 
 var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
@@ -275,6 +278,8 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_video_screen(elem)
 	if elem.raw_tag == IMAGE_TAG:
 		return _build_image(elem)
+	if elem.raw_tag == WORLD_UI_CANVAS_TAG:
+		return _build_world_ui_canvas(elem)
 	if elem.raw_tag == BLOB_TAG:
 		# Документная форма realtime-ресурса — не узел: байты уходят в BlobStore.
 		_ingest_blob(elem)
@@ -297,6 +302,35 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 	_route_audio_to_world(node)
 	_append_materialized_children(node, elem)
 	return node
+
+
+## Публичная 3D-обёртка стандартного Godot UI. Прямые дочерние Control монтируются под
+## внутренний SubViewport, а не под StaticBody3D canvas-а.
+func _build_world_ui_canvas(elem: HtmlNode) -> Node:
+	var canvas := WORLD_UI_CANVAS_SCENE.instantiate() as WorldUiCanvas
+	var size_value: Variant = _resolve_value(elem.get_attr("size", "Vector2(4,2.5)"))
+	var viewport_value: Variant = _resolve_value(
+			elem.get_attr("viewport_size", "Vector2i(1024,640)"))
+	var size_m: Vector2 = size_value if size_value is Vector2 else Vector2(4.0, 2.5)
+	var viewport_size: Vector2i = viewport_value if viewport_value is Vector2i else Vector2i(1024, 640)
+	canvas.setup_canvas(size_m, viewport_size)
+	for key in elem.attributes:
+		if WORLD_UI_CANVAS_RESERVED.has(key) or NODE_RESERVED.has(key):
+			continue
+		if _property_allowed(canvas, str(key), str(elem.attributes[key])):
+			canvas.set(key, _resolve_value(elem.attributes[key]))
+	var content := canvas.content_root()
+	for child in elem.children:
+		if child.is_text() or _is_meta_tag(child):
+			continue
+		var node := _build_node(child)
+		if node == null:
+			continue
+		if node is Control and content != null:
+			content.add_child(node)
+		else:
+			canvas.add_child(node)
+	return canvas
 
 
 ## Аудио-узлы страницы по умолчанию направляем на шину «World» (звуки мира) — чтобы их

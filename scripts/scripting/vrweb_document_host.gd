@@ -9,6 +9,7 @@ const MAX_UPDATE_CALLBACKS := 8
 const MAX_HOST_CALLS := 10_000
 const MAX_VALUE_BYTES := 64 * 1024
 const ASSETS_SCRIPT := preload("res://scripts/scripting/vrweb_script_assets.gd")
+const RENDER_SCRIPT := preload("res://scripts/scripting/vrweb_script_render.gd")
 const CREATE_CLASSES := {
 	"Node3D": true, "MeshInstance3D": true, "StaticBody3D": true, "Area3D": true,
 	"CollisionShape3D": true, "Label3D": true, "OmniLight3D": true,
@@ -32,6 +33,7 @@ const CAPABILITIES := {
 	"vrweb/assets/2": true,
 	"vrweb/clock/1": true,
 	"vrweb/log/1": true,
+	"vrweb/render-shaders/1": true,
 }
 
 var script_id := ""
@@ -58,6 +60,7 @@ var _pending_events: Array[Dictionary] = []
 var _pending_timers: Array[Dictionary] = []
 var _pending_updates: Array[Callable] = []
 var _input_bridges: Array[VrwebScriptInputBridge] = []
+var _signal_connections: Array[Dictionary] = []
 var _timers: Dictionary = {}
 var _updates: Array[Callable] = []
 var _next_timer := 1
@@ -65,6 +68,8 @@ var _state := VrwebScriptState.new()
 var _remote := VrwebScriptRemote.new()
 var _players := VrwebScriptPlayers.new()
 var _assets = ASSETS_SCRIPT.new()
+var _render = RENDER_SCRIPT.new()
+var _pending_resource_applies: Array[Dictionary] = []
 var _clock_snapshot: Callable
 
 
@@ -87,6 +92,7 @@ func setup(id: String, content_hash: String, page_root: Node, targets: Dictionar
 	_remote.setup(script_id, _invoke)
 	_players.setup(_invoke)
 	_assets.setup(script_id, _base_url, _owner, _invoke, _apply_asset, _policy)
+	_render.setup(script_id, _apply_runtime_resource, _policy)
 
 
 func api() -> Dictionary:
@@ -101,6 +107,7 @@ func api() -> Dictionary:
 		"remote": _remote.api(),
 		"players": _players.api(),
 		"assets": _assets.api(),
+		"render": _render.api(),
 		"clock": {"local_time": local_time, "authority_time": authority_time,
 			"authority_ready": authority_clock_ready, "set_timeout": set_timeout,
 			"set_interval": set_interval, "cancel": cancel_timer},
@@ -126,12 +133,15 @@ func commit() -> bool:
 			_page_root.add_child(node)
 	for operation in _pending_sets:
 		_apply_set(operation.node, operation.property, operation.value)
+	for operation in _pending_resource_applies:
+		_apply_set(operation.object, operation.property, operation.value)
 	for event in _pending_events:
 		_connect_event(event.node, event.name, event.callback, event.hint)
 	for timer in _pending_timers:
 		_start_timer(float(timer.seconds), timer.callback, bool(timer.repeat))
 	_updates.append_array(_pending_updates)
 	_pending_sets.clear()
+	_pending_resource_applies.clear()
 	_pending_events.clear()
 	_pending_timers.clear()
 	_pending_updates.clear()
@@ -147,6 +157,13 @@ func close(preserve_replicated_state := false) -> void:
 	for bridge in _input_bridges:
 		bridge.close()
 	_input_bridges.clear()
+	for record in _signal_connections:
+		var object := record.get("object") as Object
+		var signal_name := StringName(str(record.get("signal", "")))
+		var callable: Callable = record.get("callable", Callable())
+		if is_instance_valid(object) and object.is_connected(signal_name, callable):
+			object.disconnect(signal_name, callable)
+	_signal_connections.clear()
 	for timer_id in _timers.keys():
 		cancel_timer(timer_id)
 	_updates.clear()
@@ -161,6 +178,7 @@ func close(preserve_replicated_state := false) -> void:
 	_remote.close()
 	_players.close()
 	_assets.close()
+	_render.close()
 	_invoke = Callable()
 	_page_root = null
 	_player = null
@@ -264,14 +282,15 @@ func call_method(handle_id: int, method: String, arguments: Array = []):
 func on_event(handle_id: int, event_name: String, callback: Callable, hint := "") -> bool:
 	if not _allow_call() or not callback.is_valid():
 		return false
-	var node := _object(handle_id) as Node
-	if node == null or event_name != "activate":
+	var object := _object(handle_id)
+	if object == null or (event_name == "activate" and not (object is Node)) \
+			or (event_name != "activate" and not object.has_signal(event_name)):
 		return false
 	if _staging:
-		_pending_events.append({"node": node, "name": event_name, "callback": callback,
+		_pending_events.append({"node": object, "name": event_name, "callback": callback,
 			"hint": str(hint)})
 		return true
-	return _connect_event(node, event_name, callback, str(hint))
+	return _connect_event(object, event_name, callback, str(hint))
 
 
 func destroy(handle_id: int) -> bool:
@@ -303,6 +322,7 @@ func on_update(callback: Callable) -> bool:
 func update(delta: float, clock: Dictionary) -> void:
 	if not _valid or _staging or not _invoke.is_valid():
 		return
+	_render.update_clock(clock)
 	var event := {
 		"delta": delta,
 		"local_time": float(clock.get("local_time", 0.0)),
@@ -457,7 +477,12 @@ func _compatible_property_value(node: Object, property: String, value) -> bool:
 	var actual := typeof(value)
 	if expected == actual:
 		if expected == TYPE_OBJECT and value is Object and not expected_class.is_empty():
-			return (value as Object).is_class(expected_class)
+			# Godot 4.6 exposes union resource constraints as a comma-separated class_name
+			# (for example BaseMaterial3D,ShaderMaterial on material_override).
+			for allowed_class in expected_class.split(",", false):
+				if (value as Object).is_class(allowed_class.strip_edges()):
+					return true
+			return false
 		return true
 	if expected == TYPE_FLOAT and actual == TYPE_INT:
 		return true
@@ -490,6 +515,24 @@ func _apply_asset(resource_id: int, target: Dictionary, property: String) -> boo
 	return _apply_set(object, property, value)
 
 
+func _apply_runtime_resource(value: Resource, target: Dictionary, property: String) -> bool:
+	if not _allow_call() or value == null or not target.has("id") \
+			or BLOCKED_PROPERTIES.has(property):
+		return false
+	var object := _object(int(target.get("id", 0)))
+	if object == null or not _has_property(object, property) \
+			or not _compatible_property_value(object, property, value):
+		return false
+	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_property(
+			object.get_class(), property, "OpaqueRuntimeResource",
+			{"source": "script", "script_id": script_id})):
+		return false
+	if _staging:
+		_pending_resource_applies.append({"object": object, "property": property, "value": value})
+		return true
+	return _apply_set(object, property, value)
+
+
 func _clock() -> Dictionary:
 	if _clock_snapshot.is_valid():
 		var value = _clock_snapshot.call()
@@ -510,13 +553,59 @@ func _forget_owned(handle_id: int, immediate: bool) -> void:
 			node.queue_free()
 
 
-func _connect_event(node: Node, _event_name: String, callback: Callable, hint: String) -> bool:
-	var bridge := VrwebScriptInputBridge.new()
-	bridge.setup(node, func(event):
-		if _valid and _invoke.is_valid():
-			_invoke.call(callback, event), hint)
-	_input_bridges.append(bridge)
+func _connect_event(object: Object, event_name: String, callback: Callable, hint: String) -> bool:
+	if event_name == "activate":
+		var bridge := VrwebScriptInputBridge.new()
+		bridge.setup(object as Node, func(event):
+			if _valid and _invoke.is_valid():
+				_invoke.call(callback, event), hint)
+		_input_bridges.append(bridge)
+		return true
+	var info := _signal_info(object, event_name)
+	if info.is_empty():
+		return false
+	var arg_names: Array = []
+	for arg in info.get("args", []):
+		arg_names.append(str(arg.get("name", "")))
+	var dispatch := func(values: Array): _dispatch_signal(callback, event_name, arg_names, values)
+	var connection: Callable
+	match arg_names.size():
+		0: connection = func(): dispatch.call([])
+		1: connection = func(a): dispatch.call([a])
+		2: connection = func(a, b): dispatch.call([a, b])
+		3: connection = func(a, b, c): dispatch.call([a, b, c])
+		4: connection = func(a, b, c, d): dispatch.call([a, b, c, d])
+		_: return false
+	object.connect(event_name, connection)
+	_signal_connections.append({"object": object, "signal": event_name, "callable": connection})
 	return true
+
+
+func _signal_info(object: Object, event_name: String) -> Dictionary:
+	for info in object.get_signal_list():
+		if str(info.get("name", "")) == event_name:
+			return info
+	return {}
+
+
+func _dispatch_signal(callback: Callable, event_name: String, names: Array, values: Array) -> void:
+	if not _valid or not _invoke.is_valid():
+		return
+	var event := {"type": event_name, "args": []}
+	for index in values.size():
+		var value = _portable_signal_value(values[index])
+		(event.args as Array).append(value)
+		if index < names.size() and str(names[index]) != "":
+			event[str(names[index])] = value
+	_invoke.call(callback, event)
+
+
+func _portable_signal_value(value):
+	if _portable(value):
+		return value
+	if value is Object and is_instance_valid(value) and _reverse_handles.has(value.get_instance_id()):
+		return _handle_for(value)
+	return null
 
 
 func _timer(seconds: float, callback: Callable, repeat: bool) -> int:

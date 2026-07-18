@@ -34,6 +34,28 @@ viewport-текстурой и прокидывание mouse motion, left click
 
 `Portal` и `Bubble` не наследуются от этой базы: они интерактивные 3D-объекты, но не UI-панели.
 
+## Публичная композиция VRWML
+
+`WorldUiCanvas` — не база для множества предметных тегов, а общее обрамление стандартного Godot
+UI в 3D. Автор мира объявляет один
+`<WorldUiCanvas>`, а внутри вкладывает обычные `VBoxContainer`, `Button`, `LineEdit`, `CodeEdit`,
+`Tree`, `ColorPicker` и другие `Control`. Builder монтирует этих детей под внутренний root
+`SubViewport`; canvas централизованно решает mesh, texture, collision и ввод.
+
+Поддержка UI определяется общим правилом наследования от встроенного `Control`, а не ручным
+перечнем предметных панелей. Отдельной capability остаются только полномочия за пределами UI,
+например доступ file picker к локальным файлам.
+
+Knossos материализует тег особой веткой builder-а, потому что canvas является готовой сценой, а
+не одним `ClassDB`-классом. Прямые дочерние `Control` направляются в `SubViewport`; их обычная
+вложенность сохраняется. Pointer, click и wheel проходят через общий surface adapter. После клика
+по `LineEdit`, `TextEdit` или `CodeEdit` клавиатурный ввод направляется в canvas до `Escape`.
+
+Luau может подписываться через общий `handle.on(signal, callback, hint)` на опубликованные
+Godot-сигналы этих компонентов. В реализации нет знания о формах, редакторах или конкретном demo:
+один механизм обслуживает `Button.pressed`, `CodeEdit.text_changed`, `Slider.value_changed` и
+другие сигналы с переносимыми аргументами.
+
 ## Что взяли из VRChat/Unity
 
 VRChat `VRC_UIShape` устроен вокруг одной идеи: world-space `Canvas` получает отдельную форму,
