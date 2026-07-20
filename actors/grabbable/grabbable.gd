@@ -16,6 +16,7 @@ extends StaticBody3D
 signal grab(user_id: String, hand: String)
 signal drop(user_id: String, hand: String)
 signal use(user_id: String, hand: String)
+signal use_end(user_id: String, hand: String)
 
 const GROUP := "grabbables"
 
@@ -31,6 +32,9 @@ var grip_transform := Transform3D.IDENTITY
 ## Orientation=Grip/ExactGrip), true — adjustable (естественный хват в момент захвата +
 ## подстройка держателем, аналог VRChat Orientation=None + AllowManipulationWhenEquipped).
 var adjustable := false
+## Можно ли взять предмет (скриптовая ручка set_enabled, аналог VRChat pickupable):
+## false блокирует новые захваты, но не выбивает предмет из уже держащей руки.
+var enabled := true
 
 var _manager: Node = null
 var _auto_shape: CollisionShape3D = null
@@ -67,14 +71,14 @@ func _exit_tree() -> void:
 # --- Утиный интерфейс клик-луча (как Portal/Bubble) ---
 
 func is_active_at(_point: Vector3) -> bool:
-	if grab_id == "":
+	if grab_id == "" or not enabled:
 		return false
 	return _manager == null or not _manager.has_method("can_local_grab") \
 			or _manager.can_local_grab(self)
 
 
 func aim_hint_at(_point: Vector3) -> String:
-	if grab_id == "":
+	if grab_id == "" or not enabled:
 		return ""
 	if _manager != null and _manager.has_method("hint_for"):
 		return _manager.hint_for(self)
@@ -82,9 +86,43 @@ func aim_hint_at(_point: Vector3) -> String:
 
 
 func interact_at(_point: Vector3) -> void:
-	if grab_id == "" or _manager == null or not _manager.has_method("request_grab"):
+	if grab_id == "" or not enabled or _manager == null or not _manager.has_method("request_grab"):
 		return
 	_manager.request_grab(self)
+
+
+# --- Скриптовая поверхность (capability vrweb/grabbable/1, handle.call) ---
+
+## Программно положить предмет — действует только на клиенте держателя (release семантики
+## схемы; чужой клиент физически не может отпустить не свою руку). Имя release, а не drop:
+## drop занят одноимённым сигналом.
+func release() -> bool:
+	if _manager == null or not _manager.has_method("release_object"):
+		return false
+	return _manager.release_object(self)
+
+
+## user_id текущего держателя ("" — свободен).
+func holder() -> String:
+	if _manager == null or not _manager.has_method("holder_of"):
+		return ""
+	return _manager.holder_of(self)
+
+
+## Рука держателя ("" — свободен).
+func held_hand() -> String:
+	if _manager == null or not _manager.has_method("held_hand_of"):
+		return ""
+	return _manager.held_hand_of(self)
+
+
+func set_enabled(on: bool) -> bool:
+	enabled = on
+	return true
+
+
+func is_enabled() -> bool:
+	return enabled
 
 
 # --- Состояние удержания (вызывает GrabManager) ---

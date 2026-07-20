@@ -26,6 +26,7 @@ var _fetcher: PageFetcher
 var _css_fetcher: CssFetcher
 var _script_fetcher: VrwebScriptFetcher
 var _script_runtime: VrwebLuauRuntime
+var _script_pick_open := false   # OS-диалог document.files.pick уже открыт (один на клиента)
 var _address_focus_token := 0
 var _settings_focus_token := 0
 var _chat_focus_token := 0
@@ -574,6 +575,7 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 		return
 	_script_runtime = VrwebLuauRuntime.new()
 	_script_runtime.name = "VrwebLuauRuntime"
+	_script_runtime.file_picker = _script_file_picker()
 	_world.add_child(_script_runtime)
 	var script_root: Node = vrweb.get("root")
 	if script_root == null:
@@ -814,7 +816,8 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 			vrweb_targets[rid] = page_resources[rid]
 	ephemeral_view.setup(_activate_transition,
 		{"targets": vrweb_targets, "resources": page_resources, "base_url": base_url,
-		"content_policy": _content_policy})
+		"content_policy": _content_policy, "player": _player,
+		"file_picker": _script_file_picker()})
 
 	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
 	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).
@@ -1376,6 +1379,38 @@ func _on_debug_probed(text: String) -> void:
 # ImagePlacementTool. См. docs/network/realtime-resources.md и docs/client/tools.md.
 
 ## Инструменту нужен файл картинки: открыть диалог и вернуть результат через provide_file.
+## Провайдер document.files.pick (capability vrweb/files/1): OS-диалог — UI, он живёт в main,
+## как и пикер инструмента картинок. Сам выбор файла пользователем — явное согласие (модель
+## <input type="file">); скрипт получает только байты выбранного файла, путь ОС не уезжает.
+func _script_file_picker() -> Callable:
+	return func(kind: String, done: Callable) -> void:
+		if _script_pick_open or not DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+			done.call(false, "", PackedByteArray())
+			return
+		_script_pick_open = true
+		var focus_token := _player.claim_mouse_focus("script_file_dialog")
+		DisplayServer.file_dialog_show("Выбрать файл", "", "", false,
+			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, _script_pick_filters(kind),
+			func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
+				_script_pick_open = false
+				_player.release_mouse_focus(focus_token)
+				_player.capture_mouse(true)
+				var path := paths[0] if ok and not paths.is_empty() else ""
+				var bytes := FileAccess.get_file_as_bytes(path) if path != "" else PackedByteArray()
+				done.call(path != "" and not bytes.is_empty(), path.get_file(), bytes))
+
+
+func _script_pick_filters(kind: String) -> PackedStringArray:
+	match kind:
+		"image":
+			return PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp,*.gif,*.bmp;Изображения"])
+		"audio":
+			return PackedStringArray(["*.mp3,*.ogg,*.wav;Аудио"])
+		"model":
+			return PackedStringArray(["*.glb,*.gltf;3D-модели"])
+	return PackedStringArray(["*;Все файлы"])
+
+
 func _on_image_pick_requested(filters: PackedStringArray) -> void:
 	if _image_dialog_open:
 		return   # диалог уже открыт; его колбэк и завершит ожидание инструмента (provide_file)

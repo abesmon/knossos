@@ -165,8 +165,10 @@ func _detach(object_id: String, g: Grabbable) -> void:
 # --- Локальные действия игрока ---
 
 ## Правила локального взаимодействия: свободный предмет берётся, свой — нет (он уже в руке),
-## чужой — только при theft="allow".
+## чужой — только при theft="allow"; выключенный скриптом (enabled=false) — никем.
 func can_local_grab(g: Grabbable) -> bool:
+	if not g.enabled:
+		return false
 	var info: Dictionary = _held.get(OBJECT_PREFIX + g.grab_id, {})
 	if info.is_empty():
 		return true
@@ -212,12 +214,38 @@ func local_held() -> Grabbable:
 	return g if g != null and is_instance_valid(g) else null
 
 
-## use — transient-событие только на клиенте держателя (норматив). Дальше автор страницы сам
-## решает, что с ним делать (document.remote / document.state).
+## use/use_end — transient-события только на клиенте держателя (норматив; фазы — как
+## OnPickupUseDown/Up у VRChat). Дальше автор страницы сам решает, что с ними делать
+## (document.remote / document.state).
 func use_held() -> void:
 	var g := local_held()
 	if g != null:
 		g.use.emit(_my_user(), HAND_RIGHT)
+
+
+func use_held_end() -> void:
+	var g := local_held()
+	if g != null:
+		g.use_end.emit(_my_user(), HAND_RIGHT)
+
+
+# --- Скриптовая поверхность grabbable (вызывается методами узла, см. grabbable.gd) ---
+
+## Программный release конкретного предмета: действует, только если его держит ЛОКАЛЬНЫЙ
+## пользователь (release чужой руки невозможен по семантике схемы).
+func release_object(g: Grabbable) -> bool:
+	if local_held() != g:
+		return false
+	release_held()
+	return true
+
+
+func holder_of(g: Grabbable) -> String:
+	return str((_held.get(OBJECT_PREFIX + g.grab_id, {}) as Dictionary).get("holder", ""))
+
+
+func held_hand_of(g: Grabbable) -> String:
+	return str((_held.get(OBJECT_PREFIX + g.grab_id, {}) as Dictionary).get("hand", ""))
 
 
 ## Положить держимый предмет РОВНО ТАМ, где он сейчас в руке: канон — его текущая мировая

@@ -21,8 +21,15 @@ extends Node3D
 
 const BUBBLE := preload("res://actors/bubble/bubble.tscn")
 const STROKE := preload("res://actors/stroke/stroke.tscn")
+const ITEM_HOST := preload("res://scripts/vrweb_item_host.gd")
+
+## Ресурсный потолок клиента: сколько item-realm'ов (kind="vrweb-item") материализуется
+## одновременно. Это лимит песочницы (каждый item — своя Luau VM), а не политика контента.
+const MAX_ITEMS := 32
 
 var _activate_cb: Callable
+var _player: Node = null
+var _file_picker: Callable = Callable()
 var _nodes := {}           # id (String) -> Node (объектные kind'ы; патчи сюда не попадают)
 var _targets := {}         # node_id страницы -> Object (узлы/ресурсы vrweb; реестр из main)
 var _resources := {}       # id -> Resource (суб-ресурсы страницы для резолва ссылок)
@@ -39,6 +46,8 @@ func setup(activate_cb: Callable, vrweb: Dictionary = {}) -> void:
 	_targets = vrweb.get("targets", {})
 	_resources = vrweb.get("resources", {})
 	_base_url = str(vrweb.get("base_url", ""))
+	_player = vrweb.get("player") as Node
+	_file_picker = vrweb.get("file_picker", Callable())
 	_content_policy = vrweb.get("content_policy") as VrwebContentPolicy
 	if _content_policy == null:
 		_content_policy = VrwebContentPolicy.new()
@@ -227,7 +236,28 @@ func _make_node(object: Dictionary) -> Node:
 				props.get("attrs", {}), _resources, _base_url, _content_policy,
 				{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
 				"object_id": str(object.get("id", "")), "author": str(object.get("author", ""))})
+		"vrweb-item":
+			# Переносимый предмет: item-документ по props.src, собственный script realm
+			# (см. VrwebItemHost и docs/space/portable-tools.md). Данные (src) придут через
+			# setup_object в _apply; удаление объекта снимает и сцену, и realm.
+			if _item_count() >= MAX_ITEMS:
+				Log.warn("ephemeral", "потолок item-realm'ов (%d) — vrweb-item пропущен" % MAX_ITEMS)
+				return null
+			var host := ITEM_HOST.new()
+			host.configure(str(object.get("id", "")), {
+				"base_url": _base_url, "content_policy": _content_policy,
+				"player": _player, "file_picker": _file_picker,
+			})
+			return host
 	return null
+
+
+func _item_count() -> int:
+	var count := 0
+	for node in _nodes.values():
+		if is_instance_valid(node) and node is VrwebItemHost:
+			count += 1
+	return count
 
 
 # --- Патчи узлов страницы (kind="vrweb-patch") ---

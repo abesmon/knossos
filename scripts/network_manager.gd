@@ -217,6 +217,7 @@ var _authority_clock_best_rtt := INF
 var _scene_reserved := {}
 var _obj_seq := 0          # счётчик для генерации id наших объектов (new_object_id)
 var _action_token := 0     # счётчик токенов отслеживаемых действий (request_scene_action_tracked)
+var _scene_standalone_begun := false  # офлайн-эпоха эфемерной сцены уже открыта (_standalone_scene_commit)
 var _scene_resync := false # ждём снимок состояния (был GAP / смена авторитета) — не спамим запросом
 var _expire_accum := 0.0   # аккумулятор throttle-сканирования TTL в _process
 # Входящие блобы: hex -> {rx: BlobProtocol.Rx|null, from: int (выбранный источник, 0 — ищем),
@@ -926,6 +927,8 @@ func request_scene_action(action: Dictionary) -> void:
 		return
 	if has_authority():
 		_authority_handle_action(action, Settings.user_id, my_rank())
+	elif _is_standalone_state_authority():
+		_standalone_scene_commit(action)
 	elif _can_rpc():
 		var a := authority_id()
 		if a != 0:
@@ -946,6 +949,8 @@ func request_scene_action_tracked(action: Dictionary) -> int:
 	elif has_authority():
 		var accepted := _authority_handle_action(action, Settings.user_id, my_rank())
 		call_deferred("emit_signal", "scene_action_acked", token, accepted)
+	elif _is_standalone_state_authority():
+		call_deferred("emit_signal", "scene_action_acked", token, _standalone_scene_commit(action))
 	elif _can_rpc() and authority_id() != 0:
 		var a := action.duplicate(true)
 		a["token"] = token
@@ -990,6 +995,17 @@ func scene_config_attrs() -> Dictionary:
 
 func scene_config() -> Dictionary:
 	return _scene.config()
+
+
+## Офлайн-режим: эфемерный слой остаётся полноценной ЛОКАЛЬНОЙ машиной — та же ветка, что
+## standalone authority у Replicated State (_is_standalone_state_authority): коммитим сами с
+## правами админа, событий по RPC нет (_can_rpc() ложно). Локальные объекты — сессионные:
+## при входе в комнату сцена сбрасывается и заменяется снимком её авторитета.
+func _standalone_scene_commit(action: Dictionary) -> bool:
+	if not _scene_standalone_begun:
+		_scene_standalone_begun = true
+		_scene.begin_authority()
+	return _authority_handle_action(action, Settings.user_id, 0)
 
 
 ## Авторитет: применить действие и разослать события. Ранг вычисляется здесь из доверенной
@@ -1471,6 +1487,7 @@ func _teardown_mesh() -> void:
 	_scene = SceneChanges.new()
 	_scene.reserved_ids = _scene_reserved
 	_scene_resync = false
+	_scene_standalone_begun = false
 	_replicated.reset_session()
 	_replicated_resync = false
 	_replicated_command_rates.clear()

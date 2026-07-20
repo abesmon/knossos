@@ -86,5 +86,10 @@ Player (хаб ввода: _unhandled_input, именованные действ
 Задел в базовом классе — `PlayerTool.descriptor() -> Dictionary`: сериализуемое описание
 инструмента в стиле эфемерного слоя (`{"kind": "tool-pencil", "props": {"color": …}}`).
 Сейчас дескриптор **никуда не отправляется**: inventory, pickup/ownership и материализация
-`tool-*` объектов не определены. Эта работа ведётся в
-[едином roadmap](../roadmap.md#p2--performance-streaming-и-ui).
+`tool-*` объектов не определены.
+
+Направление принято и проработано в
+[docs/space/portable-tools.md](../space/portable-tools.md): инструменты становятся
+переносимыми предметами на базе grabbable + scripting (item-пакет «разметка + Luau + ассеты»),
+а `PlayerTool`/`ToolManager` — уходящая натура; клиентскими остаются только системные механики
+(пузырь, OS-диалоги, статус-строка). Точки роста и порядок работ — там же.

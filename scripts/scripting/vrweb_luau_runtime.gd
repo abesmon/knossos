@@ -13,6 +13,10 @@ const SAFE_LIBS := LuaState.LIB_BASE | LuaState.LIB_COROUTINE | LuaState.LIB_TAB
 		| LuaState.LIB_STRING | LuaState.LIB_BIT32 | LuaState.LIB_BUFFER | LuaState.LIB_UTF8 \
 		| LuaState.LIB_MATH | LuaState.LIB_VECTOR
 
+## Провайдер OS-диалога выбора файла для document.files.pick (владелец runtime — main —
+## задаёт до activate; item-runtime получает его через контекст EphemeralView).
+var file_picker: Callable = Callable()
+
 var _realm: Dictionary = {}
 var _declarations: Array[Dictionary] = []
 var _active_hashes: Dictionary = {}
@@ -230,6 +234,7 @@ func _prepare_page(scripts: Array, previous_session: Dictionary) -> Dictionary:
 		return _invoke_page(callback, event, wants_result)
 	host.setup(page_id, combined_hash_source.sha256_text(), _page_root, _targets, _base_url,
 			_player, self, invoke, previous_session, _policy, _clock_snapshot)
+	host.file_picker = file_picker
 	root_state.register_library("document", host.api())
 	root_state.pop(1)
 	root_state.set_interrupts(true)

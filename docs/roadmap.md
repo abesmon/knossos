@@ -72,7 +72,9 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - WASM как отдельный эффективный runtime profile при появлении сценария;
 - user permissions и instance ACL поверх capability pool клиента;
 - расширенные представления клиента: VR/full-body и облегчённый voice-only клиент;
-- дальнейшие федеративные и social-возможности поверх открытых контрактов.
+- дальнейшие федеративные и social-возможности поверх открытых контрактов;
+- переносимые инструменты-предметы на базе grabbable + scripting вместо вшитых в клиент
+  (анализ и порядок работ — [space/portable-tools.md](space/portable-tools.md)).
 
 ## Ближайший критический путь
 

@@ -45,7 +45,24 @@ const CAPABILITIES := {
 	"vrweb/log/1": true,
 	"vrweb/render-shaders/1": true,
 	"vrweb/video/1": true,
+	"vrweb/scene-objects/1": true,
+	"vrweb/aim/1": true,
+	"vrweb/files/1": true,
+	"vrweb/grabbable/1": true,
 }
+
+## Методы grabbable-предмета (capability vrweb/grabbable/1) на handle <VRWebGrabbable>:
+## имя -> ожидаемые типы аргументов. «drop» схемы называется release — имя `drop` занято
+## одноимённым сигналом узла.
+const GRABBABLE_METHODS := {
+	"release": [], "holder": [], "held_hand": [],
+	"set_enabled": [TYPE_BOOL], "is_enabled": [],
+}
+
+## Максимум байт файла, который files.pick вернёт скрипту инлайном (bytes); файл целиком в
+## любом случае уезжает в BlobStore и доступен по vrwebblob:// URL.
+const MAX_PICK_INLINE_BYTES := 2 * 1024 * 1024
+const MAX_PICK_FILE_BYTES := 32 * 1024 * 1024
 
 var script_id := ""
 var script_hash := ""
@@ -78,6 +95,11 @@ var _next_timer := 1
 var _state := VrwebScriptState.new()
 var _remote := VrwebScriptRemote.new()
 var _players := VrwebScriptPlayers.new()
+var _scene := VrwebScriptScene.new()
+## Провайдер выбора файла (инжектирует владелец runtime; main показывает OS-диалог):
+## file_picker.call(kind: String, done: Callable(ok, name, bytes)).
+var file_picker: Callable = Callable()
+var _pick_pending := false
 var _assets = ASSETS_SCRIPT.new()
 var _render = RENDER_SCRIPT.new()
 var _pending_resource_applies: Array[Dictionary] = []
@@ -102,6 +124,7 @@ func setup(id: String, content_hash: String, page_root: Node, targets: Dictionar
 	_state.setup(script_id, _invoke)
 	_remote.setup(script_id, _invoke)
 	_players.setup(_invoke)
+	_scene.setup(script_id, _invoke)
 	_assets.setup(script_id, _base_url, _owner, _invoke, _apply_asset, _policy)
 	_render.setup(script_id, _apply_runtime_resource, _policy)
 
@@ -117,6 +140,8 @@ func api() -> Dictionary:
 		"state": _state.api(),
 		"remote": _remote.api(),
 		"players": _players.api(),
+		"scene": _scene.api(),
+		"files": {"pick": files_pick},
 		"assets": _assets.api(),
 		"render": _render.api(),
 		"clock": {"local_time": local_time, "authority_time": authority_time,
@@ -124,7 +149,7 @@ func api() -> Dictionary:
 			"set_interval": set_interval, "cancel": cancel_timer},
 		"on_update": on_update,
 		"values": {"vector3": make_vector3, "color": make_color},
-		"player": {"get": player_get, "set_position": player_set_position},
+		"player": {"get": player_get, "set_position": player_set_position, "aim": player_aim},
 		"log": {"debug": log_debug, "info": log_info, "warning": log_warning,
 			"error": log_error},
 		"features": {"has": feature_has, "require": feature_require},
@@ -137,6 +162,8 @@ func commit() -> bool:
 	if not _state.commit():
 		return false
 	if not _remote.commit() or not _players.commit() or not _assets.commit():
+		return false
+	if not _scene.commit():
 		return false
 	for handle_id in _owned:
 		var node: Node = _owned[handle_id]
@@ -188,6 +215,7 @@ func close(preserve_replicated_state := false) -> void:
 	_state.close(not preserve_replicated_state)
 	_remote.close()
 	_players.close()
+	_scene.close()
 	_assets.close()
 	_render.close()
 	_invoke = Callable()
@@ -294,10 +322,29 @@ func call_method(handle_id: int, method: String, arguments = []):
 		return null
 	if node is VrwebVideoPlayer and VIDEO_PLAYER_METHODS.has(method):
 		return null if _staging else _call_video_method(node as VrwebVideoPlayer, method, args)
+	if node is Grabbable and GRABBABLE_METHODS.has(method):
+		return null if _staging else _call_typed_method(node, GRABBABLE_METHODS, method, args)
 	if not SAFE_METHODS.has(method):
 		return null
 	if _staging:
 		return null
+	return node.callv(method, args)
+
+
+## Типизированный вызов метода по объявленной сигнатуре (grabbable и будущие поверхности):
+## число и типы аргументов проверяются до callv, int сходит за float.
+func _call_typed_method(node: Node, table: Dictionary, method: String, arguments: Array):
+	var expected: Array = table[method]
+	if arguments.size() != expected.size():
+		return null
+	var args := []
+	for index in expected.size():
+		var value = arguments[index]
+		if int(expected[index]) == TYPE_FLOAT and typeof(value) == TYPE_INT:
+			value = float(value)
+		if typeof(value) != int(expected[index]):
+			return null
+		args.append(value)
 	return node.callv(method, args)
 
 
@@ -451,6 +498,75 @@ func player_get(property: String):
 	if property == "flying" and _player.has_method("is_flying"):
 		return _player.call("is_flying")
 	return null
+
+
+## Прицел игрока (capability vrweb/aim/1): {hit, position, normal, distance, target?}.
+## target — html id узла под лучом, если он адресуем скриптом (поднимаемся к предкам до
+## первого известного target). Poll-модель: скрипт зовёт из on_update/по use — handles на
+## каждый кадр не создаются (бюджет 256 handles не расходуется).
+func player_aim() -> Dictionary:
+	if not _allow_call() or not is_instance_valid(_player) or not _player.has_method("aim_info"):
+		return {"hit": false}
+	var info: Dictionary = _player.call("aim_info")
+	var result := {
+		"hit": bool(info.get("hit", false)),
+		"position": info.get("position", Vector3.ZERO),
+		"normal": info.get("normal", Vector3.UP),
+		"distance": float(info.get("distance", 0.0)),
+	}
+	var collider = info.get("collider")
+	if collider is Node:
+		var target_id := _target_id_of(collider as Node)
+		if target_id != "":
+			result["target"] = target_id
+	return result
+
+
+## html id адресуемого предка коллайдера (или ""): коллайдер часто — служебное тело внутри
+## целевого узла (StaticBody3D под MeshInstance3D), поэтому ищем вверх по дереву.
+func _target_id_of(node: Node) -> String:
+	var reverse := {}
+	for key in _targets:
+		var object = _targets[key]
+		if object is Node and is_instance_valid(object):
+			reverse[(object as Node).get_instance_id()] = str(key)
+	var current: Node = node
+	var guard := 0
+	while current != null and guard < 32:
+		if reverse.has(current.get_instance_id()):
+			return str(reverse[current.get_instance_id()])
+		current = current.get_parent()
+		guard += 1
+	return ""
+
+
+## Выбор файла пользователем (capability vrweb/files/1): OS-диалог показывает владелец
+## runtime (провайдер file_picker), сам выбор — явное согласие пользователя (модель
+## <input type="file">). callback: {ok, name, size, url, bytes?}; url — vrwebblob:// адрес
+## (файл уезжает в BlobStore и готов для vrweb-node/realtime-ресурсов), bytes — инлайн для
+## небольших файлов (decode в скрипте).
+func files_pick(kind: String, callback: Callable) -> bool:
+	if not _allow_call() or not callback.is_valid() or _pick_pending \
+			or not file_picker.is_valid() or _staging:
+		return false
+	_pick_pending = true
+	file_picker.call(str(kind), func(ok: bool, name: String, bytes: PackedByteArray) -> void:
+		_pick_pending = false
+		if not _valid or not _invoke.is_valid():
+			return
+		if not ok or bytes.size() == 0 or bytes.size() > MAX_PICK_FILE_BYTES:
+			_invoke.call(callback, {"ok": false, "name": str(name), "size": bytes.size(),
+				"url": ""})
+			return
+		var hex := BlobProtocol.hash_bytes(bytes)
+		if not BlobStore.has_hex(hex):
+			BlobStore.ingest(hex, bytes)
+		var event := {"ok": true, "name": str(name), "size": bytes.size(),
+			"url": BlobProtocol.url_of(hex)}
+		if bytes.size() <= MAX_PICK_INLINE_BYTES:
+			event["bytes"] = bytes
+		_invoke.call(callback, event))
+	return true
 
 
 func player_set_position(position: Vector3) -> bool:
