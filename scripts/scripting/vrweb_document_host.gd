@@ -510,6 +510,8 @@ func player_aim() -> Dictionary:
 	var info: Dictionary = _player.call("aim_info")
 	var result := {
 		"hit": bool(info.get("hit", false)),
+		"origin": info.get("origin", Vector3.ZERO),
+		"direction": info.get("direction", Vector3.FORWARD),
 		"position": info.get("position", Vector3.ZERO),
 		"normal": info.get("normal", Vector3.UP),
 		"distance": float(info.get("distance", 0.0)),

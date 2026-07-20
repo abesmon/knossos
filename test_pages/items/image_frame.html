@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb item — рамка для картинок</title>
+  <script type="application/vrweb+luau" id="image-frame.behavior">
+-- Размещение изображений как переносимый предмет: держишь рамку, ЛКМ (use) фиксирует точку
+-- прицела и открывает выбор файла (document.files.pick — явное согласие пользователя);
+-- выбранная картинка уезжает в blob store и ставится в мир обычным vrweb-node
+-- <VRWebImage src="vrwebblob://...">. Тот же артефакт, что у клиентского инструмента раньше.
+local frame = document.query("#image-frame-item")
+assert(frame ~= nil, "image frame item scene id is missing")
+
+local PLACE_WIDTH = 1.0    -- ширина картинки в метрах (высота — по пропорциям текстуры)
+
+local function fmt(value)
+  return string.format("%.4f", value)
+end
+
+frame.on("use", function(_e)
+  local aim = document.player.aim()
+  local pos, normal
+  if aim.hit and aim.distance < 3.4 then
+    pos = aim.position + aim.normal * 0.02
+    normal = aim.normal
+  else
+    pos = aim.origin + aim.direction * 1.5
+    normal = -aim.direction
+  end
+  -- Разворот: по горизонтальной нормали (стена) — вдоль неё; иначе (пол/потолок/воздух) —
+  -- лицом к игроку по yaw.
+  local yaw
+  if math.abs(normal.y) < 0.5 then
+    yaw = math.atan2(normal.x, normal.z)
+  else
+    local player_pos = document.player.get("position")
+    local dir = player_pos - pos
+    yaw = math.atan2(dir.x, dir.z)
+  end
+  document.files.pick("image", function(pick)
+    if not pick.ok then return end
+    document.scene.add({ kind = "vrweb-node", parent = "", ttl = 0, props = {
+      tag = "VRWebImage",
+      attrs = {
+        src = tostring(pick.url),
+        alt = tostring(pick.name),
+        width = fmt(PLACE_WIDTH),
+        position = "Vector3(" .. fmt(pos.x) .. "," .. fmt(pos.y) .. "," .. fmt(pos.z) .. ")",
+        rotation = "Vector3(0," .. fmt(yaw) .. ",0)",
+      },
+    } }, nil)
+  end)
+end, "")
+  </script>
+</head>
+<body>
+  <vrwml>
+    <Resource id="FrameBody" type="BoxMesh" size="Vector3(0.3,0.22,0.015)"/>
+    <Resource id="FrameMaterial" type="StandardMaterial3D" albedo_color="Color(0.35,0.55,0.9,1)"/>
+    <VRWebGrabbable id="image-frame-item">
+      <MeshInstance3D mesh="SubResource:::FrameBody" surface_material_override/0="SubResource:::FrameMaterial"/>
+    </VRWebGrabbable>
+  </vrwml>
+</body>
+</html>

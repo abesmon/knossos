@@ -307,11 +307,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			if gm != null:
 				gm.release_held()
 	elif event.is_action_pressed("tool_slot_2"):
-		# Запрос активации инструменту слота 2 (рисование: нет → карандаш → ластик → нет).
-		tools.handle_slot_action(&"tool_slot_2")
+		# Слот 2 — item-инструменты тулбелта (нет → карандаш → ластик → нет),
+		# см. docs/space/portable-tools.md.
+		if _looking:
+			_toolbelt_slot(&"tool_slot_2")
 	elif event.is_action_pressed("tool_slot_3"):
-		# Запрос активации инструменту слота 3 (размещение картинки: тумблер).
-		tools.handle_slot_action(&"tool_slot_3")
+		# Слот 3 — рамка картинок (тумблер).
+		if _looking:
+			_toolbelt_slot(&"tool_slot_3")
 	elif event.is_action_pressed("debug_toggle"):
 		_toggle_debug()
 	elif event.is_action_pressed("player_jump"):
@@ -512,20 +515,31 @@ func _grab_manager() -> GrabManager:
 	return node as GrabManager
 
 
+## Тулбелт item-инструментов — тоже в мире, ищем через группу.
+func _toolbelt_slot(action: StringName) -> void:
+	var belt := get_tree().get_first_node_in_group("item_toolbelt") as ItemToolbelt
+	if belt != null:
+		belt.handle_slot(action)
+
+
 ## Данные прицела для скриптов (capability vrweb/aim/1, см. docs/space/scripting-api.md):
-## точка/нормаль/дистанция луча взаимодействия и коллайдер под прицелом. Держимый предмет
-## исключён из луча (set_aim_exception), поэтому прицел «сквозь предмет» — как у курсора.
+## origin/direction луча — всегда (рисование/прицеливание «в воздух»), точка/нормаль/дистанция
+## и коллайдер — при попадании. Держимый предмет исключён из луча (set_aim_exception),
+## поэтому прицел «сквозь предмет» — как у курсора.
 func aim_info() -> Dictionary:
+	var origin := _camera.global_position if _camera != null else global_position
+	var direction := -_camera.global_transform.basis.z if _camera != null \
+			else -global_transform.basis.z
+	var info := {"hit": false, "origin": origin, "direction": direction}
 	if _ray == null or not _ray.is_colliding():
-		return {"hit": false}
+		return info
 	var point := _ray.get_collision_point()
-	return {
-		"hit": true,
-		"position": point,
-		"normal": _ray.get_collision_normal(),
-		"distance": _camera.global_position.distance_to(point) if _camera != null else 0.0,
-		"collider": _aim_collider(),
-	}
+	info["hit"] = true
+	info["position"] = point
+	info["normal"] = _ray.get_collision_normal()
+	info["distance"] = origin.distance_to(point)
+	info["collider"] = _aim_collider()
+	return info
 
 
 ## Колесо мыши при держимом adjustable-предмете: обычное — дистанция (ближе/дальше, как в

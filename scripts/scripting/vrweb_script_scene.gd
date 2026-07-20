@@ -25,19 +25,23 @@ func setup(script_id: String, invoke: Callable) -> void:
 	_invoke = invoke
 
 
+## ВСЕ аргументы обязательны (callback/kind — nil допустим): луау-аддон при вызове
+## bound-метода с недостающим дефолтным аргументом падает (вплоть до segfault во вложенном
+## callback), а лямбда фикс-арности даёт чистую Lua-ошибку — поэтому api из лямбд.
 func api() -> Dictionary:
 	return {
-		"add": add_object,
-		"update": update_object,
-		"remove": remove_object,
-		"object": read_object,
+		"add": func(spec, callback): return add_object(spec, callback),
+		"update": func(id, props, callback): return update_object(id, props, callback),
+		"remove": func(id, callback): return remove_object(id, callback),
+		"object": func(id): return read_object(id),
+		"objects": func(kind): return list_objects(kind),
 	}
 
 
 ## add(spec, callback?) -> id|nil. spec: {kind, parent?, ttl?, props?}. id генерится клиентом
 ## (адрес СВОЕГО объекта — по нему же update/remove). Исход коммита авторитетом придёт в
 ## callback {ok, id}; без callback действие best-effort (как пузырь).
-func add_object(spec, callback = null):
+func add_object(spec, callback):
 	if _closed or typeof(spec) != TYPE_DICTIONARY:
 		return null
 	var kind := str((spec as Dictionary).get("kind", ""))
@@ -57,7 +61,7 @@ func add_object(spec, callback = null):
 	return id
 
 
-func update_object(id, props, callback = null) -> bool:
+func update_object(id, props, callback) -> bool:
 	if _closed or typeof(props) != TYPE_DICTIONARY or str(id).is_empty():
 		return false
 	_dispatch({"op": SceneChanges.OP_UPDATE, "id": str(id),
@@ -65,7 +69,7 @@ func update_object(id, props, callback = null) -> bool:
 	return true
 
 
-func remove_object(id, callback = null) -> bool:
+func remove_object(id, callback) -> bool:
 	if _closed or str(id).is_empty():
 		return false
 	_dispatch({"op": SceneChanges.OP_REMOVE, "id": str(id)}, str(id), callback)
@@ -78,6 +82,22 @@ func read_object(id) -> Dictionary:
 		return {}
 	var object := NetworkManager.scene_object(str(id))
 	return object.duplicate(true)
+
+
+## Перечисление объектов слоя (опционально по kind) — для инструментов-модификаторов
+## (ластик, клинеры): массив плоских данных. Размер ограничен самим слоем (MAX_OBJECTS).
+func list_objects(kind) -> Array:
+	if _closed:
+		return []
+	var wanted := "" if kind == null else str(kind)
+	var result: Array = []
+	var objects := NetworkManager.scene_objects()
+	for id in objects:
+		var object: Dictionary = objects[id]
+		if wanted != "" and str(object.get("kind", "")) != wanted:
+			continue
+		result.append(object.duplicate(true))
+	return result
 
 
 ## Top-level стейджится как остальные мосты: действия уходят только после успешного commit

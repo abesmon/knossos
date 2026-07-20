@@ -31,7 +31,6 @@ var _address_focus_token := 0
 var _settings_focus_token := 0
 var _chat_focus_token := 0
 var _console_focus_token := 0
-var _image_dialog_focus_token := 0
 # Пока активного мира нет, отдельный lease удерживает свободный курсор для навигационного UI.
 # Это также закрывает синхронную ошибку fetch: хвост _on_go не сможет снова захватить мышь.
 var _loading_hub_focus_token := 0
@@ -53,6 +52,7 @@ var _page_seed := 0
 var _world_image_loader: ImageLoader = null
 var _video_manager: VrwebVideoManager = null
 var _grab_manager: GrabManager = null
+var _item_toolbelt: ItemToolbelt = null
 var _base_scene_mode := VrwebBuilder.MODE_COMBINE
 var _effective_scene_mode := VrwebBuilder.MODE_COMBINE
 @onready var _status: Label = _ui.status
@@ -115,7 +115,7 @@ var _loading: bool = false
 # при повторной навигации, а не копить его (омнибокс браузера: A→C, а не A→B→C).
 var _pending_history_push: bool = false
 
-var _image_dialog_open := false   # открыт файловый диалог инструмента размещения (кнопка 3)
+var _ui_pick_finish: Callable = Callable()   # ожидающий fallback-пикер document.files.pick
 @onready var _settings_overlay: Control = _ui.settings_overlay
 @onready var _debug_panel: PanelContainer = _ui.debug_panel
 @onready var _debug_label: Label = _ui.debug_label
@@ -137,7 +137,7 @@ var _mouse_captured: bool = true
 func _ready() -> void:
 	_setup_environment()
 	_setup_ui_extras()
-	_ui.image_file_chosen.connect(_image_file_chosen)
+	_ui.image_file_chosen.connect(_on_ui_file_chosen)
 
 	_fetcher = PageFetcher.new()
 	add_child(_fetcher)
@@ -161,14 +161,10 @@ func _ready() -> void:
 	# Esc при уже свободной мыши (возимся с UI) открывает настройки.
 	_player.settings_requested.connect(_open_settings)
 	_world.add_child(_player)
-	# Система инструментов (см. docs/client/tools.md) создаётся в Player._ready — подключаемся
-	# после add_child. Подсказки инструментов — в строку статуса; инструменту размещения картинки
-	# нужен файловый диалог — пикер (UI) живёт здесь, результат возвращается через provide_file.
+	# Системные инструменты (пузырь, см. docs/client/tools.md) создаются в Player._ready —
+	# подключаемся после add_child. Пользовательские инструменты теперь — переносимые предметы
+	# (ItemToolbelt в _rebuild_world, docs/space/portable-tools.md).
 	_player.tools.status_hint.connect(_set_status)
-	_player.tools.image_pick_requested.connect(_on_image_pick_requested)
-	# База для относительных URL офлайн-размещения картинок — знание о навигации остаётся тут.
-	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
-	image_tool.base_url_provider = func() -> String: return _base_url
 
 	_cancel.pressed.connect(_on_cancel)
 	_refresh.pressed.connect(_on_refresh)
@@ -748,6 +744,7 @@ func _clear_world() -> void:
 	_world_image_loader = null
 	_video_manager = null
 	_grab_manager = null
+	_item_toolbelt = null
 	_base_scene_mode = VrwebBuilder.MODE_COMBINE
 	_effective_scene_mode = VrwebBuilder.MODE_COMBINE
 	_remote_view = null
@@ -833,6 +830,14 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	_grab_manager.name = "GrabManager"
 	_world.add_child(_grab_manager)
 	_grab_manager.setup(_player, _remote_view)
+
+	# Тулбелт item-инструментов: хоткеи слотов спавнят переносимые предметы (карандаш/ластик/
+	# рамка картинок) вместо вшитых в клиент инструментов. См. docs/space/portable-tools.md.
+	_item_toolbelt = ItemToolbelt.new()
+	_item_toolbelt.name = "ItemToolbelt"
+	_world.add_child(_item_toolbelt)
+	_item_toolbelt.setup(_grab_manager)
+	_item_toolbelt.status_hint.connect(_set_status)
 
 	# mode="exclusive" — HTML-сцену не строим вовсе, в мире только узлы vrweb.
 	var exclusive: bool = vrweb.get("found", false) and vrweb.get("mode", "") == VrwebBuilder.MODE_EXCLUSIVE
@@ -1374,30 +1379,40 @@ func _on_debug_probed(text: String) -> void:
 		_debug_label.text = text if text != "" else "Наведи прицел на объект…"
 
 
-# --- Файловый пикер для инструмента размещения изображений (кнопка 3) ---
-# Пикер — UI, поэтому живёт здесь; логика инструмента (прицеливание, спавн) — в
-# ImagePlacementTool. См. docs/network/realtime-resources.md и docs/client/tools.md.
+# --- Файловый пикер скриптов (document.files.pick, capability vrweb/files/1) ---
+# Пикер — UI, поэтому живёт здесь. Сам выбор файла пользователем — явное согласие (модель
+# <input type="file">); скрипт получает только байты выбранного файла, путь ОС не уезжает.
 
-## Инструменту нужен файл картинки: открыть диалог и вернуть результат через provide_file.
-## Провайдер document.files.pick (capability vrweb/files/1): OS-диалог — UI, он живёт в main,
-## как и пикер инструмента картинок. Сам выбор файла пользователем — явное согласие (модель
-## <input type="file">); скрипт получает только байты выбранного файла, путь ОС не уезжает.
 func _script_file_picker() -> Callable:
 	return func(kind: String, done: Callable) -> void:
-		if _script_pick_open or not DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		if _script_pick_open:
 			done.call(false, "", PackedByteArray())
 			return
 		_script_pick_open = true
 		var focus_token := _player.claim_mouse_focus("script_file_dialog")
-		DisplayServer.file_dialog_show("Выбрать файл", "", "", false,
-			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, _script_pick_filters(kind),
-			func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
-				_script_pick_open = false
-				_player.release_mouse_focus(focus_token)
-				_player.capture_mouse(true)
-				var path := paths[0] if ok and not paths.is_empty() else ""
-				var bytes := FileAccess.get_file_as_bytes(path) if path != "" else PackedByteArray()
-				done.call(path != "" and not bytes.is_empty(), path.get_file(), bytes))
+		var finish := func(path: String) -> void:
+			_script_pick_open = false
+			_player.release_mouse_focus(focus_token)
+			_player.capture_mouse(true)
+			var bytes := FileAccess.get_file_as_bytes(path) if path != "" else PackedByteArray()
+			done.call(path != "" and not bytes.is_empty(), path.get_file(), bytes)
+		if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+			DisplayServer.file_dialog_show("Выбрать файл", "", "", false,
+				DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, _script_pick_filters(kind),
+				func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
+					finish.call(paths[0] if ok and not paths.is_empty() else ""))
+			return
+		# Fallback без нативного диалога ОС — FileDialog в MainUI (результат — _on_ui_file_chosen).
+		_ui_pick_finish = finish
+		_ui.open_image_dialog(_script_pick_filters(kind))
+
+
+## Результат fallback-диалога MainUI: завершить ожидающий files.pick.
+func _on_ui_file_chosen(ok: bool, path: String) -> void:
+	var finish := _ui_pick_finish
+	_ui_pick_finish = Callable()
+	if finish.is_valid():
+		finish.call(path if ok else "")
 
 
 func _script_pick_filters(kind: String) -> PackedStringArray:
@@ -1409,30 +1424,6 @@ func _script_pick_filters(kind: String) -> PackedStringArray:
 		"model":
 			return PackedStringArray(["*.glb,*.gltf;3D-модели"])
 	return PackedStringArray(["*;Все файлы"])
-
-
-func _on_image_pick_requested(filters: PackedStringArray) -> void:
-	if _image_dialog_open:
-		return   # диалог уже открыт; его колбэк и завершит ожидание инструмента (provide_file)
-	_image_dialog_open = true
-	_image_dialog_focus_token = _player.claim_mouse_focus("image_file_dialog")
-	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
-		DisplayServer.file_dialog_show("Разместить изображение", "", "", false,
-			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters,
-			func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
-				_image_file_chosen(ok and not paths.is_empty(), paths[0] if not paths.is_empty() else ""))
-		return
-	# Fallback без нативного диалога ОС принадлежит MainUI, а не сцене мира.
-	_ui.open_image_dialog(filters)
-
-
-## Файл выбран (или диалог отменён): вернуть захват мыши и отдать результат инструменту.
-func _image_file_chosen(ok: bool, path: String) -> void:
-	_image_dialog_open = false
-	_release_focus_token(&"_image_dialog_focus_token")
-	_player.capture_mouse(true)
-	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
-	image_tool.provide_file(ok, path)
 
 
 ## Подсветка прицела: над кликабельным/портальным объектом включается активная нода курсора,

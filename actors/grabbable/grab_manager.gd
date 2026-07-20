@@ -61,6 +61,10 @@ func setup(player: Node3D, remote_view: Node) -> void:
 	_remote_view = remote_view
 
 
+func player() -> Node3D:
+	return _player if _player != null and is_instance_valid(_player) else null
+
+
 # --- Реестр (Grabbable регистрируются сами при входе в дерево) ---
 
 func register_grabbable(g: Grabbable) -> void:
