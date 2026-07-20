@@ -17,6 +17,16 @@ const CREATE_CLASSES := {
 	"CSGSphere3D": true,
 }
 const SAFE_METHODS := {"show": true, "hide": true, "play": true, "stop": true}
+## Методы видео-плеера (capability vrweb/video/1) поверх общего SAFE_METHODS: доступны только
+## на handle VrwebVideoPlayer. Значение — список ожидаемых типов аргументов (int сходит за
+## float). set_source дополнительно резолвит и проверяет URL (_allowed_media_url).
+const VIDEO_PLAYER_METHODS := {
+	"play": [], "pause": [], "toggle": [],
+	"seek": [TYPE_FLOAT], "set_volume": [TYPE_FLOAT],
+	"set_source": [TYPE_STRING], "source": [],
+	"position": [], "duration": [],
+	"is_playing": [], "is_buffering": [], "last_error": [],
+}
 const BLOCKED_PROPERTIES := {
 	"script": true, "owner": true, "scene_file_path": true,
 	"process_mode": true, "process_priority": true, "process_physics_priority": true,
@@ -34,6 +44,7 @@ const CAPABILITIES := {
 	"vrweb/clock/1": true,
 	"vrweb/log/1": true,
 	"vrweb/render-shaders/1": true,
+	"vrweb/video/1": true,
 }
 
 var script_id := ""
@@ -268,15 +279,70 @@ func set_property(handle_id: int, property: String, value) -> bool:
 	return _apply_set(object, property, value)
 
 
-func call_method(handle_id: int, method: String, arguments: Array = []):
-	if not _allow_call() or not SAFE_METHODS.has(method) or arguments.size() > 8:
+func call_method(handle_id: int, method: String, arguments = []):
+	# Пустая Luau-таблица неотличима от массива и может приехать пустым Dictionary —
+	# принимаем её (и nil) как «без аргументов»; непустой словарь аргументами не считается.
+	var args: Array = []
+	if arguments is Array:
+		args = arguments
+	elif arguments != null and not (arguments is Dictionary and (arguments as Dictionary).is_empty()):
+		return null
+	if not _allow_call() or args.size() > 8:
 		return null
 	var node := _object(handle_id) as Node
 	if node == null or not node.has_method(method):
 		return null
+	if node is VrwebVideoPlayer and VIDEO_PLAYER_METHODS.has(method):
+		return null if _staging else _call_video_method(node as VrwebVideoPlayer, method, args)
+	if not SAFE_METHODS.has(method):
+		return null
 	if _staging:
 		return null
-	return node.callv(method, arguments)
+	return node.callv(method, args)
+
+
+## Транспорт видео-плеера из скрипта (vrweb/video/1). Аргументы проверяются по объявленной
+## сигнатуре VIDEO_PLAYER_METHODS (не полагаемся на строгую типизацию callv). На synced-плеере
+## play/pause/seek эмитят transport_changed и уходят в стандартную синхронизацию как обычный
+## клик игрока; на sync="none" — чисто локальны.
+func _call_video_method(player: VrwebVideoPlayer, method: String, arguments: Array):
+	var expected: Array = VIDEO_PLAYER_METHODS[method]
+	if arguments.size() != expected.size():
+		return null
+	var args := []
+	for index in expected.size():
+		var value = arguments[index]
+		if int(expected[index]) == TYPE_FLOAT and typeof(value) == TYPE_INT:
+			value = float(value)
+		if typeof(value) != int(expected[index]):
+			return null
+		args.append(value)
+	if method == "set_source":
+		# URL резолвится относительно страницы и проходит те же схемные ограничения, что
+		# document.assets: локальные схемы доступны только локальному документу.
+		var url := _allowed_media_url(str(args[0]))
+		return player.set_source(url) if url != "" else false
+	return player.callv(method, args)
+
+
+## Разрешённый URL медиа-источника для set_source (та же модель, что VrwebScriptAssets):
+## http(s) — всем; vrweblocal://vrwebresource:// — только документу той же локальной схемы.
+func _allowed_media_url(path: String) -> String:
+	if path.to_utf8_buffer().size() > 4096:
+		return ""
+	var url := PageFetcher.resolve_url(path, _base_url)
+	var allowed := url.begins_with("http://") or url.begins_with("https://")
+	if url.begins_with(PageFetcher.LOCAL_SCHEME):
+		allowed = _base_url.begins_with(PageFetcher.LOCAL_SCHEME)
+	elif url.begins_with(PageFetcher.RESOURCE_SCHEME):
+		allowed = _base_url.begins_with(PageFetcher.RESOURCE_SCHEME)
+	if not allowed:
+		return ""
+	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_operation(
+			"script_video_source", {"url": url},
+			{"source": "script", "script_id": script_id})):
+		return ""
+	return url
 
 
 func on_event(handle_id: int, event_name: String, callback: Callable, hint := "") -> bool:
@@ -439,7 +505,7 @@ func _handle_for(object: Object) -> Dictionary:
 		"id": handle_id,
 		"get": func(property: String): return get_property(handle_id, property),
 		"set": func(property: String, value): return set_property(handle_id, property, value),
-		"call": func(method: String, arguments: Array = []): return call_method(handle_id, method, arguments),
+		"call": func(method: String, arguments = []): return call_method(handle_id, method, arguments),
 		"on": func(event_name: String, callback: Callable, hint := ""): return on_event(
 			handle_id, event_name, callback, hint),
 		"destroy": func(): return destroy(handle_id),

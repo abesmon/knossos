@@ -177,8 +177,13 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Стандартизировать приватный query-параметр, рабочий вариант `vrweb-instance=<code>`.
 - [ ] Обкатать server-provided adaptive representations через request header с рабочим именем
   `VRWeb-Capability-Code`, не меняя URL/room key и не создавая registry конкретных codes заранее.
-- [ ] Зафиксировать cache contract (`Vary`), redirect policy и HTTP test vectors negotiation.
-- [ ] Определить минимальный проверяемый network ABI вариантов в Maker Kit.
+- [ ] Зафиксировать cache contract (`Vary`), redirect policy (same-origin и cross-origin)
+  и HTTP/CDN test vectors negotiation для reference implementation.
+- [ ] Определить минимальный проверяемый network ABI вариантов в Maker Kit и способ его
+  объявления автором для нескольких responses.
+- [ ] Решить, нужен ли response header с фактически выбранным representation code
+  для diagnostics.
+- [ ] Оценить, понадобится ли structured negotiation рядом с простой строкой capability code.
 - [ ] Добавить явный compatibility/discovery contract для сторонних клиентов и серверов.
 
 ### P2 — Personal spaces и persistence vNext

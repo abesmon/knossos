@@ -73,6 +73,8 @@ HTML и не может потеряться при передаче.
 Контракт, lifecycle и модель sandbox: [VRWeb scripting](space/scripting.md). Все доступные
 методы, значения, лимиты и ошибки: [Scripting API](space/scripting-api.md). Копируемый большой
 пример с input, update и общим состоянием: [state-switch demo](client/state-switch-demo.md).
+Рецепты собственных систем синхронизации (якорная модель транспорта, плейлист заявок с
+владельцами, границы state/remote): [паттерны синхронизации](space/scripting-patterns.md).
 
 ## 4. Проверять и отлаживать
 

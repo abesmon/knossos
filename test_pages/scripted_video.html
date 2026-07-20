@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — скриптовый видео-плеер (якорная синхронизация)</title>
+  <script type="application/vrweb+luau" id="demo.scripted-video">
+-- Референс кастомного синхронизированного плеера на БАЗОВОМ уровне (sync="none":
+-- стандартная надстройка выключена, транспортом управляет только этот скрипт).
+--
+-- Модель — «якорная»: реплицируется не поток тиков, а канон
+--   { src, playing, anchor_position, anchor_time },
+-- который меняется только при действиях. Текущую позицию каждый клиент вычисляет сам:
+--   target = anchor_position + (authority_time() - anchor_time),
+-- а правила дрифт-коррекции (порог, częstота, караоке-сдвиг и т.п.) — локальный авторский
+-- код в on_update. Поздно вошедшие получают весь канон из snapshot без единого лишнего
+-- сообщения. См. docs/client/video-player.md («Архитектура») и docs/space/scripting-api.md.
+assert(document.features.require("vrweb/video/1"))
+
+local player = document.query("#stage-player")
+local url_input = document.query("#url-input")
+local status = document.query("#status-label")
+local toggle_btn = document.query("#toggle-button")
+local back_btn = document.query("#back-button")
+local fwd_btn = document.query("#fwd-button")
+local share_btn = document.query("#share-button")
+local preset_360 = document.query("#preset-360")
+local preset_1080 = document.query("#preset-1080")
+
+if not player or not url_input or not status or not toggle_btn or not back_btn
+    or not fwd_btn or not share_btn or not preset_360 or not preset_1080 then
+  error("scripted video demo scene ids are missing")
+end
+
+local SRC_360 = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
+local SRC_1080 = "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_30MB.mp4"
+
+local schema = "scripted-video"
+local object = "stage"
+local version = 1
+
+-- Валидация правомерности живёт в reducer'ах и исполняется у authority. Здесь правило
+-- открытое (обычный rank); «плеер по рангам» делается заменой default_write_rule или
+-- проверками context.rank / context.user_id внутри reducer.
+assert(document.state.define(schema, {
+  version = version,
+  fields = {
+    src = { type = "string", default = "" },
+    playing = { type = "bool", default = false },
+    anchor_position = { type = "float", default = 0 },
+    anchor_time = { type = "float", default = 0 },
+  },
+  default_write_rule = { rank = { op = "lte", value = 1073741824 } },
+  commands = {
+    -- context.authority_msec — часы authority в момент коммита команды: та же шкала,
+    -- что document.clock.authority_time() у каждого клиента.
+    set_src = {
+      reducer = function(event)
+        local src = tostring(event.args.src or "")
+        if src == "" or #src > 2048 then return {} end
+        return { src = src, playing = true, anchor_position = 0,
+          anchor_time = event.context.authority_msec / 1000.0 }
+      end,
+    },
+    set_playing = {
+      reducer = function(event)
+        local pos = tonumber(event.args.position) or 0
+        if pos < 0 or pos > 86400 then return {} end
+        return { playing = event.args.playing == true, anchor_position = pos,
+          anchor_time = event.context.authority_msec / 1000.0 }
+      end,
+    },
+    seek = {
+      reducer = function(event)
+        local pos = tonumber(event.args.position) or -1
+        if pos < 0 or pos > 86400 then return {} end
+        return { playing = event.state.playing == true, anchor_position = pos,
+          anchor_time = event.context.authority_msec / 1000.0 }
+      end,
+    },
+  },
+}))
+assert(document.state.ensure(object, schema, {
+  src = "", playing = false, anchor_position = 0, anchor_time = 0,
+}, ""))
+
+local canon = document.state.read(object, schema)
+
+-- Программные вызовы плеера тоже эмитят transport_changed; applying-флаг отличает
+-- «применяем канон» от «локальное действие игрока» и рвёт сетевой цикл.
+local applying = false
+local function apply(fn)
+  applying = true
+  fn()
+  applying = false
+end
+
+-- ЕДИНАЯ точка публикации локальных действий: клик по экрану, кнопки пульта и любые
+-- будущие вызовы player.call эмитят transport_changed → превращаются в state-команду.
+player.on("transport_changed", function(event)
+  if applying then return end
+  local pos = tonumber(event.position) or 0
+  if event.action == "play" or event.action == "pause" then
+    document.state.command(object, schema, version, "set_playing",
+      { playing = event.action == "play", position = pos })
+  elseif event.action == "seek" then
+    document.state.command(object, schema, version, "seek", { position = pos })
+  end
+end, "Публикация локального транспорта в канон")
+
+-- Применение канона: смена источника, play/pause, позиция при паузе.
+local function render(state)
+  canon = state
+  if state.src ~= "" then
+    url_input.set("text", state.src)
+    if player.call("source", {}) ~= state.src then
+      apply(function()
+        -- Каждый клиент применяет URL локально; недопустимая схема отклоняется host'ом.
+        player.call("set_source", { state.src })
+        if state.playing then player.call("play", {}) end
+      end)
+      return
+    end
+  end
+  apply(function()
+    if state.playing and player.call("is_playing", {}) ~= true then
+      player.call("play", {})
+    elseif not state.playing and player.call("is_playing", {}) == true then
+      player.call("pause", {})
+    end
+    if not state.playing then
+      player.call("seek", { state.anchor_position })
+    end
+  end)
+end
+
+document.state.on(object, schema, function(event)
+  render(event.state)
+end)
+
+-- Пульт: кнопки просто дёргают ЛОКАЛЬНЫЙ транспорт — transport_changed выше публикует
+-- действие в канон. Так же работает клик по самому экрану.
+toggle_btn.on("pressed", function()
+  player.call("toggle", {})
+end, "Play/Pause для всех")
+
+back_btn.on("pressed", function()
+  player.call("seek", { math.max((player.call("position", {}) or 0) - 10, 0) })
+end, "Назад 10 секунд")
+
+fwd_btn.on("pressed", function()
+  player.call("seek", { (player.call("position", {}) or 0) + 10 })
+end, "Вперёд 10 секунд")
+
+local function share_src(url)
+  if url and url ~= "" then
+    document.state.command(object, schema, version, "set_src", { src = url })
+  end
+end
+
+share_btn.on("pressed", function()
+  share_src(url_input.get("text"))
+end, "Загрузить ссылку всем")
+
+preset_360.on("pressed", function()
+  share_src(SRC_360)
+end, "Bunny 360p (1 МБ)")
+
+preset_1080.on("pressed", function()
+  share_src(SRC_1080)
+end, "Bunny 1080p (30 МБ)")
+
+-- Смена authority: шкала authority_time нового таймкипера имеет другую эпоху, старый
+-- якорь к ней непереводим. Новый authority переякоривает канон своей текущей позицией.
+local was_authority = false
+document.players.on_changed(function(event)
+  local me = event["local"]
+  local is_authority = me ~= nil and me.is_authority == true
+  if is_authority and not was_authority and canon.src ~= "" then
+    document.state.command(object, schema, version, "set_playing", {
+      playing = canon.playing == true,
+      position = player.call("position", {}) or canon.anchor_position,
+    })
+  end
+  was_authority = is_authority
+end)
+
+-- Дрифт-коррекция — полностью локальная политика этого мира: свой порог, свой кулдаун.
+-- Караоке-плеер добавил бы сюда сдвиг на задержку голоса, «мягкий» плеер — плавный
+-- догон вместо seek. Канона это не касается — он остаётся якорем.
+local DRIFT_THRESHOLD = 0.75  -- с; большее расхождение с целевой позицией → seek
+local CORRECTION_COOLDOWN = 1.0 -- с; не дёргаем seek чаще (даём докачке/декодеру догнать)
+local last_correction = -CORRECTION_COOLDOWN
+local status_accum = 1.0
+
+assert(document.on_update(function(frame)
+  local playing = canon.playing == true and canon.src ~= ""
+  local drift = 0
+  if playing and frame.authority_ready
+      and player.call("is_buffering", {}) ~= true
+      and player.call("source", {}) == canon.src then
+    local target = canon.anchor_position + (frame.authority_time - canon.anchor_time)
+    local actual = player.call("position", {}) or 0
+    drift = actual - target
+    if target >= 0 and math.abs(drift) > DRIFT_THRESHOLD
+        and frame.local_time - last_correction >= CORRECTION_COOLDOWN then
+      last_correction = frame.local_time
+      apply(function() player.call("seek", { target }) end)
+    end
+  end
+
+  status_accum = status_accum + frame.delta
+  if status_accum < 0.25 then return end
+  status_accum = 0.0
+  local glyph = (player.call("is_playing", {}) == true) and "▶" or "‖"
+  if player.call("is_buffering", {}) == true then glyph = "…" end
+  local function fmt(t)
+    local s = math.floor(math.max(t or 0, 0))
+    return string.format("%d:%02d", math.floor(s / 60), s % 60)
+  end
+  local mode = frame.authority_ready and string.format("sync %+.2fс", drift) or "local"
+  status.set("text", string.format("%s  %s / %s  ·  %s", glyph,
+    fmt(player.call("position", {})), fmt(player.call("duration", {})), mode))
+end))
+
+document.log.info("scripted video demo ready (anchor sync)")
+  </script>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <WorldEnvironment environment="SubResource:::Environment"/>
+    <DirectionalLight3D rotation_degrees="Vector3(-50,-25,0)" light_energy="0.8"/>
+    <MeshInstance3D mesh="SubResource:::FloorMesh" material_override="SubResource:::FloorMaterial"
+                    transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0.05,0)">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::FloorShape"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+
+    <!-- БАЗОВЫЙ плеер: sync="none" — стандартная надстройка выключена. Клик по экрану
+         эмитит transport_changed, который скрипт выше публикует в собственный канон. -->
+    <VRWebVideoPlayer id="stage-player" sync="none" loop="true"/>
+    <VRWebVideoScreen player="stage-player" size="4.8:2.7"
+                      transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,2.6,-7)"/>
+
+    <Label3D text="SCRIPTED VIDEO: якорная синхронизация своим скриптом"
+             position="Vector3(0,4.35,-7)" font_size="44" pixel_size="0.005" outline_size="10"/>
+
+    <!-- Пульт: ввод ссылки и общий транспорт -->
+    <WorldUiCanvas id="control-canvas" name="ControlCanvas"
+                   position="Vector3(0,1.05,-4.6)" rotation_degrees="Vector3(-28,0,0)"
+                   size="Vector2(4.4,1.6)" viewport_size="Vector2i(1100,400)">
+      <PanelContainer anchors_preset="15" anchor_right="1.0" anchor_bottom="1.0">
+        <VBoxContainer theme_override_constants_separation="10">
+          <Label text="ПУЛЬТ ПЛЕЕРА (общий для всех в комнате)" theme_override_font_sizes_font_size="26"/>
+          <LineEdit id="url-input" name="UrlInput" placeholder_text="https://… прямая ссылка на mp4 (faststart)"
+                    custom_minimum_size="Vector2(0,52)"/>
+          <HBoxContainer theme_override_constants_separation="12">
+            <Button id="preset-360" name="Preset360" text="BUNNY 360p"
+                    custom_minimum_size="Vector2(200,52)"/>
+            <Button id="preset-1080" name="Preset1080" text="BUNNY 1080p"
+                    custom_minimum_size="Vector2(200,52)"/>
+            <Button id="share-button" name="ShareButton" text="ЗАГРУЗИТЬ ВСЕМ"
+                    custom_minimum_size="Vector2(240,52)"/>
+          </HBoxContainer>
+          <HBoxContainer theme_override_constants_separation="12">
+            <Button id="toggle-button" name="ToggleButton" text="⏯"
+                    custom_minimum_size="Vector2(90,52)"/>
+            <Button id="back-button" name="BackButton" text="−10c"
+                    custom_minimum_size="Vector2(110,52)"/>
+            <Button id="fwd-button" name="FwdButton" text="+10c"
+                    custom_minimum_size="Vector2(110,52)"/>
+            <Label id="status-label" name="StatusLabel" text="‖  0:00 / 0:00  ·  local"
+                   size_flags_horizontal="3" vertical_alignment="1"
+                   theme_override_font_sizes_font_size="26"/>
+          </HBoxContainer>
+        </VBoxContainer>
+      </PanelContainer>
+    </WorldUiCanvas>
+
+    <VRWebSpawner mode="first">
+      <SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0,-1)"/>
+    </VRWebSpawner>
+
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(16,0.1,16)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(16,0.1,16)"/>
+    <Resource id="FloorMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.10,0.12,0.18,1)" roughness="0.6"/>
+    <Resource id="Environment" type="Environment"
+              background_mode="2" background_color="Color(0.02,0.03,0.05,1)"
+              ambient_light_source="3" ambient_light_color="Color(0.2,0.24,0.36,1)"
+              ambient_light_energy="0.6"/>
+  </vrwml>
+</body>
+</html>

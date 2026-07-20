@@ -80,7 +80,7 @@ const MIRROR_RESERVED := {"size": true, "resolution_scale": true, "srgb_decode":
 ## Атрибуты <VRWebVideoScreen>, которые задают привязку/плеер, а не свойства узла Node3D.
 const VIDEO_SCREEN_RESERVED := {
 	"player": true, "src": true, "size": true,
-	"autoplay": true, "loop": true, "volume": true,
+	"autoplay": true, "loop": true, "volume": true, "sync": true,
 }
 
 ## Атрибуты <VRWebImage>, которые задают саму картинку, а не свойства узла Node3D.
@@ -414,9 +414,11 @@ func _build_mirror(elem: HtmlNode) -> Node:
 	return mirror
 
 
-## <VRWebVideoPlayer id="..." src="<url>" autoplay loop volume="0.5"/> — логический видео-плеер
-## (декод в текстуру, см. scripts/vrweb_video_player.gd). Кастомный тег, не класс Godot —
-## headless-узел без геометрии. src резолвится относительно адреса страницы, как ext-ресурсы.
+## <VRWebVideoPlayer id="..." src="<url>" autoplay loop volume="0.5" sync="none"/> —
+## логический видео-плеер (декод в текстуру, см. scripts/vrweb_video_player.gd). Кастомный
+## тег, не класс Godot — headless-узел без геометрии. src резолвится относительно адреса
+## страницы, как ext-ресурсы. sync="none" отключает стандартную сетевую синхронизацию:
+## такой плеер — чисто базовый уровень под ручное управление скриптингом (vrweb/video/1).
 func _build_video_player(elem: HtmlNode) -> Node:
 	var node: Node = VIDEO_PLAYER_SCRIPT.new()
 	var src := ""
@@ -424,6 +426,7 @@ func _build_video_player(elem: HtmlNode) -> Node:
 		src = PageFetcher.resolve_url(elem.get_attr("src"), _base_url)
 	node.setup(elem.get_attr("id"), src, _attr_bool(elem, "autoplay", false),
 			_attr_bool(elem, "loop", false), _attr_float(elem, "volume", 1.0))
+	node.synced = _attr_sync(elem)
 	return node
 
 
@@ -445,6 +448,7 @@ func _build_video_screen(elem: HtmlNode) -> Node:
 	node.autoplay = _attr_bool(elem, "autoplay", false)
 	node.loop = _attr_bool(elem, "loop", false)
 	node.volume = _attr_float(elem, "volume", 1.0)
+	node.synced = _attr_sync(elem)
 	for key in elem.attributes:
 		if VIDEO_SCREEN_RESERVED.has(key):
 			continue
@@ -498,6 +502,12 @@ func _attr_bool(elem: HtmlNode, key: String, fallback: bool) -> bool:
 		return fallback
 	var v: Variant = _resolve_value(elem.get_attr(key))
 	return v if v is bool else fallback
+
+
+## Атрибут sync видео-тегов: "none"/"off"/"false"/"manual" выключают стандартную
+## синхронизацию (базовый плеер под ручной скриптинг), всё остальное/нет атрибута — включена.
+func _attr_sync(elem: HtmlNode) -> bool:
+	return elem.get_attr("sync").strip_edges().to_lower() not in ["none", "off", "false", "manual"]
 
 
 ## Числовой атрибут элемента (float) или fallback, если атрибута нет/значение не число.

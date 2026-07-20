@@ -13,7 +13,6 @@ static func definition(default_rank: int) -> Dictionary:
 			"playing": {"type": "bool", "default": false},
 			"anchor_position": {"type": "float", "default": 0.0, "min": 0.0, "max": MAX_POSITION},
 			"anchor_authority_msec": {"type": "int", "default": 0, "min": 0},
-			"media_revision": {"type": "int", "default": 0, "min": 0},
 		},
 		"sample_fields": {
 			"position": {"type": "float", "default": 0.0, "min": 0.0, "max": MAX_POSITION},

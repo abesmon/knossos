@@ -3,6 +3,11 @@ extends Node
 
 ## Связывает плееры и экраны страницы. Сетевой транспорт реализован через общий
 ## Replicated State: COMMAND/DELTA/SNAPSHOT для канонического транспорта и SAMPLE для drift.
+##
+## Привязка экранов к плеерам — базовый уровень и делается для ВСЕХ плееров. Сетевая
+## синхронизация — надстройка по умолчанию: в неё попадают только плееры с synced == true
+## (тег без sync="none" и HTML <video>). Плеер с sync="none" остаётся чисто локальным —
+## его транспортом управляет скриптинг страницы (см. docs/client/video-player.md).
 
 const SCHEMA_ID := VideoStateSchema.ID
 const SCHEMA_VERSION := VideoStateSchema.VERSION
@@ -76,16 +81,20 @@ func _register(player: VrwebVideoPlayer) -> void:
 	if _players.has(player.id):
 		return
 	_players[player.id] = player
+	if not player.synced:
+		return   # базовый плеер: только привязка экранов, никакой сети
 	player.transport_changed.connect(_on_local_transport.bind(player.id))
 	_register_state_object(player.id, player)
 
 
 func _register_state_object(id: String, player: VrwebVideoPlayer) -> void:
+	# src в стандартной надстройке НЕ реплицируется — по построению: у синтезированного
+	# плеера источник задан разметкой, менять его может только авторский скрипт, и тогда
+	# синхронизацию источника ведёт сам скрипт (см. docs/client/video-player.md).
 	NetworkManager.register_replicated_object(id, SCHEMA_ID, {
 		"playing": player.wants_playing(),
 		"anchor_position": player.position(),
 		"anchor_authority_msec": Time.get_ticks_msec(),
-		"media_revision": 0,
 	})
 
 
@@ -105,6 +114,7 @@ func _bind_screen(screen: VrwebVideoScreen) -> void:
 		if not _players.has(pid):
 			var p := VrwebVideoPlayer.new()
 			p.setup(pid, screen.src, screen.autoplay, screen.loop, screen.volume)
+			p.synced = screen.synced
 			add_child(p)
 			_register(p)
 		screen.bind(_players[pid])
@@ -146,7 +156,7 @@ func _on_replicated_state(object_id: String, schema_id: String, state: Dictionar
 		return
 	_revisions[object_id] = revision
 	var player: VrwebVideoPlayer = _players.get(object_id)
-	if player != null:
+	if player != null and player.synced:
 		player.apply_remote("play" if bool(state.get("playing", false)) else "pause",
 				float(state.get("anchor_position", 0.0)))
 
@@ -155,7 +165,7 @@ func _on_replicated_sample(_sender: int, object_id: String, schema_id: String, s
 	if schema_id != SCHEMA_ID or int(sample.get("revision", -1)) != int(_revisions.get(object_id, 0)):
 		return
 	var player: VrwebVideoPlayer = _players.get(object_id)
-	if player != null:
+	if player != null and player.synced:
 		player.apply_remote("sync_play" if bool(sample.get("playing", false)) else "sync_pause",
 				float(sample.get("position", 0.0)))
 
@@ -163,7 +173,8 @@ func _on_replicated_sample(_sender: int, object_id: String, schema_id: String, s
 func _on_authority_changed(_authority: int, _is_me: bool) -> void:
 	# reset_session при смене mesh удаляет объекты, но схемы живут; восстанавливаем декларации.
 	for id in _players:
-		_register_state_object(id, _players[id])
+		if _players[id].synced:
+			_register_state_object(id, _players[id])
 
 
 func _process(delta: float) -> void:
@@ -175,7 +186,7 @@ func _process(delta: float) -> void:
 		return
 	for id in _players:
 		var player: VrwebVideoPlayer = _players[id]
-		if player.has_started():
+		if player.synced and player.has_started():
 			NetworkManager.send_replicated_sample(id, SCHEMA_ID, SCHEMA_VERSION, {
 				"position": player.position(),
 				"playing": player.is_playing(),

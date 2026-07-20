@@ -32,6 +32,8 @@ var src := ""
 var autoplay := false
 var loop := false
 var volume := 1.0
+## sync="none" на теге экрана → неявный плеер создаётся без стандартной синхронизации.
+var synced := true
 
 var _want_w := 0.0   # размеры из тега (size="ш:в"), 0 = авто из пропорций видео
 var _want_h := 0.0

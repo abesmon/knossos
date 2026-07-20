@@ -176,11 +176,8 @@ versioned registry или более структурированного negoti
 представление. Механизм продолжает принцип VRWeb «один стек — много реализаций», не заставляя
 самый слабый и самый богатый клиент строить одинаковую сцену.
 
-## Открытые вопросы перед реализацией
+## Единый roadmap
 
-- окончательное имя request header (`VRWeb-Capability-Code` пока рабочее);
-- политика передачи header через same-origin и cross-origin redirects;
-- нужен ли response header с фактически выбранным representation code для diagnostics;
-- как автор объявляет общий network ABI нескольких responses и проверяет его в Maker Kit;
-- понадобится ли позже structured negotiation рядом с простой строкой;
-- какие cache/CDN test vectors должны войти в reference implementation.
+Нерешённые вопросы перед реализацией (окончательное имя request header, redirect и cache
+policy, diagnostics response header, network ABI в Maker Kit, structured negotiation) ведутся
+в [едином roadmap](../roadmap.md#p1--federation-и-instance-contract).
