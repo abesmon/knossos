@@ -47,6 +47,7 @@ const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
 const IMAGE_TAG := "VRWebImage"
 const BLOB_TAG := "VRWebBlob"
 const WORLD_UI_CANVAS_TAG := "WorldUiCanvas"
+const GRABBABLE_TAG := "VRWebGrabbable"
 const SUBRESOURCE_PREFIX := "SubResource:::"
 const EXTRESOURCE_PREFIX := "ExtResource:::"
 const MODE_COMBINE := "combine"
@@ -56,6 +57,7 @@ const MIRROR_SCENE := preload("res://scenes/vrweb_mirror.tscn")
 const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
 const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
 const WORLD_UI_CANVAS_SCENE := preload("res://actors/world_ui/world_ui_canvas.tscn")
+const GRABBABLE_SCRIPT := preload("res://actors/grabbable/grabbable.gd")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -87,6 +89,9 @@ const VIDEO_SCREEN_RESERVED := {
 ## width/height — желаемый размер квада в МЕТРАХ (0/нет = натуральный размер текстуры).
 const IMAGE_RESERVED := {"src": true, "alt": true, "width": true, "height": true}
 const WORLD_UI_CANVAS_RESERVED := {"size": true, "viewport_size": true}
+
+## Атрибуты <VRWebGrabbable>, которые задают сам предмет, а не свойства узла.
+const GRABBABLE_RESERVED := {"id": true, "theft": true, "grip": true, "mode": true}
 
 var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
@@ -280,6 +285,8 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_image(elem)
 	if elem.raw_tag == WORLD_UI_CANVAS_TAG:
 		return _build_world_ui_canvas(elem)
+	if elem.raw_tag == GRABBABLE_TAG:
+		return _build_grabbable(elem)
 	if elem.raw_tag == BLOB_TAG:
 		# Документная форма realtime-ресурса — не узел: байты уходят в BlobStore.
 		_ingest_blob(elem)
@@ -331,6 +338,33 @@ func _build_world_ui_canvas(elem: HtmlNode) -> Node:
 		else:
 			canvas.add_child(node)
 	return canvas
+
+
+## <VRWebGrabbable id="ball" theft="allow|deny" mode="fixed|adjustable" grip="Transform3D(...)">
+## — обёртка, делающая своё VRWML-содержимое предметом, который можно взять в руку (норматив —
+## docs/space/grabbable.md). id обязателен для сетевого hold-состояния (адрес выводится
+## детерминированно); grip — авторский хват режима fixed (поза относительно якоря руки);
+## mode="adjustable" — естественный хват + подстройка держателем;
+## прочие атрибуты (transform и т.п.) — обычные свойства узла.
+func _build_grabbable(elem: HtmlNode) -> Node:
+	var node: Grabbable = GRABBABLE_SCRIPT.new()
+	node.grab_id = elem.get_attr("id")
+	node.theft_allowed = elem.get_attr("theft", "allow").strip_edges().to_lower() \
+			not in ["deny", "false", "no", "off"]
+	node.adjustable = elem.get_attr("mode", "fixed").strip_edges().to_lower() == "adjustable"
+	if elem.has_attr("grip"):
+		var grip: Variant = _resolve_value(elem.get_attr("grip"))
+		if grip is Transform3D:
+			node.grip_transform = grip
+		else:
+			Log.warn("builder", "<VRWebGrabbable> grip не Transform3D — используется identity")
+	for key in elem.attributes:
+		if GRABBABLE_RESERVED.has(key):
+			continue
+		if _property_allowed(node, str(key), str(elem.attributes[key])):
+			node.set(key, _resolve_value(elem.attributes[key]))
+	_append_materialized_children(node, elem)
+	return node
 
 
 ## Аудио-узлы страницы по умолчанию направляем на шину «World» (звуки мира) — чтобы их

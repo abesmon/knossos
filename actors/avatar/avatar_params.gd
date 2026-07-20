@@ -52,6 +52,9 @@ const AFK := &"AFK"
 const SEATED := &"Seated"
 ## Находится в станции.
 const IN_STATION := &"InStation"
+## Рука держит grabbable-предмет (аватар может сжимать кисть). См. docs/client/grabbable.md.
+const HOLD_LEFT := &"HoldLeft"
+const HOLD_RIGHT := &"HoldRight"
 ## Версия контракта конкретного аватара/источника (значение — VERSION).
 const AVATAR_VERSION := &"AvatarVersion"
 
@@ -116,6 +119,8 @@ static func defaults() -> Dictionary:
 		AFK: false,
 		SEATED: false,
 		IN_STATION: false,
+		HOLD_LEFT: false,
+		HOLD_RIGHT: false,
 		AVATAR_VERSION: VERSION,
 	}
 

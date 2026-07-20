@@ -48,6 +48,7 @@ var _debug_on := false       # инспектор провенанса под п
 var _debug_last := ""        # последний показанный текст (эмитим только при смене)
 var _hovered_ui: Object = null
 var _focused_world_ui: Object = null
+var _manipulating := false   # зажата средняя кнопка: мышь/колесо крутят держимый предмет
 
 const SCROLL_REACH := 12.0   # дальность луча прокрутки текста, м (длиннее, чем луч взаимодействия:
 								# читают абзац издали, а не вплотную, как жмут портал)
@@ -236,14 +237,29 @@ func _unhandled_input(event: InputEvent) -> void:
 	else:
 		_focused_world_ui = null
 	if event is InputEventMouseMotion and _looking:
+		# Зажата средняя кнопка и в руке adjustable-предмет — мышь вращает ЕГО, а не камеру
+		# (в VRChat это неудобные клавиши I/J/K/L/U/O, см. docs/client/grabbable.md).
+		var gm := _grab_manager()
+		if _manipulating and gm != null and gm.holding_adjustable():
+			gm.adjust_rotation(event.relative)
+			return
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		_camera.rotate_x(-event.relative.y * mouse_sensitivity)
 		_camera.rotation.x = clamp(_camera.rotation.x, -1.4, 1.4)
+	elif event.is_action_pressed("player_manipulate"):
+		_manipulating = true
+	elif event.is_action_released("player_manipulate"):
+		_manipulating = false
 	elif event.is_action_pressed("player_main_action"):
 		if _looking:
-			# Активный инструмент имеет приоритет на ЛКМ; без инструмента — взаимодействие с порталом.
+			# Приоритет ЛКМ: активный инструмент → use держимого предмета → взаимодействие
+			# (порталы/панели/взятие grabbable через interact_at).
 			if not tools.handle_primary_pressed():
-				_try_interact()
+				var gm := _grab_manager()
+				if gm != null and gm.local_held() != null:
+					gm.use_held()
+				else:
+					_try_interact()
 		else:
 			capture_mouse(true)
 	elif event.is_action_released("player_main_action"):
@@ -254,10 +270,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Второстепенное действие — активному инструменту (отмена прицеливания и т.п.).
 		tools.handle_secondary_pressed()
 	elif _looking and event.is_action_pressed("player_scale_up"):
-		# Гасим в _physics_process: запрос к direct_space_state безопасен только там.
-		_scroll_pending += -1.0
+		if not _scroll_to_grabbable(1.0):
+			# Гасим в _physics_process: запрос к direct_space_state безопасен только там.
+			_scroll_pending += -1.0
 	elif _looking and event.is_action_pressed("player_scale_down"):
-		_scroll_pending += 1.0
+		if not _scroll_to_grabbable(-1.0):
+			_scroll_pending += 1.0
 	elif event is InputEventPanGesture and _looking:
 		# Тачпад на macOS шлёт прокрутку двумя пальцами не колесом, а pan-жестом (delta.y).
 		_scroll_pending += event.delta.y * TRACKPAD_SCROLL_SCALE
@@ -273,6 +291,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("player_interact"):
 		_try_interact()
+	elif event.is_action_pressed("player_drop"):
+		# G — положить держимый предмет в точку прицела (см. docs/client/grabbable.md).
+		if _looking:
+			var gm := _grab_manager()
+			if gm != null:
+				gm.release_held()
 	elif event.is_action_pressed("tool_slot_2"):
 		# Запрос активации инструменту слота 2 (рисование: нет → карандаш → ластик → нет).
 		tools.handle_slot_action(&"tool_slot_2")
@@ -469,6 +493,47 @@ func _try_interact() -> void:
 		if col.has_method("keyboard_focus_active") and col.keyboard_focus_active():
 			_focused_world_ui = col
 			capture_mouse(false)
+
+
+## --- Grabbable-предметы (docs/client/grabbable.md) ---
+
+## Менеджер grabbable живёт в мире (пересоздаётся при навигации) — ищем через группу.
+func _grab_manager() -> GrabManager:
+	var node := get_tree().get_first_node_in_group("grab_manager")
+	return node as GrabManager
+
+
+## Колесо мыши при держимом adjustable-предмете: обычное — дистанция (ближе/дальше, как в
+## VRChat), с зажатой средней кнопкой — roll. Возвращает true, если событие поглощено
+## (тогда прокрутка панелей не срабатывает).
+func _scroll_to_grabbable(steps: float) -> bool:
+	var gm := _grab_manager()
+	if gm == null or not gm.holding_adjustable():
+		return false
+	if _manipulating:
+		gm.adjust_roll(steps)
+	else:
+		gm.adjust_distance(steps)
+	return true
+
+
+## Держимый предмет исключается из собственного клик-луча: он висит перед камерой и иначе
+## перекрывал бы прицел (лучи других игроков его по-прежнему видят — theft работает).
+func set_aim_exception(body: CollisionObject3D, on: bool) -> void:
+	if _ray == null or not is_instance_valid(body):
+		return
+	if on:
+		_ray.add_exception(body)
+	else:
+		_ray.remove_exception(body)
+
+
+## Держим ли предмет рукой — в шину аватара (HoldLeft/HoldRight, аватар может сжать кисть).
+func set_holding(hand: String, held: bool) -> void:
+	if _avatar_source == null:
+		return
+	var pname := AvatarParams.HOLD_LEFT if hand == "left" else AvatarParams.HOLD_RIGHT
+	_avatar_source.params.set_value(pname, held)
 
 
 func _script_input_for(node: Object):

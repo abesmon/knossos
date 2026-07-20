@@ -51,6 +51,7 @@ var _page_space: Dictionary = {}
 var _page_seed := 0
 var _world_image_loader: ImageLoader = null
 var _video_manager: VrwebVideoManager = null
+var _grab_manager: GrabManager = null
 var _base_scene_mode := VrwebBuilder.MODE_COMBINE
 var _effective_scene_mode := VrwebBuilder.MODE_COMBINE
 @onready var _status: Label = _ui.status
@@ -744,6 +745,7 @@ func _clear_world() -> void:
 	_page_space = {}
 	_world_image_loader = null
 	_video_manager = null
+	_grab_manager = null
 	_base_scene_mode = VrwebBuilder.MODE_COMBINE
 	_effective_scene_mode = VrwebBuilder.MODE_COMBINE
 	_remote_view = null
@@ -819,6 +821,15 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	_video_manager = VrwebVideoManager.new()
 	_video_manager.name = "VrwebVideoManager"
 	_world.add_child(_video_manager)
+
+	# Менеджер grabbable-предметов: hold-состояние через Replicated State + attachment-модель
+	# (предмет в руке следует за якорем аватара держателя). Тоже живёт в мире и сносится при
+	# навигации. Grabbable-узлы регистрируются в нём сами при входе в дерево — важно лишь,
+	# чтобы менеджер был создан ДО добавления vrweb-узлов. См. docs/client/grabbable.md.
+	_grab_manager = GrabManager.new()
+	_grab_manager.name = "GrabManager"
+	_world.add_child(_grab_manager)
+	_grab_manager.setup(_player, _remote_view)
 
 	# mode="exclusive" — HTML-сцену не строим вовсе, в мире только узлы vrweb.
 	var exclusive: bool = vrweb.get("found", false) and vrweb.get("mode", "") == VrwebBuilder.MODE_EXCLUSIVE

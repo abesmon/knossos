@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — Grabbable demo</title>
+  <script type="application/vrweb+luau" id="demo.grabbable">
+-- Демо grabbable-предметов (docs/space/grabbable.md): портируемые события grab/drop/use.
+-- ЛКМ по мячу — взять, ЛКМ пока держишь — use (мяч меняет цвет), G — положить.
+local ball = document.query("#demo-ball")
+local ball_material = document.query("#BallMaterial")
+local status = document.query("#status-label")
+
+if not ball or not ball_material or not status then
+  error("grabbable demo scene ids are missing")
+end
+
+local palette = {
+  document.values.color(0.9, 0.3, 0.2, 1.0),
+  document.values.color(0.2, 0.7, 0.9, 1.0),
+  document.values.color(0.4, 0.9, 0.3, 1.0),
+  document.values.color(0.95, 0.8, 0.2, 1.0),
+}
+local color_index = 1
+
+-- grab/drop приходят на ВСЕХ клиентах из канонических дельт hold-состояния.
+-- Третий аргумент on(event, callback, hint) обязателен (сигнал-события хинт не используют — "").
+ball.on("grab", function(event)
+  status.set("text", "Мяч в руке (" .. tostring(event.hand) .. ") у " ..
+      string.sub(tostring(event.user_id), 1, 8))
+end, "")
+
+ball.on("drop", function(_event)
+  status.set("text", "Мяч свободен — возьми его (ЛКМ), положи (G)")
+end, "")
+
+-- use — transient-событие только у держателя: результат (цвет) держатель делает каноном сам.
+-- Здесь для простоты цвет меняется локально; синхронный вариант делал бы
+-- document.state.command из этого callback (см. docs/space/scripting-patterns.md).
+ball.on("use", function(_event)
+  color_index = color_index % #palette + 1
+  ball_material.set("albedo_color", palette[color_index])
+end, "")
+  </script>
+</head>
+<body>
+  <h1>Grabbable demo</h1>
+  <p>ЛКМ — взять, ЛКМ в руке — use (мяч меняет цвет), G — положить (предмет остаётся там, где
+    его держали). Статуя с theft="deny" не отбирается из чужих рук.</p>
+  <p>Ящик — <code>mode="adjustable"</code>: берётся «как есть», без снапа. Колесо — дальше/ближе,
+    средняя кнопка + мышь — вращение, средняя + колесо — roll.</p>
+
+  <vrwml mode="exclusive">
+    <VRWebSpawner mode="first">
+      <SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1.6,6)"/>
+    </VRWebSpawner>
+
+    <Resource id="FloorMesh" type="PlaneMesh" size="Vector2(14,14)"/>
+    <Resource id="FloorMaterial" type="StandardMaterial3D" albedo_color="Color(0.25,0.27,0.3,1)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(14,0.1,14)"/>
+    <MeshInstance3D mesh="SubResource:::FloorMesh" surface_material_override/0="SubResource:::FloorMaterial">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::FloorShape" transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,-0.05,0)"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+
+    <DirectionalLight3D transform="Transform3D(0.7,-0.5,0.5, 0,0.7,0.7, -0.7,-0.5,0.5, 0,6,0)"/>
+
+    <Resource id="BallMesh" type="SphereMesh" radius="0.22" height="0.44"/>
+    <Resource id="BallMaterial" type="StandardMaterial3D" albedo_color="Color(0.9,0.3,0.2,1)"/>
+    <VRWebGrabbable id="demo-ball" transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,1,0)">
+      <MeshInstance3D mesh="SubResource:::BallMesh" surface_material_override/0="SubResource:::BallMaterial"/>
+    </VRWebGrabbable>
+
+    <Resource id="StatueMesh" type="BoxMesh" size="Vector3(0.25,0.6,0.25)"/>
+    <Resource id="StatueMaterial" type="StandardMaterial3D" albedo_color="Color(0.7,0.65,0.5,1)"/>
+    <VRWebGrabbable id="demo-statue" theft="deny"
+        grip="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,-0.15,0)"
+        transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 2,1.1,-1)">
+      <MeshInstance3D mesh="SubResource:::StatueMesh" surface_material_override/0="SubResource:::StatueMaterial"/>
+    </VRWebGrabbable>
+
+    <Resource id="CrateMesh" type="BoxMesh" size="Vector3(0.4,0.4,0.4)"/>
+    <Resource id="CrateMaterial" type="StandardMaterial3D" albedo_color="Color(0.55,0.4,0.25,1)"/>
+    <VRWebGrabbable id="demo-crate" mode="adjustable"
+        transform="Transform3D(1,0,0, 0,1,0, 0,0,1, -2,1.1,-1)">
+      <MeshInstance3D mesh="SubResource:::CrateMesh" surface_material_override/0="SubResource:::CrateMaterial"/>
+    </VRWebGrabbable>
+
+    <Resource id="LabelFont" type="LabelSettings" font_size="48" outline_size="8"/>
+    <WorldUiCanvas size="Vector2(4,1)" viewport_size="Vector2i(1024,256)"
+        transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,2.6,-3)">
+      <Label id="status-label" text="Мяч свободен — возьми его (ЛКМ), положи (G)"
+          label_settings="SubResource:::LabelFont"/>
+    </WorldUiCanvas>
+  </vrwml>
+</body>
+</html>

@@ -244,6 +244,19 @@ func _on_p2p_disconnected(id: int) -> void:
 		cap.set_connection_lost(true)
 
 
+## Капсула держателя grabbable-предмета по user_id (для attachment-модели GrabManager):
+## живой пир — по привязке peer→user_id, призрак grace-периода — по своему user_id (предмет
+## остаётся в руке замершей капсулы, пока авторитет не освободит его авто-release).
+func capsule_for_user(user_id: String) -> Node3D:
+	if user_id == "":
+		return null
+	for peer_id in _capsules:
+		if NetworkManager.user_id_of(peer_id) == user_id:
+			return _capsules[peer_id]
+	var g: Dictionary = _ghost_caps.get(user_id, {})
+	return g.get("cap") as Node3D if not g.is_empty() else null
+
+
 func _on_peer_left(id: int) -> void:
 	_faces.erase(id)
 	_avatar_uris.erase(id)
