@@ -45,6 +45,7 @@ const MIRROR_TAG := "VRWebMirror"
 const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
 const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
 const IMAGE_TAG := "VRWebImage"
+const STROKE_TAG := "VRWebStroke"
 const BLOB_TAG := "VRWebBlob"
 const WORLD_UI_CANVAS_TAG := "WorldUiCanvas"
 const GRABBABLE_TAG := "VRWebGrabbable"
@@ -58,6 +59,7 @@ const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
 const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
 const WORLD_UI_CANVAS_SCENE := preload("res://actors/world_ui/world_ui_canvas.tscn")
 const GRABBABLE_SCRIPT := preload("res://actors/grabbable/grabbable.gd")
+const STROKE_SCENE := preload("res://actors/stroke/stroke.tscn")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -283,6 +285,8 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_video_screen(elem)
 	if elem.raw_tag == IMAGE_TAG:
 		return _build_image(elem)
+	if elem.raw_tag == STROKE_TAG:
+		return _build_stroke(elem)
 	if elem.raw_tag == WORLD_UI_CANVAS_TAG:
 		return _build_world_ui_canvas(elem)
 	if elem.raw_tag == GRABBABLE_TAG:
@@ -513,6 +517,16 @@ func _build_image(elem: HtmlNode) -> Node:
 			continue
 		if _property_allowed(node, str(key), str(elem.attributes[key])):
 			node.set(key, _resolve_value(elem.attributes[key]))
+	return node
+
+
+## <VRWebStroke points="[x0,y0,z0,x1,y1,z1,…]" color="Color(r,g,b,1)" width="0.02"/> —
+## процедурный штрих-полилиния. Это обычный специальный тег VRWML: в realtime-слое он
+## переносится универсальным kind="vrweb-node", без отдельного клиентского kind'а.
+func _build_stroke(elem: HtmlNode) -> Node:
+	var node := STROKE_SCENE.instantiate() as StrokeActor
+	_apply_attributes(node, elem)
+	_append_materialized_children(node, elem)
 	return node
 
 

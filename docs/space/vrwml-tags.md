@@ -71,6 +71,7 @@
 | `<VRWebSpawner>` | stable | Декларирует стратегию выбора начальной позы (`first` или `random`); не обязан оставаться runtime-узлом. | [Authoring сцены](../vrweb-export.md#как-собирать-сцену) |
 | `<SpawnerPoint>` | stable | Дочерняя поза спавна с `Transform3D`; направление локальной `-Z` задаёт взгляд. | [Authoring сцены](../vrweb-export.md#как-собирать-сцену) |
 | `<VRWebMirror>` | stable | Создаёт отражающую поверхность заданного размера и позы. | [Зеркало VRWML](../client/scene-elements.md#зеркало-vrwml) |
+| `<VRWebStroke>` | evolving | Рисует процедурную полилинию-трубу; `points` — плоская последовательность мировых XYZ, `color` — RGB, `width` — метры. | [Карандаш и ластик](../client/pencil-tool.md) |
 
 ## Предметы
 

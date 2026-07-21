@@ -6,7 +6,7 @@
   <script type="application/vrweb+luau" id="pencil.behavior">
 -- Карандаш как переносимый предмет (docs/space/portable-tools.md): держишь в руке,
 -- зажал ЛКМ (use) — ведёшь штрих по прицелу, отпустил (use_end) — один штрих уходит в
--- эфемерный слой (kind="stroke", тот же контракт, что у клиентского карандаша раньше).
+-- эфемерный слой стандартным VRWML-узлом <VRWebStroke>.
 -- Превью по ходу ведения — временные CSG-точки, снимаются при финализации.
 local pencil = document.query("#pencil-item")
 assert(pencil ~= nil, "pencil item scene id is missing")
@@ -79,8 +79,15 @@ pencil.on("use_end", function(_e)
   drawing = false
   clear_preview()
   if #points < 6 then return end   -- клик без ведения — не штрих
-  document.scene.add({ kind = "stroke", parent = "", ttl = 0, props = {
-    points = points, color = { cr, cg, cb }, width = STROKE_WIDTH,
+  local encoded = {}
+  for i = 1, #points do encoded[i] = string.format("%.3f", points[i]) end
+  document.scene.add({ kind = "vrweb-node", parent = "", ttl = 0, props = {
+    tag = "VRWebStroke",
+    attrs = {
+      points = "[" .. table.concat(encoded, ", ") .. "]",
+      color = string.format("Color(%.4f, %.4f, %.4f, 1)", cr, cg, cb),
+      width = tostring(STROKE_WIDTH),
+    },
   } }, nil)
   points = {}
 end, "")

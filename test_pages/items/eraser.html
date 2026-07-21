@@ -5,7 +5,7 @@
   <title>VRWeb item — ластик</title>
   <script type="application/vrweb+luau" id="eraser.behavior">
 -- Ластик как переносимый предмет: зажал ЛКМ (use) — стирает СВОИ штрихи под прицелом.
--- Список штрихов — document.scene.objects("stroke"); чужие отфильтровываются по author
+-- Штрихи — стандартные vrweb-node с tag="VRWebStroke"; чужие отфильтровываются по author
 -- заранее (авторитет всё равно отклонил бы remove чужого объекта).
 local eraser = document.query("#eraser-item")
 assert(eraser ~= nil, "eraser item scene id is missing")
@@ -35,8 +35,15 @@ local function segment_distance(p, a, b)
 end
 
 local function stroke_hit(props, p)
-  local pts = props.points
-  if type(pts) ~= "table" or #pts < 6 then return false end
+  local attrs = props.attrs
+  if type(attrs) ~= "table" then return false end
+  local pts = {}
+  local raw = string.gsub(tostring(attrs.points or ""), "[%[%],]", " ")
+  for token in string.gmatch(raw, "[^%s]+") do
+    local value = tonumber(token)
+    if value ~= nil then pts[#pts + 1] = value end
+  end
+  if #pts < 6 then return false end
   local prev = nil
   for i = 1, #pts - 2, 3 do
     local v = document.values.vector3(pts[i], pts[i + 1], pts[i + 2])
@@ -56,10 +63,11 @@ document.on_update(function(frame)
   if accum < SCAN_INTERVAL then return end
   accum = 0
   local p = erase_point()
-  local strokes = document.scene.objects("stroke")
+  local strokes = document.scene.objects("vrweb-node")
   for i = 1, #strokes do
     local stroke = strokes[i]
-    if tostring(stroke.author) == tostring(me.user_id) and stroke_hit(stroke.props, p) then
+    if stroke.props.tag == "VRWebStroke" and tostring(stroke.author) == tostring(me.user_id)
+        and stroke_hit(stroke.props, p) then
       document.scene.remove(stroke.id, nil)
     end
   end

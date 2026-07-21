@@ -55,7 +55,10 @@ func _strokes() -> Array:
 	var out: Array = []
 	var objects := NetworkManager.scene_objects()
 	for id in objects:
-		if str(objects[id].get("kind", "")) == "stroke":
+		var object: Dictionary = objects[id]
+		var props: Dictionary = object.get("props", {})
+		if str(object.get("kind", "")) == SceneHtml.KIND_NODE \
+				and str(props.get("tag", "")) == VrwebBuilder.STROKE_TAG:
 			out.append(objects[id])
 	return out
 
@@ -153,7 +156,9 @@ func _run() -> void:
 	_check(strokes.size() == 1, "карандаш оставил один штрих в слое (%d)" % strokes.size())
 	if strokes.size() == 1:
 		var props: Dictionary = strokes[0].get("props", {})
-		_check((props.get("points", []) as Array).size() >= 6, "штрих содержит точки")
+		var attrs: Dictionary = props.get("attrs", {})
+		_check(str(attrs.get("points", "")).split(" ", false).size() >= 6,
+				"штрих содержит точки")
 		_check(str(strokes[0].get("author", "")) == Settings.user_id, "автор штриха — мы")
 	var stroke_actors := get_tree().get_nodes_in_group(StrokeActor.GROUP)
 	_check(stroke_actors.size() >= 1, "штрих материализован StrokeActor")

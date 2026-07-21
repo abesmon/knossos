@@ -195,7 +195,8 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Несколько пространств пользователя, сохранив `home` дефолтом.
 - [ ] Федеративный auth приватного fetch.
 - [ ] Протокольное выселение гостей при закрытии пространства.
-- [ ] HTML-представление и flush мировых `stroke`/`bubble` объектов.
+- [ ] HTML-представление и flush мировых `bubble`-объектов (`VRWebStroke` уже проходит
+  общий flush как `vrweb-node`).
 - [ ] Мягкое уведомление `page-revised` после flush.
 - [ ] Доставка результата `deferred` через pending endpoint или webhook.
 - [ ] Более тонкие серверные права и квоты по зонам/kind.

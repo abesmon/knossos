@@ -1,6 +1,7 @@
 # Карандаш и ластик (штрихи)
 
-> Штрихи — объекты [эфемерного слоя](../network/ephemeral-changes.md) (`kind="stroke"`).
+> Штрихи — объекты [эфемерного слоя](../network/ephemeral-changes.md): универсальный
+> `kind="vrweb-node"` со специальным VRWML-тегом `<VRWebStroke>`.
 > Инструменты рисования с июля 2026 — **переносимые предметы**
 > ([pencil.html](../../test_pages/items/pencil.html) /
 > [eraser.html](../../test_pages/items/eraser.html), слот 2 тулбелта — см.
@@ -24,14 +25,16 @@
 | Слой | Файл | Роль |
 |---|---|---|
 | **Данные/геометрия** (чистая, агностичная) | [scripts/ephemeral/stroke_path.gd](../../scripts/ephemeral/stroke_path.gd) `StrokePath` | flat↔точки, Douglas–Peucker, хит-тест полилинии — используется материализацией; item-скрипты делают эквивалент на Luau |
-| **Протокол** | `SceneChanges` / `NetworkManager` | **не менялся**: `kind="stroke"` поверх готовых `add`/`remove` |
-| **Материализация** | [actors/stroke/stroke.gd](../../actors/stroke/stroke.gd) `StrokeActor` + ветка в [ephemeral_view.gd](../../scripts/ephemeral_view.gd) | один меш по `props`; группа `ephemeral_stroke` |
+| **Протокол** | `SceneChanges` / `NetworkManager` | `kind="vrweb-node"`, `props.tag="VRWebStroke"`, строковые `props.attrs`; обычные `add`/`remove` |
+| **Материализация** | [actors/stroke/stroke.gd](../../actors/stroke/stroke.gd) `StrokeActor` + [vrweb_builder.gd](../../scripts/vrweb_builder.gd) | специальный тег строится общим путём `vrweb-node`; один меш; группа `ephemeral_stroke` |
 | **Инструменты** | [items/pencil.html](../../test_pages/items/pencil.html), [items/eraser.html](../../test_pages/items/eraser.html) | Luau в realm предмета: `use`/`use_end` + `document.player.aim` → `document.scene` |
-| **Тесты** | [tests/test_stroke_path.gd](../../tests/test_stroke_path.gd), [tests/test_item_tools.gd](../../tests/test_item_tools.gd) | чистый контракт StrokePath; полный цикл рисования/стирания item-инструментами |
+| **Тесты** | [tests/test_stroke_path.gd](../../tests/test_stroke_path.gd), [tests/test_vrweb_stroke.gd](../../tests/test_vrweb_stroke.gd), [tests/test_item_tools.gd](../../tests/test_item_tools.gd) | чистая геометрия; документный тег VRWML; полный цикл рисования/стирания item-инструментами |
 
-## Данные штриха (контракт не менялся)
+## Данные штриха
 
-`props`: `{ "points": [x0,y0,z0,…], "color": [r,g,b], "width": <м> }`. Точки — **мировые**
+Каноническая разметка: `<VRWebStroke points="[x0,y0,z0,…]" color="Color(r,g,b,1)" width="0.02"/>`.
+В realtime-слое это `props: {tag:"VRWebStroke", attrs:{points, color, width}}`; значения
+атрибутов — строки VRWML. Точки — **мировые**
 координаты (`parent=""`), поэтому `StrokeActor` стоит в начале координат, а вершины абсолютны.
 Полный контракт объекта — в
 [ephemeral-changes.md](../network/ephemeral-changes.md#штрихи-второй-инструмент).
@@ -43,7 +46,8 @@
    иначе `aim.origin + direction*1.2` (рисование в воздухе). Прореживание шагом 3 см,
    потолок 200 точек (props-бюджет слоя). Превью — временные `CSGSphere3D`-точки через
    `document.create` (снимаются при финализации/отмене).
-3. **use_end**: если точек ≥ 2 — один `document.scene.add({kind:"stroke", ttl:0, props})`.
+3. **use_end**: если точек ≥ 2 — один `document.scene.add` с `kind="vrweb-node"` и тегом
+   `VRWebStroke`.
    Никаких `update` по ходу: один штрих — ровно один объект, минимум трафика.
 4. **drop** (выпал из руки посреди ведения — G/кража): незавершённый штрих отменяется.
 
@@ -53,7 +57,8 @@
 
 ## Ластик
 
-Пока ЛКМ зажата, скрипт раз в ~0.12 с берёт `document.scene.objects("stroke")`, фильтрует по
+Пока ЛКМ зажата, скрипт раз в ~0.12 с берёт `document.scene.objects("vrweb-node")`, оставляет
+только объекты с `props.tag="VRWebStroke"`, фильтрует по
 `author == свой user_id` (чужие всё равно отклонил бы авторитет) и проверяет дистанцию точки
 прицела до полилинии (та же математика, что `StrokePath.distance_to_polyline`, на Luau);
 попадание → `document.scene.remove(id)`.
@@ -69,7 +74,7 @@
 - **Цвет/толщина**: цвет — стабильный оттенок по `user_id` (считается в Luau); UI выбора —
   дело самого item'а (например, use по палитре).
 - **Частичное стирание**: разрезать штрих на два (remove + 2×add) — отложено.
-- **Граффити-права**: стирать чужие штрихи — политика по `kind` в `SceneChanges`
+- **Граффити-права**: стирать чужие штрихи — политика по тегу внутри `vrweb-node`
   (capabilities), как предусмотрено в
   [ephemeral-changes.md](../network/ephemeral-changes.md#права-владение--фундамент-под-систему-прав).
 - **Персистенция**: `ttl=0` делает штрихи кандидатами на выгрузку — как прочие эфемерные

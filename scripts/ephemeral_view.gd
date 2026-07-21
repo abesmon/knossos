@@ -12,15 +12,15 @@ extends Node3D
 ## объекта монтируется как ребёнок его узла (наследует трансформ); parent="page:<node_id>" —
 ## как ребёнок РЕАЛЬНОГО узла vrweb-слоя страницы (реестр targets из main).
 ##
-## Kind'ы: "bubble" (портал-метка), "stroke" (штрих карандаша) и оверлей vrweb
+## Kind'ы: "bubble" (портал-метка) и оверлей vrweb
 ## (см. docs/space-console.md):
-##   "vrweb-node"  — добавленный узел сцены: строится VrwebBuilder.build_element;
+##   "vrweb-node"  — добавленный узел сцены: строится VrwebBuilder.build_element
+##                   (включая процедурный специальный тег <VRWebStroke>);
 ##   "vrweb-patch" — правка узла СТРАНИЦЫ (id "vpatch:<node_id>"): применяет props.set к живому
 ##                   узлу (с запоминанием оригиналов для отката), props.removed скрывает его.
 ## Подробно — в docs/ephemeral-changes.md.
 
 const BUBBLE := preload("res://actors/bubble/bubble.tscn")
-const STROKE := preload("res://actors/stroke/stroke.tscn")
 const ITEM_HOST := preload("res://scripts/vrweb_item_host.gd")
 
 ## Ресурсный потолок клиента: сколько item-realm'ов (kind="vrweb-item") материализуется
@@ -223,10 +223,6 @@ func _make_node(object: Dictionary) -> Node:
 			if _activate_cb.is_valid():
 				bubble.activated.connect(_activate_cb)
 			return bubble
-		"stroke":
-			# Штрих карандаша: один меш-труба по точкам (см. StrokeActor). Не кликабелен —
-			# колбэк активации не нужен; данные ставит вьюха через setup_object в _apply.
-			return STROKE.instantiate()
 		SceneHtml.KIND_NODE:
 			# Добавленный узел vrweb-слоя: строится тем же путём, что узлы страницы
 			# (тот же принятый ClassDB-риск, см. docs/vrwml-tags.md). Дети приходят

@@ -68,12 +68,17 @@ func _test_scene_merge_and_flush() -> void:
 			"ts": 1.0, "ttl": 0.0, "props": {"set": {"visible": "false"}}},
 		"u1.7": {"id": "u1.7", "kind": "bubble", "parent": "", "author": "a", "ts": 2.0,
 			"ttl": 30.0, "props": {"url": "u"}},
+		"u1.8": {"id": "u1.8", "kind": "vrweb-node", "parent": "", "author": "a", "ts": 3.0,
+			"ttl": 0.0, "props": {"tag": "VRWebStroke", "attrs": {
+				"points": "[0,0,0,1,0,0]", "width": "0.02"}}},
 	}
 	var merged := SceneHtml.serialize_scene(index, objects)
 	_ok(merged.find("visible=\"false\"") != -1, "патч слит в атрибуты узла")
 	_ok(merged.find("<bubble") != -1, "мировой объект в слитом документе")
+	_ok(merged.find("<VRWebStroke") != -1, "VRWebStroke слит как обычный VRWML-узел")
 	var flush := SceneHtml.serialize_scene(index, objects, false)
 	_ok(flush.find("<bubble") == -1, "флаш без мировых объектов")
+	_ok(flush.find("<VRWebStroke") != -1, "VRWebStroke входит в общий vrweb-node flush")
 	# Tombstone: узел и его поддерево скрыты.
 	objects["vpatch:box"]["props"] = {"set": {}, "removed": true}
 	var without := SceneHtml.serialize_scene(index, objects)
@@ -227,13 +232,14 @@ func _test_scene_guards() -> void:
 	_ok(not d["ok"], "правка не-allowlisted атрибута блока → ошибка")
 
 
-## Снимок состояния для большинства тестов: пузырь + штрих в корне.
+## Снимок состояния для большинства тестов: пузырь + VRWebStroke-узел в корне.
 func _objects() -> Dictionary:
 	return {
 		"u1.1": {"id": "u1.1", "kind": "bubble", "parent": "", "author": "alice", "ts": 100.0,
 			"ttl": 30.0, "props": {"url": "https://a.example/x", "position": [1.0, 1.6, 5.0], "label": "Вася"}},
-		"u1.2": {"id": "u1.2", "kind": "stroke", "parent": "", "author": "alice", "ts": 101.0,
-			"ttl": 0.0, "props": {"points": [0.0, 1.0, 0.0, 0.5, 1.2, 0.1], "color": [1.0, 0.0, 0.0], "width": 0.02}},
+		"u1.2": {"id": "u1.2", "kind": "vrweb-node", "parent": "", "author": "alice", "ts": 101.0,
+			"ttl": 0.0, "props": {"tag": "VRWebStroke", "attrs": {
+				"points": "[0, 1, 0, 0.5, 1.2, 0.1]", "color": "Color(1, 0, 0, 1)", "width": "0.02"}}},
 	}
 
 

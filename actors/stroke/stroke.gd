@@ -1,30 +1,40 @@
 class_name StrokeActor
 extends Node3D
 
-## Эктор-штрих: материализация эфемерного объекта kind="stroke" (рисунок карандаша). Строит ОДИН
+## Эктор-штрих: материализация специального VRWML-тега <VRWebStroke> (рисунок карандаша). Строит ОДИН
 ## меш (тонкую трубу вдоль полилинии) в единственный MeshInstance3D — цель «минимум мешей»: один
-## draw-call на штрих, без физ-коллайдеров. Точки в props — мировые координаты (parent="" корень),
-## поэтому узел стоит в начале координат, а вершины абсолютны. См. docs/pencil-tool.md.
+## draw-call на штрих, без физ-коллайдеров. Точки в attrs — мировые координаты (parent="" корень),
+## поэтому узел стоит в начале координат, а вершины абсолютны. См. docs/client/pencil-tool.md.
 ##
-## Два пути использования:
-##  • Канонический — EphemeralView инстанцирует из записи журнала и зовёт setup_object(object).
-##  • Превью/локальный — DrawingTool сам инстанцирует, рисует по ходу ведения append_point() и
-##    (офлайн) финализирует setup_object с готовым props.
+## Канонический путь — VrwebBuilder создаёт актор из attrs универсального vrweb-node. Публичные
+## свойства ниже принимают как разобранные VRWML-литералы, так и компактные строки чисел.
 ##
-## Состоит в группе "ephemeral_stroke" — по ней ластик находит штрихи для хит-теста (hit_by).
+## Состоит в группе "ephemeral_stroke" для диагностики и тестов материализации.
 
 const GROUP := "ephemeral_stroke"
 ## Граней в поперечнике трубы: 4 — дёшево и достаточно «объёмно» с любого угла.
 const SIDES := 4
 const DEFAULT_WIDTH := 0.02
 
-## id записи в журнале ("" — локальный офлайн-штрих, удаляется напрямую, без сети) и автор
-## (для решения ластика «моё/чужое»).
-var object_id: String = ""
-var author: String = ""
+var points = []:
+	set(value):
+		points = value
+		_points = _vec_array(StrokePath.flat_to_points(_flat_value(value)))
+		_rebuild()
+
+var color = Color.WHITE:
+	set(value):
+		color = _color_from(value)
+		_setup_material(color)
+
+var width = DEFAULT_WIDTH:
+	set(value):
+		width = maxf(0.002, float(value))
+		_radius = width * 0.5
+		_rebuild()
 
 var _radius: float = DEFAULT_WIDTH * 0.5
-var _points: Array[Vector3] = []     # текущие вершины (мировые) — для превью-достройки и хит-теста
+var _points: Array[Vector3] = []     # текущие вершины в мировых координатах
 var _mat: StandardMaterial3D
 
 @onready var _mesh: MeshInstance3D = $Mesh
@@ -32,49 +42,10 @@ var _mat: StandardMaterial3D
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	if _mat == null:
-		_setup_material(Color(1, 1, 1))
-
-
-## Контракт EphemeralView: принять плоский объект { id, author, props:{points,color,width} } и
-## построить меш. Зовётся при создании и (редко, при finalize-on-release) при update/ресинке.
-func setup_object(object: Dictionary) -> void:
-	object_id = str(object.get("id", object_id))
-	author = str(object.get("author", author))
-	var props: Dictionary = object.get("props", {})
-	_radius = maxf(0.002, float(props.get("width", DEFAULT_WIDTH))) * 0.5
-	_setup_material(_color_from(props.get("color", [1, 1, 1])))
-	_points = _vec_array(StrokePath.flat_to_points(props.get("points", [])))
+	_setup_material(_color_from(color))
+	_radius = maxf(0.002, float(width)) * 0.5
+	_points = _vec_array(StrokePath.flat_to_points(_flat_value(points)))
 	_rebuild()
-
-
-# --- Превью/локальный режим (DrawingTool) ---
-
-## Начать живой штрих: задать цвет/толщину и очистить точки. Дальше — append_point по ходу ведения.
-func begin_preview(color: Color, width: float) -> void:
-	_radius = maxf(0.002, width) * 0.5
-	_setup_material(color)
-	_points.clear()
-	_rebuild()
-
-
-## Достроить превью одной точкой и перерисовать меш (≤MAX_POINTS точек — дёшево).
-func append_point(p: Vector3) -> void:
-	_points.append(p)
-	_rebuild()
-
-
-# --- Хит-тест ластика ---
-
-## Пересекает ли сфера радиуса radius в точке point этот штрих (по полилинии с учётом толщины).
-func hit_by(point: Vector3, radius: float) -> bool:
-	if _points.size() < 2:
-		return false
-	var flat: Array = []
-	for v in _points:
-		flat.append(v.x); flat.append(v.y); flat.append(v.z)
-	return StrokePath.distance_to_polyline(flat, point) <= _radius + radius
-
 
 # --- Построение меша ---
 
@@ -154,9 +125,23 @@ func _initial_normal(tangent: Vector3) -> Vector3:
 
 
 func _color_from(arr) -> Color:
+	if arr is Color:
+		return arr
+	if arr is String:
+		arr = _flat_value(arr)
 	if typeof(arr) == TYPE_ARRAY and (arr as Array).size() >= 3:
 		return Color(float(arr[0]), float(arr[1]), float(arr[2]))
 	return Color(1, 1, 1)
+
+
+func _flat_value(value) -> Array:
+	if value is Array:
+		return value
+	var out: Array = []
+	for token in str(value).split(" ", false):
+		if token.is_valid_float():
+			out.append(token.to_float())
+	return out
 
 
 ## Array -> типизированный Array[Vector3] (flat_to_points возвращает нетипизированный).
