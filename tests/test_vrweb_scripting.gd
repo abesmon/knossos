@@ -5,8 +5,10 @@ var _failed := false
 
 func _ready() -> void:
 	_test_declarations()
+	_test_realm_attribute()
 	_test_integrity()
 	_test_export()
+	_test_host_contract()
 	await _test_fetch()
 	if not OS.get_environment("VRWEB_SCRIPT_TEST_BASE").is_empty():
 		await _test_http_fetch(OS.get_environment("VRWEB_SCRIPT_TEST_BASE"))
@@ -32,6 +34,100 @@ func _test_declarations() -> void:
 	var data_url := VrwebScriptDeclaration.collect(HtmlParser.parse(
 			'<script type="application/vrweb+luau" id="data" src="DATA:text/plain,x"></script>'), "")
 	_eq(data_url.errors.size(), 1, "data script URLs are rejected case-insensitively")
+
+
+## Явный identity page realm: атрибут realm, его согласованность и fallback к id
+## первого скрипта (docs/space/scripting.md).
+func _test_realm_attribute() -> void:
+	var matching := VrwebScriptDeclaration.collect(HtmlParser.parse("""
+<script type="application/vrweb+luau" id="a" realm="my.page">return 1</script>
+<script type="application/vrweb+luau" id="b" realm="my.page">return 2</script>
+"""), "")
+	_eq(matching.errors.is_empty(), true, "matching explicit realms collect")
+	_eq(matching.realm, "my.page", "collect reports the page realm")
+	var mismatch := VrwebScriptDeclaration.collect(HtmlParser.parse("""
+<script type="application/vrweb+luau" id="a" realm="one">return 1</script>
+<script type="application/vrweb+luau" id="b" realm="two">return 2</script>
+"""), "")
+	_eq(mismatch.errors.size(), 1, "mismatching explicit realms are rejected")
+	_eq(mismatch.scripts.size(), 1, "the first realm wins, the conflicting tag is skipped")
+	var implicit := VrwebScriptDeclaration.collect(HtmlParser.parse(
+			'<script type="application/vrweb+luau" id="solo">return 1</script>'), "")
+	_eq(implicit.realm, "", "without the attribute identity falls back to the first script id")
+	var runtime := VrwebLuauRuntime.new()
+	add_child(runtime)
+	var page := Node3D.new()
+	add_child(page)
+	runtime.setup(page, {}, "", null, VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL))
+	var activation := runtime.activate([
+		{"id": "a", "realm": "my.page", "profile": VrwebScriptDeclaration.PROFILE,
+			"kind": "inline", "source": "return 1", "src": "", "integrity": "", "base_url": ""},
+	])
+	_eq(activation.ok, true, "realm-attributed page activates")
+	_eq(runtime._page_id, "my.page", "explicit realm becomes the page realm identity")
+	runtime.close()
+	runtime.queue_free()
+	page.queue_free()
+
+
+## Стандартный контракт host-вызовов: опущенные необязательные аргументы, пара `nil, code`
+## при отказе и фазовый код lifecycle (docs/space/scripting-api.md).
+func _test_host_contract() -> void:
+	var page := Node3D.new()
+	add_child(page)
+	var label := Label3D.new()
+	page.add_child(label)
+	var runtime := VrwebLuauRuntime.new()
+	add_child(runtime)
+	runtime.setup(page, {"lamp": label}, "vrwebresource://contract.html", null,
+			VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL))
+	var source := """
+local results = {}
+-- Опущенные необязательные аргументы: create без props, color без alpha, on без hint.
+local box = document.create("Node3D")
+results.created = box ~= nil
+results.color_ok = document.values.color(1, 0, 0) ~= nil
+local lamp = document.query("#lamp")
+results.on_ok = lamp.on("activate", function() end) == true
+-- Контракт ошибок: неуспех приходит парой nil, code.
+local missing, missing_code = document.create("HTTPRequest")
+results.err_nil = missing == nil
+results.err_code = missing_code
+local _, selector_code = document.query("lamp")
+results.selector_code = selector_code
+-- Фазовый контракт: транспортный вызов недоступен в staged top-level.
+local _, phase_code = lamp.call("show")
+results.phase_code = phase_code
+-- Консолидация: player.set, document.shaders, players.local_player.
+local _, player_code = document.player.set("position", document.values.vector3(0, 0, 0))
+results.player_code = player_code
+results.shaders_api = document.shaders ~= nil
+	and document.features.has("vrweb/shaders/1")
+	and not document.features.has("vrweb/render-shaders/1")
+document.players.on_changed(function(event)
+	results.me_is_local = event.local_player ~= nil and event.local_player.is_local == true
+end)
+document.session.results = results
+"""
+	var activation := runtime.activate([
+		{"id": "contract.page", "profile": VrwebScriptDeclaration.PROFILE, "kind": "inline",
+			"source": source, "src": "", "integrity": "", "base_url": ""},
+	])
+	_eq(activation.ok, true, "contract page activates (%s)" % str(activation))
+	var results: Dictionary = runtime.session_of("contract.page").get("results", {})
+	_eq(results.get("created"), true, "create works without the optional props argument")
+	_eq(results.get("color_ok"), true, "values.color works without the optional alpha")
+	_eq(results.get("on_ok"), true, "handle.on works without the optional hint")
+	_eq(results.get("err_nil"), true, "a failed host call returns nil first")
+	_eq(results.get("err_code"), "unsupported", "unknown create class reports code unsupported")
+	_eq(results.get("selector_code"), "invalid_args", "bad selector reports invalid_args")
+	_eq(results.get("phase_code"), "lifecycle", "staged transport call reports lifecycle")
+	_eq(results.get("player_code"), "unsupported", "player.set without a player reports unsupported")
+	_eq(results.get("shaders_api"), true, "document.shaders replaces document.render.shaders")
+	_eq(results.get("me_is_local"), true, "players event carries local_player")
+	runtime.close()
+	runtime.queue_free()
+	page.queue_free()
 
 
 func _test_integrity() -> void:

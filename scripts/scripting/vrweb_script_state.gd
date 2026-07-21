@@ -20,6 +20,8 @@ var _pending_commands: Array[Dictionary] = []
 var _pending_subscriptions: Array[Dictionary] = []
 var _pending_binding_subscriptions: Array[Dictionary] = []
 var _saved_states: Dictionary = {}
+var _result_callbacks: Dictionary = {}
+var _results_connected := false
 
 
 func setup(script_id: String, invoke: Callable) -> void:
@@ -33,47 +35,52 @@ func api() -> Dictionary:
 			var state_dict = _table_as_dictionary(initial)
 			var bindings_dict = _table_as_dictionary(initial_bindings)
 			if state_dict == null or bindings_dict == null:
-				return false
+				return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 			return ensure_object(str(object_id), str(schema_id), state_dict, bindings_dict),
 		"read": read,
 		"bindings": bindings, "binding": binding, "revision": revision,
-		"command": func(object_id, schema_id, version, command_name, args = {}):
+		"command": func(object_id, schema_id, version, command_name, args = null, callback = null):
 			return command(str(object_id), str(schema_id), int(version), str(command_name),
-					args if args is Dictionary else {}),
+					args if args is Dictionary else {},
+					callback if callback is Callable else Callable()),
 		"on": subscribe, "on_bindings": subscribe_bindings}
 
 
-func register_schema(local_schema: String, definition: Dictionary) -> bool:
-	if _closed or not VrwebScriptDeclaration.valid_id(local_schema):
-		return false
+func register_schema(local_schema: String, definition: Dictionary):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not VrwebScriptDeclaration.valid_id(local_schema):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if _staging:
 		_pending_schemas[local_schema] = definition.duplicate(true)
 		return true
 	var wire := _wire(local_schema)
 	var wrapped := _wrap_definition(definition)
 	if not NetworkManager.register_replicated_schema(wire, wrapped):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	_schemas[local_schema] = wire
 	_definitions[local_schema] = wrapped
 	return true
 
 
 func ensure_object(local_object: String, local_schema: String, initial: Dictionary = {},
-		bindings: Dictionary = {}) -> bool:
-	if _closed or not VrwebScriptDeclaration.valid_id(local_object):
-		return false
+		bindings: Dictionary = {}):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not VrwebScriptDeclaration.valid_id(local_object):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if _staging:
 		if not _pending_schemas.has(local_schema):
-			return false
+			return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 		_pending_objects.append({"object": local_object, "schema": local_schema,
 			"initial": initial.duplicate(true), "bindings": bindings.duplicate(true)})
 		return true
 	if not _schemas.has(local_schema):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	var wire_schema := str(_schemas[local_schema])
 	var wire_object := _wire(local_object)
 	if not NetworkManager.register_replicated_object(wire_object, wire_schema, initial, bindings):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	_objects[_key(local_object, local_schema)] = {"schema": wire_schema, "object": wire_object,
 		"bindings": bindings.duplicate(true), "initial": initial.duplicate(true)}
 	_connect_authority()
@@ -115,27 +122,57 @@ func wire_record(local_object: String, local_schema: String) -> Dictionary:
 	return (_objects.get(_key(local_object, local_schema), {}) as Dictionary).duplicate(true)
 
 
+## Опциональный callback — стандартное наблюдение исхода команды: он получает
+## {ok, code, revision, request_id} из ACK авторитета (docs/network/replicated-state.md).
 func command(local_object: String, local_schema: String, version: int, command_name: String,
-		args: Dictionary = {}) -> int:
+		args: Dictionary = {}, callback: Callable = Callable()):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
 	if _staging:
 		_pending_commands.append({"object": local_object, "schema": local_schema,
-			"version": version, "command": command_name, "args": args.duplicate(true)})
+			"version": version, "command": command_name, "args": args.duplicate(true),
+			"callback": callback})
 		return 0
 	var record: Dictionary = _objects.get(_key(local_object, local_schema), {})
-	return -1 if _closed or record.is_empty() else NetworkManager.request_replicated_command(
+	if record.is_empty():
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	var request_id: int = NetworkManager.request_replicated_command(
 			str(record.object), str(record.schema), version, command_name, args)
+	_track_result(request_id, callback)
+	return request_id
 
 
-func subscribe(local_object: String, local_schema: String, callback: Callable) -> bool:
-	if _closed or not callback.is_valid():
-		return false
+func _track_result(request_id: int, callback: Callable) -> void:
+	if request_id < 0 or not callback.is_valid():
+		return
+	if not _results_connected:
+		NetworkManager.replicated_command_result.connect(_on_command_result)
+		_results_connected = true
+	_result_callbacks[request_id] = callback
+
+
+func _on_command_result(request_id: int, accepted: bool, code: String, revision: int) -> void:
+	if _closed or not _result_callbacks.has(request_id):
+		return
+	var callback: Callable = _result_callbacks[request_id]
+	_result_callbacks.erase(request_id)
+	if callback.is_valid() and _invoke.is_valid():
+		_invoke.call(callback, {"ok": accepted, "code": code, "revision": revision,
+			"request_id": request_id})
+
+
+func subscribe(local_object: String, local_schema: String, callback: Callable):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var key := _key(local_object, local_schema)
 	if _staging:
 		_pending_subscriptions.append({"object": local_object, "schema": local_schema,
 			"callback": callback})
 		return true
 	if not _objects.has(key):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	if not _subscriptions.has(key):
 		_subscriptions[key] = []
 	_subscriptions[key].append(callback)
@@ -145,16 +182,18 @@ func subscribe(local_object: String, local_schema: String, callback: Callable) -
 	return true
 
 
-func subscribe_bindings(local_object: String, local_schema: String, callback: Callable) -> bool:
-	if _closed or not callback.is_valid():
-		return false
+func subscribe_bindings(local_object: String, local_schema: String, callback: Callable):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if _staging:
 		_pending_binding_subscriptions.append({"object": local_object, "schema": local_schema,
 			"callback": callback})
 		return true
 	var key := _key(local_object, local_schema)
 	if not _objects.has(key):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	if not _binding_subscriptions.has(key):
 		_binding_subscriptions[key] = []
 	_binding_subscriptions[key].append(callback)
@@ -168,11 +207,11 @@ func commit() -> bool:
 		return false
 	_staging = false
 	for local_schema in _pending_schemas:
-		if not register_schema(str(local_schema), _pending_schemas[local_schema]):
+		if register_schema(str(local_schema), _pending_schemas[local_schema]) != true:
 			return false
 	for pending in _pending_objects:
-		if not ensure_object(str(pending.object), str(pending.schema), pending.initial,
-				pending.bindings):
+		if ensure_object(str(pending.object), str(pending.schema), pending.initial,
+				pending.bindings) != true:
 			return false
 	for pending in _pending_subscriptions:
 		subscribe(str(pending.object), str(pending.schema), pending.callback)
@@ -180,7 +219,8 @@ func commit() -> bool:
 		subscribe_bindings(str(pending.object), str(pending.schema), pending.callback)
 	for pending in _pending_commands:
 		command(str(pending.object), str(pending.schema), int(pending.version),
-				str(pending.command), pending.args)
+				str(pending.command), pending.args,
+				pending.get("callback", Callable()))
 	_pending_schemas.clear()
 	_pending_objects.clear()
 	_pending_subscriptions.clear()
@@ -201,6 +241,10 @@ func close(unregister := true) -> void:
 	_authority_connected = false
 	_subscriptions.clear()
 	_binding_subscriptions.clear()
+	if _results_connected and NetworkManager.replicated_command_result.is_connected(_on_command_result):
+		NetworkManager.replicated_command_result.disconnect(_on_command_result)
+	_results_connected = false
+	_result_callbacks.clear()
 	if NetworkManager.replicated_bindings_received.is_connected(_on_bindings):
 		NetworkManager.replicated_bindings_received.disconnect(_on_bindings)
 	if unregister and not _staging:
@@ -365,6 +409,8 @@ static func _key(object_id: String, schema_id: String) -> String:
 
 
 static func _table_as_dictionary(value):
+	if value == null:
+		return {}
 	if value is Dictionary:
 		return (value as Dictionary).duplicate(true)
 	if value is Array and (value as Array).is_empty():

@@ -69,7 +69,7 @@ document.on_update(function(frame)
     if stroke.props.tag == "VRWebStroke" and stroke.bindings ~= nil
         and tostring(stroke.bindings.creator) == tostring(me.user_id)
         and stroke_hit(stroke.props, p) then
-      document.scene.remove(stroke.id, nil)
+      document.scene.remove(stroke.id)
     end
   end
 end)

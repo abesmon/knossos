@@ -86,7 +86,7 @@ local function render()
   custom_status.set("text", "CUSTOM REDUCER + 2s COOLDOWN\nsimulator: " ..
     (b ~= "" and b or "vacant") .. "\nepoch: " .. tostring(b_state.simulation_epoch or 0) ..
     " · 12 samples/s")
-  local holder = throw_ball.call("holder", {}) or ""
+  local holder = throw_ball.call("holder") or ""
   local simulator = throw_ball.call("simulator", {}) or ""
   throw_status.set("text", "GRAB → THROW → HANDOFF\nholder: " ..
     (holder ~= "" and holder or "free") .. "\nsimulator: " ..

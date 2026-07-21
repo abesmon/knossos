@@ -9,68 +9,79 @@ signal script_replaced(script_id: String, old_hash: String, new_hash: String)
 const TOP_LEVEL_BUDGET_MS := 75
 const CALLBACK_BUDGET_MS := 25
 const SOFT_MEMORY_BYTES := 16 * 1024 * 1024
-## luau_gdextension invokes GDScript Callables with exactly the Lua argument count and does not
-## apply GDScript defaults. Keep the sandbox-facing optional handle.on hint in Luau, while the
-## underlying host Callable remains a strict three-argument boundary.
-const HANDLE_BINDING_BOOTSTRAP := """
-local wrapped_handles = {}
-local wrap_handle
+## Доверенный слой биндинга. luau_gdextension вызывает GDScript Callable ровно с числом
+## аргументов, переданным из Lua, не подставляя дефолты (недостающий аргумент — вплоть до
+## segfault). Bootstrap решает это генерально и реализует стандартный контракт host-вызовов:
+##  1) арность — недостающие хвостовые аргументы добиваются nil, лишние отсекаются
+##     (манифест арности host подставляет в __ARITY_MANIFEST__);
+##  2) ошибки — сентинел VrwebScriptError превращается в пару `nil, code`;
+##  3) host-объекты (маркер __vrweb_host: handle/file/resource/shader/material) получают те же
+##     обёртки на свои методы, а события callback'ов рекурсивно проходят ту же обработку.
+const HOST_BINDING_BOOTSTRAP := """
+local HOST_ARITY = __ARITY_MANIFEST__
+local HOST_SHAPES = {
+    handle = {get = 1, set = 2, call = 2, on = 3, destroy = 0},
+    file = {publish = 1, bytes = 0},
+    resource = {apply = 2},
+    shader = {format = 0, parameters = 0, create_material = 0},
+    material = {set_parameter = 2, get_parameter = 1, apply = 2},
+}
 
-local function wrap_value(value, seen)
-    if type(value) ~= "table" then
-        return value
+local wrap_value
+local wrap_fn
+
+local function wrap_callback(callback)
+    return function(event, ...)
+        return callback(wrap_value(event, {}), ...)
     end
-    if value.id ~= nil and value.on ~= nil then
-        return wrap_handle(value)
+end
+
+wrap_fn = function(fn, arity)
+    return function(...)
+        local args = table.create(arity)
+        local supplied = math.min(select("#", ...), arity)
+        for index = 1, supplied do
+            local value = select(index, ...)
+            if type(value) == "function" then
+                value = wrap_callback(value)
+            end
+            args[index] = value
+        end
+        local result = fn(table.unpack(args, 1, arity))
+        if type(result) == "table" and result.__vrweb_error ~= nil then
+            return nil, result.__vrweb_error
+        end
+        return wrap_value(result, {})
     end
-    if seen[value] then
+end
+
+wrap_value = function(value, seen)
+    if type(value) ~= "table" or seen[value] then
         return value
     end
     seen[value] = true
+    local shape = HOST_SHAPES[value.__vrweb_host]
+    if shape ~= nil then
+        for name, arity in pairs(shape) do
+            if value[name] ~= nil then
+                value[name] = wrap_fn(value[name], arity)
+            end
+        end
+        return value
+    end
     for key, child in pairs(value) do
         value[key] = wrap_value(child, seen)
     end
     return value
 end
 
-wrap_handle = function(handle)
-    if type(handle) ~= "table" or wrapped_handles[handle] then
-        return handle
+for path, arity in pairs(HOST_ARITY) do
+    local parent = document
+    local parts = string.split(path, ".")
+    for index = 1, #parts - 1 do
+        parent = parent[parts[index]]
     end
-    local raw_on = handle.on
-    -- Godot Callable crosses the extension boundary as callable userdata, not a Luau function.
-    if raw_on == nil then
-        return handle
-    end
-    wrapped_handles[handle] = true
-    handle.on = function(event_name, callback, hint)
-        if hint == nil then
-            hint = ""
-        end
-        return raw_on(event_name, function(event)
-            return callback(wrap_value(event, {}))
-        end, hint)
-    end
-    return handle
-end
-
-local raw_query = document.query
-document.query = function(selector)
-    return wrap_handle(raw_query(selector))
-end
-
-local raw_query_all = document.query_all
-document.query_all = function(selector)
-    local handles = raw_query_all(selector)
-    for index, handle in ipairs(handles) do
-        handles[index] = wrap_handle(handle)
-    end
-    return handles
-end
-
-local raw_create = document.create
-document.create = function(type_name, properties)
-    return wrap_handle(raw_create(type_name, properties))
+    parent[parts[#parts]] = wrap_fn(parent[parts[#parts]], arity)
 end
 """
 const SAFE_LIBS := LuaState.LIB_BASE | LuaState.LIB_COROUTINE | LuaState.LIB_TABLE \
@@ -295,7 +306,14 @@ func _prepare_page(scripts: Array, previous_session: Dictionary) -> Dictionary:
 	if candidates.is_empty():
 		return {"realm": {}, "declarations": [], "errors": errors}
 
+	# Identity page realm: явный атрибут realm (нормируется в declaration) либо, как раньше,
+	# id первого валидного script tag. Несовпадение явных realm отсечено на этапе collect.
 	var page_id := str(candidates[0].id)
+	for declaration in candidates:
+		var declared_realm := str(declaration.get("realm", ""))
+		if not declared_realm.is_empty():
+			page_id = declared_realm
+			break
 	var combined_hash_source := ""
 	for declaration in candidates:
 		combined_hash_source += str(declaration.get("hash",
@@ -308,9 +326,14 @@ func _prepare_page(scripts: Array, previous_session: Dictionary) -> Dictionary:
 	host.setup(page_id, combined_hash_source.sha256_text(), _page_root, _targets, _base_url,
 			_player, self, invoke, previous_session, _policy, _clock_snapshot)
 	host.file_picker = file_picker
-	root_state.register_library("document", host.api())
+	var api := host.api()
+	root_state.register_library("document", api)
 	root_state.pop(1)
-	var bootstrap_bytecode: PackedByteArray = Luau.compile(HANDLE_BINDING_BOOTSTRAP)
+	var manifest := {}
+	_arity_manifest(api, "", manifest)
+	var bootstrap_source := HOST_BINDING_BOOTSTRAP.replace("__ARITY_MANIFEST__",
+			_manifest_literal(manifest))
+	var bootstrap_bytecode: PackedByteArray = Luau.compile(bootstrap_source)
 	if bootstrap_bytecode.is_empty() or not root_state.load_bytecode(bootstrap_bytecode,
 			"@vrweb-host-bootstrap.luau") or root_state.pcall(0, 0) != Luau.LUA_OK:
 		var bootstrap_error := str(root_state.to_variant(-1)) \
@@ -489,6 +512,28 @@ func _rebuild_active_hashes() -> void:
 
 static func _error(phase: String, message: String) -> Dictionary:
 	return {"ok": false, "phase": phase, "error": message, "realm": {}}
+
+
+## Манифест арности host-функций: путь в дереве document -> число объявленных аргументов.
+## Bootstrap по нему добивает недостающие хвостовые аргументы nil и отсекает лишние —
+## sandbox-facing поверхность не зависит от того, что extension не подставляет GDScript-дефолты.
+static func _arity_manifest(api: Dictionary, prefix: String, output: Dictionary) -> void:
+	for key in api:
+		var value = api[key]
+		var path := str(key) if prefix.is_empty() else prefix + "." + str(key)
+		if value is Callable:
+			output[path] = (value as Callable).get_argument_count()
+		elif value is Dictionary:
+			_arity_manifest(value, path, output)
+
+
+static func _manifest_literal(manifest: Dictionary) -> String:
+	var parts: PackedStringArray = []
+	var keys := manifest.keys()
+	keys.sort()
+	for key in keys:
+		parts.append("[\"%s\"] = %d" % [str(key), int(manifest[key])])
+	return "{" + ", ".join(parts) + "}"
 
 
 func _clock_snapshot() -> Dictionary:

@@ -112,20 +112,20 @@ local function render(state)
   canon = state
   if state.src ~= "" then
     url_input.set("text", state.src)
-    if player.call("source", {}) ~= state.src then
+    if player.call("source") ~= state.src then
       apply(function()
         -- Каждый клиент применяет URL локально; недопустимая схема отклоняется host'ом.
         player.call("set_source", { state.src })
-        if state.playing then player.call("play", {}) end
+        if state.playing then player.call("play") end
       end)
       return
     end
   end
   apply(function()
-    if state.playing and player.call("is_playing", {}) ~= true then
-      player.call("play", {})
-    elseif not state.playing and player.call("is_playing", {}) == true then
-      player.call("pause", {})
+    if state.playing and player.call("is_playing") ~= true then
+      player.call("play")
+    elseif not state.playing and player.call("is_playing") == true then
+      player.call("pause")
     end
     if not state.playing then
       player.call("seek", { state.anchor_position })
@@ -140,15 +140,15 @@ end)
 -- Пульт: кнопки просто дёргают ЛОКАЛЬНЫЙ транспорт — transport_changed выше публикует
 -- действие в канон. Так же работает клик по самому экрану.
 toggle_btn.on("pressed", function()
-  player.call("toggle", {})
+  player.call("toggle")
 end, "Play/Pause для всех")
 
 back_btn.on("pressed", function()
-  player.call("seek", { math.max((player.call("position", {}) or 0) - 10, 0) })
+  player.call("seek", { math.max((player.call("position") or 0) - 10, 0) })
 end, "Назад 10 секунд")
 
 fwd_btn.on("pressed", function()
-  player.call("seek", { (player.call("position", {}) or 0) + 10 })
+  player.call("seek", { (player.call("position") or 0) + 10 })
 end, "Вперёд 10 секунд")
 
 local function share_src(url)
@@ -173,12 +173,12 @@ end, "Bunny 1080p (30 МБ)")
 -- якорь к ней непереводим. Новый authority переякоривает канон своей текущей позицией.
 local was_authority = false
 document.players.on_changed(function(event)
-  local me = event["local"]
+  local me = event.local_player
   local is_authority = me ~= nil and me.is_authority == true
   if is_authority and not was_authority and canon.src ~= "" then
     document.state.command(object, schema, version, "set_playing", {
       playing = canon.playing == true,
-      position = player.call("position", {}) or canon.anchor_position,
+      position = player.call("position") or canon.anchor_position,
     })
   end
   was_authority = is_authority
@@ -196,10 +196,10 @@ assert(document.on_update(function(frame)
   local playing = canon.playing == true and canon.src ~= ""
   local drift = 0
   if playing and frame.authority_ready
-      and player.call("is_buffering", {}) ~= true
-      and player.call("source", {}) == canon.src then
+      and player.call("is_buffering") ~= true
+      and player.call("source") == canon.src then
     local target = canon.anchor_position + (frame.authority_time - canon.anchor_time)
-    local actual = player.call("position", {}) or 0
+    local actual = player.call("position") or 0
     drift = actual - target
     if target >= 0 and math.abs(drift) > DRIFT_THRESHOLD
         and frame.local_time - last_correction >= CORRECTION_COOLDOWN then
@@ -211,15 +211,15 @@ assert(document.on_update(function(frame)
   status_accum = status_accum + frame.delta
   if status_accum < 0.25 then return end
   status_accum = 0.0
-  local glyph = (player.call("is_playing", {}) == true) and "▶" or "‖"
-  if player.call("is_buffering", {}) == true then glyph = "…" end
+  local glyph = (player.call("is_playing") == true) and "▶" or "‖"
+  if player.call("is_buffering") == true then glyph = "…" end
   local function fmt(t)
     local s = math.floor(math.max(t or 0, 0))
     return string.format("%d:%02d", math.floor(s / 60), s % 60)
   end
   local mode = frame.authority_ready and string.format("sync %+.2fс", drift) or "local"
   status.set("text", string.format("%s  %s / %s  ·  %s", glyph,
-    fmt(player.call("position", {})), fmt(player.call("duration", {})), mode))
+    fmt(player.call("position")), fmt(player.call("duration")), mode))
 end))
 
 document.log.info("scripted video demo ready (anchor sync)")

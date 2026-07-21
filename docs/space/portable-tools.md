@@ -41,7 +41,7 @@ Web API и не спрашивает, «хороший» ли это сайт.
 | Основное действие в руке | событие `use` (transient у держателя) |
 | Канон, late join, права, ACK | `document.state` (Replicated State) |
 | Адресные эффекты на выбранном клиенте | `document.remote` |
-| Ресурсы: текстуры, звук, меши, шейдеры | `document.assets`, `document.render.shaders` |
+| Ресурсы: текстуры, звук, меши, шейдеры | `document.assets`, `document.shaders` |
 | Общая шкала времени | `document.clock.authority_time`, `AUTHORITY_TIME` |
 
 Реализуемо уже сейчас: пульты, ключи, реквизит, «волшебные предметы» (use → state/remote),

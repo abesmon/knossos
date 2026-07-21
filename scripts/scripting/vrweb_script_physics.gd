@@ -11,6 +11,8 @@ var _invoke: Callable
 var _pending: Array[Dictionary] = []
 var _records: Dictionary = {} # local object -> {schema, wire object/schema, adapter}
 var _subscriptions: Dictionary = {}
+var _result_callbacks: Dictionary = {}
+var _results_connected := false
 var _closed := false
 var _committed := false
 
@@ -25,44 +27,54 @@ func setup(script_id: String, state: VrwebScriptState, page_root: Node,
 
 func api() -> Dictionary:
 	return {
-		"claim": claim,
-		"handoff": handoff,
+		"claim": func(object_id, callback = null):
+			return claim(str(object_id), callback if callback is Callable else Callable()),
+		"handoff": func(object_id, command_name, callback = null):
+			return handoff(str(object_id), str(command_name),
+					callback if callback is Callable else Callable()),
 		"apply_impulse": apply_impulse,
-		"command": func(object_id, command_name, args = {}):
-			return command(str(object_id), str(command_name), args if args is Dictionary else {}),
+		"command": func(object_id, command_name, args = null, callback = null):
+			return command(str(object_id), str(command_name), args if args is Dictionary else {},
+					callback if callback is Callable else Callable()),
 		"simulator": simulator,
 		"is_local_simulator": is_local_simulator,
 		"on_simulator": on_simulator,
 	}
 
 
-func bind(body: RigidBody3D, local_object: String, options: Dictionary = {}) -> bool:
-	if _closed or _committed or body == null or not is_instance_valid(body) \
+## Возвращает код стандартного контракта ("" — успех): host превращает его в `nil, code`.
+func bind(body: RigidBody3D, local_object: String, options: Dictionary = {}) -> String:
+	if _closed:
+		return VrwebScriptError.LIFECYCLE
+	if _committed:
+		# bind — часть staged top-level: после commit realm состав physics-схем зафиксирован.
+		return VrwebScriptError.LIFECYCLE
+	if body == null or not is_instance_valid(body) \
 			or not VrwebScriptDeclaration.valid_id(local_object):
-		return false
+		return VrwebScriptError.INVALID_ARGS
 	for pending in _pending:
 		if str(pending.object) == local_object or pending.body == body:
-			return false
+			return VrwebScriptError.BUSY
 	var local_schema := "physics_%s" % local_object
 	var commands = options.get("commands", {})
 	if commands is Array and (commands as Array).is_empty():
 		commands = {}
 	if typeof(commands) != TYPE_DICTIONARY:
-		return false
+		return VrwebScriptError.INVALID_ARGS
 	var fields = options.get("fields", {})
 	if fields is Array and (fields as Array).is_empty():
 		fields = {}
 	if typeof(fields) != TYPE_DICTIONARY:
-		return false
-	if not _state.register_schema(local_schema,
-			RigidbodyStateSchema.definition(commands as Dictionary, fields as Dictionary)):
-		return false
-	if not _state.ensure_object(local_object, local_schema,
-			RigidbodyStateSchema.initial_state(body), {}):
-		return false
+		return VrwebScriptError.INVALID_ARGS
+	if _state.register_schema(local_schema,
+			RigidbodyStateSchema.definition(commands as Dictionary, fields as Dictionary)) != true:
+		return VrwebScriptError.INVALID_ARGS
+	if _state.ensure_object(local_object, local_schema,
+			RigidbodyStateSchema.initial_state(body), {}) != true:
+		return VrwebScriptError.INTERNAL
 	_pending.append({"body": body, "object": local_object, "schema": local_schema,
 		"options": options.duplicate(true)})
-	return true
+	return ""
 
 
 func commit() -> bool:
@@ -93,6 +105,10 @@ func close(replacement: VrwebScriptPhysics = null) -> void:
 	if _closed:
 		return
 	_closed = true
+	if _results_connected and NetworkManager.replicated_command_result.is_connected(_on_command_result):
+		NetworkManager.replicated_command_result.disconnect(_on_command_result)
+	_results_connected = false
+	_result_callbacks.clear()
 	if NetworkManager.replicated_bindings_received.is_connected(_on_bindings):
 		NetworkManager.replicated_bindings_received.disconnect(_on_bindings)
 	for record in _records.values():
@@ -117,25 +133,56 @@ func _replacement_owns_body(replacement: VrwebScriptPhysics, target) -> bool:
 	return false
 
 
-func claim(local_object: String) -> int:
+## claim/handoff/command возвращают request_id; опциональный callback получает
+## {ok, code, revision, request_id} из того же ACK-пути, что document.state.command.
+func claim(local_object: String, callback: Callable = Callable()):
 	var adapter := _adapter(local_object)
-	return -1 if adapter == null else adapter.claim()
+	if adapter == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	return _tracked(adapter.claim(), callback)
 
 
-func handoff(local_object: String, command_name: String) -> int:
+func handoff(local_object: String, command_name: String, callback: Callable = Callable()):
 	var adapter := _adapter(local_object)
-	return -1 if adapter == null else adapter.handoff(command_name)
+	if adapter == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	return _tracked(adapter.handoff(command_name), callback)
 
 
-func apply_impulse(local_object: String, impulse) -> bool:
+func apply_impulse(local_object: String, impulse):
 	var adapter := _adapter(local_object)
-	return false if adapter == null or typeof(impulse) != TYPE_VECTOR3 \
-			else adapter.apply_impulse(impulse)
+	if adapter == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	if typeof(impulse) != TYPE_VECTOR3:
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	return adapter.apply_impulse(impulse)
 
 
-func command(local_object: String, command_name: String, args: Dictionary = {}) -> int:
+func command(local_object: String, command_name: String, args: Dictionary = {},
+		callback: Callable = Callable()):
 	var adapter := _adapter(local_object)
-	return -1 if adapter == null else adapter.command(command_name, args)
+	if adapter == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	return _tracked(adapter.command(command_name, args), callback)
+
+
+func _tracked(request_id: int, callback: Callable):
+	if request_id >= 0 and callback.is_valid():
+		if not _results_connected:
+			NetworkManager.replicated_command_result.connect(_on_command_result)
+			_results_connected = true
+		_result_callbacks[request_id] = callback
+	return request_id
+
+
+func _on_command_result(request_id: int, accepted: bool, code: String, revision: int) -> void:
+	if _closed or not _result_callbacks.has(request_id):
+		return
+	var callback: Callable = _result_callbacks[request_id]
+	_result_callbacks.erase(request_id)
+	if callback.is_valid() and _invoke.is_valid():
+		_invoke.call(callback, {"ok": accepted, "code": code, "revision": revision,
+			"request_id": request_id})
 
 
 func simulator(local_object: String) -> String:
@@ -148,9 +195,11 @@ func is_local_simulator(local_object: String) -> bool:
 	return false if adapter == null else adapter.is_local_simulator()
 
 
-func on_simulator(local_object: String, callback: Callable) -> bool:
-	if _closed or not callback.is_valid():
-		return false
+func on_simulator(local_object: String, callback: Callable):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if not _subscriptions.has(local_object):
 		_subscriptions[local_object] = []
 	_subscriptions[local_object].append(callback)

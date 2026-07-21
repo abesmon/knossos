@@ -4,8 +4,8 @@ extends RefCounted
 ## Narrow, engine-independent capability surface exposed to one Luau script.
 
 ## Stable three-argument host endpoint for handle.on. The trusted Luau bootstrap in
-## VrwebLuauRuntime owns the optional-argument surface and always calls this method with a hint.
-## WeakRef avoids a host <-> binding lifetime cycle.
+## VrwebLuauRuntime pads the optional hint with nil, so the parameter is untyped and
+## normalized here. WeakRef avoids a host <-> binding lifetime cycle.
 class HandleOnBinding extends RefCounted:
 	var _host: WeakRef
 	var _handle_id: int
@@ -14,9 +14,13 @@ class HandleOnBinding extends RefCounted:
 		_host = weakref(host)
 		_handle_id = handle_id
 
-	func invoke(event_name: String, callback: Callable, hint: String) -> bool:
+	func invoke(event_name, callback, hint = null):
 		var host = _host.get_ref()
-		return host.on_event(_handle_id, event_name, callback, hint) if host != null else false
+		if host == null:
+			return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+		var hint_text := "" if hint == null else str(hint)
+		var callable: Callable = callback if callback is Callable else Callable()
+		return host.on_event(_handle_id, str(event_name), callable, hint_text)
 
 const MAX_HANDLES := 256
 const MAX_TIMERS := 64
@@ -54,11 +58,10 @@ const CAPABILITIES := {
 	"vrweb/remote/1": true,
 	"vrweb/players/1": true,
 	"vrweb/player/1": true,
-	"vrweb/assets/1": true,
 	"vrweb/assets/2": true,
 	"vrweb/clock/1": true,
 	"vrweb/log/1": true,
-	"vrweb/render-shaders/1": true,
+	"vrweb/shaders/1": true,
 	"vrweb/video/1": true,
 	"vrweb/scene-objects/1": true,
 	"vrweb/aim/1": true,
@@ -159,8 +162,6 @@ func api() -> Dictionary:
 		"query": query,
 		"query_all": query_all,
 		"create": create,
-		"session_get": func(key: String, fallback = null): return session.get(key, fallback),
-		"session_set": func(key: String, value): return _session_set(key, value),
 		"session": session,
 		"state": _state.api(),
 		"physics": physics_api,
@@ -169,14 +170,14 @@ func api() -> Dictionary:
 		"scene": _scene.api(),
 		"files": {"pick": files_pick},
 		"assets": _assets.api(),
-		"render": _render.api(),
+		"shaders": _render.api(),
 		"clock": {"local_time": local_time, "authority_time": authority_time,
 			"authority_ready": authority_clock_ready, "set_timeout": set_timeout,
 			"set_interval": set_interval, "cancel": cancel_timer},
 		"on_update": on_update,
 		"values": {"vector3": make_vector3, "color": make_color,
 			"transform_facing": make_transform_facing, "to_literal": to_literal},
-		"player": {"get": player_get, "set_position": player_set_position, "aim": player_aim},
+		"player": {"get": player_get, "set": player_set, "aim": player_aim},
 		"log": {"debug": log_debug, "info": log_info, "warning": log_warning,
 			"error": log_error},
 		"features": {"has": feature_has, "require": feature_require},
@@ -274,108 +275,148 @@ func retire_for_replacement(replacement: VrwebDocumentHost) -> void:
 
 
 func query(selector: String):
-	if not _allow_call() or not selector.begins_with("#"):
-		return null
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not selector.begins_with("#"):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var object = _targets.get(selector.trim_prefix("#"))
 	return _handle_for(object) if object is Object and is_instance_valid(object) else null
 
 
-func query_all(selector: String) -> Array:
+func query_all(selector: String):
 	var one = query(selector)
+	if VrwebScriptError.is_err(one):
+		return one
 	return [] if one == null else [one]
 
 
-func physics_bind(target, object_id: String, options = {}) -> bool:
-	if not _allow_call() or typeof(target) != TYPE_DICTIONARY:
-		return false
+func physics_bind(target, object_id, options = null):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if typeof(target) != TYPE_DICTIONARY:
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var handle: Dictionary = target
 	var object := _object(int(handle.get("id", 0)))
 	if not (object is RigidBody3D):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var option_dict := {}
 	if options is Dictionary:
 		option_dict = (options as Dictionary).duplicate(true)
-	elif not (options is Array and (options as Array).is_empty()):
-		return false
-	return _physics.bind(object as RigidBody3D, object_id, option_dict)
+	elif options != null and not (options is Array and (options as Array).is_empty()):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	var code := _physics.bind(object as RigidBody3D, str(object_id), option_dict)
+	return true if code.is_empty() else VrwebScriptError.err(code)
 
 
-func create(type_name: String, properties: Dictionary = {}):
-	if not _allow_call() or not CREATE_CLASSES.has(type_name) or _handles.size() >= MAX_HANDLES:
-		return null
+func create(type_name: String, properties = null):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not CREATE_CLASSES.has(type_name):
+		return VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
+	if _handles.size() >= MAX_HANDLES:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
+	var property_dict := {}
+	if properties is Dictionary:
+		property_dict = properties
+	elif properties != null and not (properties is Array and (properties as Array).is_empty()):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_element(type_name,
 			{}, {"source": "script", "script_id": script_id})):
-		return null
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	var object = ClassDB.instantiate(type_name)
 	if not (object is Node):
 		if object is Object and not (object is RefCounted):
 			object.free()
-		return null
+		return VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
 	var node := object as Node
 	var handle: Dictionary = _handle_for(node)
 	if handle.is_empty():
 		node.free()
-		return null
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	_owned[int(handle.id)] = node
-	for property in properties:
-		if not set_property(int(handle.id), str(property), properties[property]):
+	for property in property_dict:
+		var applied = set_property(int(handle.id), str(property), property_dict[property])
+		if VrwebScriptError.is_err(applied):
 			_forget_owned(int(handle.id), true)
-			return null
+			return applied
 	if not _staging:
 		_page_root.add_child(node)
 	return handle
 
 
 func get_property(handle_id: int, property: String):
-	if not _allow_call():
-		return null
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
 	var object := _object(handle_id)
-	if object == null or BLOCKED_PROPERTIES.has(property) or not _has_property(object, property):
-		return null
+	if object == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	if BLOCKED_PROPERTIES.has(property):
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
+	if not _has_property(object, property):
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	var key := "%d:%s" % [handle_id, property]
 	var value = _overrides.get(key, object.get(property))
-	return value if _portable(value) else null
+	return value if _portable(value) else VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
 
 
-func set_property(handle_id: int, property: String, value) -> bool:
-	if not _allow_call() or not _portable(value) or var_to_bytes(value).size() > MAX_VALUE_BYTES:
-		return false
+func set_property(handle_id: int, property: String, value):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not _portable(value):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if var_to_bytes(value).size() > MAX_VALUE_BYTES:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	var object := _object(handle_id)
-	if object == null or BLOCKED_PROPERTIES.has(property) or not _has_property(object, property) \
+	if object == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	if BLOCKED_PROPERTIES.has(property):
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
+	if not _has_property(object, property) \
 			or not _compatible_property_value(object, property, value):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_property(
 			object.get_class(), property, var_to_str(value),
 			{"source": "script", "script_id": script_id})):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	if _staging:
 		_pending_sets.append({"node": object, "property": property, "value": value})
 		_overrides["%d:%s" % [handle_id, property]] = value
 		return true
-	return _apply_set(object, property, value)
+	return true if _apply_set(object, property, value) \
+			else VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 
 
-func call_method(handle_id: int, method: String, arguments = []):
+func call_method(handle_id: int, method: String, arguments = null):
 	# Пустая Luau-таблица неотличима от массива и может приехать пустым Dictionary —
 	# принимаем её (и nil) как «без аргументов»; непустой словарь аргументами не считается.
 	var args: Array = []
 	if arguments is Array:
 		args = arguments
 	elif arguments != null and not (arguments is Dictionary and (arguments as Dictionary).is_empty()):
-		return null
-	if not _allow_call() or args.size() > 8:
-		return null
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if args.size() > 8:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	var node := _object(handle_id) as Node
 	if node == null or not node.has_method(method):
-		return null
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	if node is VrwebVideoPlayer and VIDEO_PLAYER_METHODS.has(method):
-		return null if _staging else _call_video_method(node as VrwebVideoPlayer, method, args)
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE) if _staging \
+				else _call_video_method(node as VrwebVideoPlayer, method, args)
 	if node is Grabbable and GRABBABLE_METHODS.has(method):
-		return null if _staging else _call_typed_method(node, GRABBABLE_METHODS, method, args)
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE) if _staging \
+				else _call_typed_method(node, GRABBABLE_METHODS, method, args)
 	if not SAFE_METHODS.has(method):
-		return null
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	if _staging:
-		return null
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
 	return node.callv(method, args)
 
 
@@ -384,14 +425,14 @@ func call_method(handle_id: int, method: String, arguments = []):
 func _call_typed_method(node: Node, table: Dictionary, method: String, arguments: Array):
 	var expected: Array = table[method]
 	if arguments.size() != expected.size():
-		return null
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var args := []
 	for index in expected.size():
 		var value = arguments[index]
 		if int(expected[index]) == TYPE_FLOAT and typeof(value) == TYPE_INT:
 			value = float(value)
 		if typeof(value) != int(expected[index]):
-			return null
+			return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 		args.append(value)
 	return node.callv(method, args)
 
@@ -403,20 +444,21 @@ func _call_typed_method(node: Node, table: Dictionary, method: String, arguments
 func _call_video_method(player: VrwebVideoPlayer, method: String, arguments: Array):
 	var expected: Array = VIDEO_PLAYER_METHODS[method]
 	if arguments.size() != expected.size():
-		return null
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var args := []
 	for index in expected.size():
 		var value = arguments[index]
 		if int(expected[index]) == TYPE_FLOAT and typeof(value) == TYPE_INT:
 			value = float(value)
 		if typeof(value) != int(expected[index]):
-			return null
+			return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 		args.append(value)
 	if method == "set_source":
 		# URL резолвится относительно страницы и проходит те же схемные ограничения, что
 		# document.assets: локальные схемы доступны только локальному документу.
 		var url := _allowed_media_url(str(args[0]))
-		return player.set_source(url) if url != "" else false
+		return player.set_source(url) if url != "" \
+				else VrwebScriptError.err(VrwebScriptError.DENIED)
 	return player.callv(method, args)
 
 
@@ -440,39 +482,50 @@ func _allowed_media_url(path: String) -> String:
 	return url
 
 
-func on_event(handle_id: int, event_name: String, callback: Callable, hint := "") -> bool:
-	if not _allow_call() or not callback.is_valid():
-		return false
+func on_event(handle_id: int, event_name: String, callback: Callable, hint := ""):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var object := _object(handle_id)
 	if object == null or (event_name == "activate" and not (object is Node)) \
 			or (event_name != "activate" and not object.has_signal(event_name)):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	if _staging:
 		_pending_events.append({"node": object, "name": event_name, "callback": callback,
 			"hint": str(hint)})
 		return true
-	return _connect_event(object, event_name, callback, str(hint))
+	return true if _connect_event(object, event_name, callback, str(hint)) \
+			else VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
 
 
-func destroy(handle_id: int) -> bool:
-	if not _allow_call() or not _owned.has(handle_id):
-		return false
+func destroy(handle_id: int):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not _owned.has(handle_id):
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	_forget_owned(handle_id, false)
 	return true
 
 
-func set_timeout(seconds: float, callback: Callable) -> int:
+func set_timeout(seconds: float, callback: Callable):
 	return _timer(seconds, callback, false)
 
 
-func set_interval(seconds: float, callback: Callable) -> int:
+func set_interval(seconds: float, callback: Callable):
 	return _timer(seconds, callback, true)
 
 
-func on_update(callback: Callable) -> bool:
-	if not _allow_call() or not callback.is_valid() \
-			or _updates.size() + _pending_updates.size() >= MAX_UPDATE_CALLBACKS:
-		return false
+func on_update(callback: Callable):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if _updates.size() + _pending_updates.size() >= MAX_UPDATE_CALLBACKS:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	if _staging:
 		_pending_updates.append(callback)
 	else:
@@ -517,8 +570,9 @@ func make_vector3(x: float, y: float, z: float) -> Vector3:
 	return Vector3(x, y, z) if _allow_call() else Vector3.ZERO
 
 
-func make_color(r: float, g: float, b: float, a := 1.0) -> Color:
-	return Color(r, g, b, a) if _allow_call() else Color.TRANSPARENT
+func make_color(r: float, g: float, b: float, a = null) -> Color:
+	var alpha := 1.0 if a == null else float(a)
+	return Color(r, g, b, alpha) if _allow_call() else Color.TRANSPARENT
 
 
 ## Поза для объекта, который «смотрит» лицевой стороной (+Z) вдоль front — размещение на
@@ -542,16 +596,20 @@ func make_transform_facing(origin: Vector3, front: Vector3, up_hint: Vector3) ->
 
 ## Портируемое значение → литерал VRWML (та же грамматика, что у атрибутов разметки).
 ## Нужен, чтобы строить props объектов слоя из вычисленных значений, не клея строки руками.
-func to_literal(value) -> String:
-	if not _allow_call() or not _portable(value):
-		return ""
+func to_literal(value):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not _portable(value):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var text := var_to_str(value)
-	return text if text.to_utf8_buffer().size() <= 4096 else ""
+	return text if text.to_utf8_buffer().size() <= 4096 \
+			else VrwebScriptError.err(VrwebScriptError.LIMIT)
 
 
-func cancel_timer(timer_id: int) -> bool:
+func cancel_timer(timer_id: int):
 	if not _timers.has(timer_id):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	var timer: Timer = _timers[timer_id]
 	_timers.erase(timer_id)
 	if is_instance_valid(timer):
@@ -560,28 +618,53 @@ func cancel_timer(timer_id: int) -> bool:
 	return true
 
 
-func resolve_asset(path: String) -> String:
-	if not _allow_call() or path.to_utf8_buffer().size() > 4096:
-		return ""
+func resolve_asset(path: String):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if path.to_utf8_buffer().size() > 4096:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	return PageFetcher.resolve_url(path, _base_url)
 
 
 func player_get(property: String):
-	if not _allow_call() or not is_instance_valid(_player):
-		return null
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not is_instance_valid(_player):
+		return VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
 	if property == "position" and _player is Node3D:
 		return (_player as Node3D).global_position
 	if property == "flying" and _player.has_method("is_flying"):
 		return _player.call("is_flying")
-	return null
+	return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+
+
+## Запись свойств локального игрока той же get/set-идиомой, что у остальных handle:
+## v1 поддерживает "position" (телепорт локального игрока).
+func player_set(property, value):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if str(property) != "position":
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	if typeof(value) != TYPE_VECTOR3:
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if not is_instance_valid(_player) or not _player.has_method("teleport_to"):
+		return VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
+	_player.call("teleport_to", value)
+	return true
 
 
 ## Прицел игрока (capability vrweb/aim/1): {hit, position, normal, distance, target?}.
 ## target — html id узла под лучом, если он адресуем скриптом (поднимаемся к предкам до
 ## первого известного target). Poll-модель: скрипт зовёт из on_update/по use — handles на
 ## каждый кадр не создаются (бюджет 256 handles не расходуется).
-func player_aim() -> Dictionary:
-	if not _allow_call() or not is_instance_valid(_player) or not _player.has_method("aim_info"):
+func player_aim():
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not is_instance_valid(_player) or not _player.has_method("aim_info"):
 		return {"hit": false}
 	var info: Dictionary = _player.call("aim_info")
 	var result := {
@@ -628,10 +711,18 @@ func _target_id_of(node: Node) -> String:
 ## сами по себе, а с файлом можно сделать ровно две вещи — опубликовать в
 ## контент-адресуемом сторе (file.publish) или прочитать байты (file.bytes). Так host не
 ## решает за скрипт, что это за файл и что с ним делать.
-func files_pick(kind: String, callback: Callable) -> bool:
-	if not _allow_call() or not callback.is_valid() or _pick_pending \
-			or not file_picker.is_valid() or _staging:
-		return false
+func files_pick(kind: String, callback: Callable):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if _staging:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not file_picker.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
+	if _pick_pending:
+		return VrwebScriptError.err(VrwebScriptError.BUSY)
 	_pick_pending = true
 	# Диалог открывается ВНЕ стека скрипта (call_deferred ниже), а результат доставляется
 	# отложенно (_deliver_pick). Оба конца обязательны: модальный диалог ОС крутит собственный
@@ -668,11 +759,15 @@ func _open_picker(kind: String, callback: Callable) -> void:
 
 ## Непрозрачный handle выбранного файла. Публикация и чтение байт — раздельные операции,
 ## поэтому крупный файл можно положить в стор, ни разу не втащив его в память VM.
+## inline_limit делает бюджет file.bytes() обнаруживаемым: поведение не зависит от вшитой
+## в документацию константы конкретного клиента.
 func _file_handle(file_id: int) -> Dictionary:
 	return {
+		"__vrweb_host": "file",
 		"name": str((_files.get(file_id, {}) as Dictionary).get("name", "")),
 		"size": ((_files.get(file_id, {}) as Dictionary).get("bytes",
 				PackedByteArray()) as PackedByteArray).size(),
+		"inline_limit": MAX_PICK_INLINE_BYTES,
 		"publish": func(resource_type: String): return _publish_file(file_id, str(resource_type)),
 		"bytes": func(): return _file_bytes(file_id),
 	}
@@ -683,14 +778,18 @@ func _file_handle(file_id: int) -> Dictionary:
 ## Для типов, у которых нормализация осмысленна, host приводит содержимое к бюджету блоба
 ## (сейчас это изображения: проверка сигнатуры + пережим). Для остальных — байты как есть.
 ## Тип задаёт СКРИПТ и знает, что получит; host ничего не решает за него по имени файла.
-func _publish_file(file_id: int, resource_type: String) -> String:
-	if not _allow_call() or not _files.has(file_id):
-		return ""
+func _publish_file(file_id: int, resource_type: String):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not _files.has(file_id):
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	var bytes: PackedByteArray = (_files[file_id] as Dictionary)["bytes"]
 	# Пережим крупного файла занимает сотни миллисекунд — это время host-операции, а не
 	# исполнения скрипта, поэтому оно не должно съедать его CPU-бюджет (см. _host_operation).
-	return _host_operation(func() -> String:
+	var url: String = _host_operation(func() -> String:
 		return BlobStore.import_image(bytes) if resource_type == "image" else BlobStore.add(bytes))
+	return url if not url.is_empty() else VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
 
 
 ## Выполнить потенциально небыструю нативную операцию, вернув скрипту его CPU-бюджет:
@@ -704,13 +803,18 @@ func _host_operation(operation: Callable):
 	return result
 
 
-## Байты файла для обработки в самом скрипте ("" -> null, если файл крупнее инлайн-лимита:
-## тащить десятки мегабайт в VM с её memory budget нельзя — для таких файлов есть publish).
+## Байты файла для обработки в самом скрипте. Файл крупнее inline_limit возвращает
+## `nil, "limit"`: тащить десятки мегабайт в VM с её memory budget нельзя — для таких
+## файлов есть publish.
 func _file_bytes(file_id: int):
-	if not _allow_call() or not _files.has(file_id):
-		return null
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not _files.has(file_id):
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
 	var bytes: PackedByteArray = (_files[file_id] as Dictionary)["bytes"]
-	return bytes if bytes.size() <= MAX_PICK_INLINE_BYTES else null
+	return bytes if bytes.size() <= MAX_PICK_INLINE_BYTES \
+			else VrwebScriptError.err(VrwebScriptError.LIMIT)
 
 
 ## Отложенный вход в VM с результатом выбора файла.
@@ -721,13 +825,6 @@ func _deliver_pick(callback: Callable, event: Dictionary) -> void:
 func _invoke_deferred(callback: Callable, event: Dictionary) -> void:
 	if _valid and _invoke.is_valid():
 		_invoke.call(callback, event)
-
-
-func player_set_position(position: Vector3) -> bool:
-	if not _allow_call() or not is_instance_valid(_player) or not _player.has_method("teleport_to"):
-		return false
-	_player.call("teleport_to", position)
-	return true
 
 
 func feature_has(feature: String) -> bool:
@@ -776,10 +873,11 @@ func _handle_for(object: Object) -> Dictionary:
 		on_binding = HandleOnBinding.new(self, handle_id)
 		_on_bindings[handle_id] = on_binding
 	return {
+		"__vrweb_host": "handle",
 		"id": handle_id,
 		"get": func(property: String): return get_property(handle_id, property),
 		"set": func(property: String, value): return set_property(handle_id, property, value),
-		"call": func(method: String, arguments = []): return call_method(handle_id, method, arguments),
+		"call": func(method: String, arguments = null): return call_method(handle_id, method, arguments),
 		"on": on_binding.invoke,
 		"destroy": func(): return destroy(handle_id),
 	}
@@ -795,6 +893,15 @@ func _allow_call() -> bool:
 		return false
 	_calls += 1
 	return _calls <= MAX_HOST_CALLS
+
+
+## Шлюз host-вызова с кодом отказа стандартного контракта: "" — можно продолжать,
+## lifecycle — realm закрыт, limit — исчерпан бюджет host calls текущего входа VM.
+func _gate() -> String:
+	if not _valid:
+		return VrwebScriptError.LIFECYCLE
+	_calls += 1
+	return "" if _calls <= MAX_HOST_CALLS else VrwebScriptError.LIMIT
 
 
 func _has_property(node: Object, property: String) -> bool:
@@ -839,37 +946,52 @@ func _apply_set(node: Object, property: String, value) -> bool:
 	return true
 
 
-func _apply_asset(resource_id: int, target: Dictionary, property: String) -> bool:
-	if not _allow_call() or not target.has("id") or BLOCKED_PROPERTIES.has(property):
-		return false
+func _apply_asset(resource_id: int, target: Dictionary, property: String):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not target.has("id"):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if BLOCKED_PROPERTIES.has(property):
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	var object := _object(int(target.get("id", 0)))
 	var value: Resource = _assets.resource(resource_id)
-	if object == null or value == null or not _has_property(object, property) \
+	if object == null or value == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	if not _has_property(object, property) \
 			or not _compatible_property_value(object, property, value):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_property(
 			object.get_class(), property, "OpaqueResource",
 			{"source": "script", "script_id": script_id})):
-		return false
-	return _apply_set(object, property, value)
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
+	return true if _apply_set(object, property, value) \
+			else VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 
 
-func _apply_runtime_resource(value: Resource, target: Dictionary, property: String) -> bool:
-	if not _allow_call() or value == null or not target.has("id") \
-			or BLOCKED_PROPERTIES.has(property):
-		return false
+func _apply_runtime_resource(value: Resource, target: Dictionary, property: String):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if not target.has("id"):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if BLOCKED_PROPERTIES.has(property):
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	var object := _object(int(target.get("id", 0)))
-	if object == null or not _has_property(object, property) \
+	if object == null or value == null:
+		return VrwebScriptError.err(VrwebScriptError.NOT_FOUND)
+	if not _has_property(object, property) \
 			or not _compatible_property_value(object, property, value):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_property(
 			object.get_class(), property, "OpaqueRuntimeResource",
 			{"source": "script", "script_id": script_id})):
-		return false
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	if _staging:
 		_pending_resource_applies.append({"object": object, "property": property, "value": value})
 		return true
-	return _apply_set(object, property, value)
+	return true if _apply_set(object, property, value) \
+			else VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 
 
 func _clock() -> Dictionary:
@@ -948,10 +1070,14 @@ func _portable_signal_value(value):
 	return null
 
 
-func _timer(seconds: float, callback: Callable, repeat: bool) -> int:
-	if not _allow_call() or seconds <= 0.0 or not callback.is_valid() \
-			or _timers.size() + _pending_timers.size() >= MAX_TIMERS:
-		return 0
+func _timer(seconds: float, callback: Callable, repeat: bool):
+	var gate := _gate()
+	if not gate.is_empty():
+		return VrwebScriptError.err(gate)
+	if seconds <= 0.0 or not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if _timers.size() + _pending_timers.size() >= MAX_TIMERS:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	if _staging:
 		_pending_timers.append({"seconds": seconds, "callback": callback, "repeat": repeat})
 		return -_pending_timers.size()
@@ -973,17 +1099,6 @@ func _start_timer(seconds: float, callback: Callable, repeat: bool) -> int:
 			cancel_timer(timer_id))
 	timer.start()
 	return timer_id
-
-
-func _session_set(key: String, value) -> bool:
-	if not _allow_call() or key.to_utf8_buffer().size() > 256 or not _portable(value):
-		return false
-	var next := session.duplicate(true)
-	next[key] = value
-	if var_to_bytes(next).size() > MAX_VALUE_BYTES:
-		return false
-	session = next
-	return true
 
 
 func _log(level: String, message) -> void:

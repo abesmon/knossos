@@ -30,6 +30,12 @@ end
 - inline: исходный текст внутри элемента;
 - linked: `src`, разрешаемый относительно URL документа.
 
+Опциональный атрибут `realm` задаёт **явную identity page realm** — namespace wire-адресов
+`document.state`/`document.remote` и адрес страницы для remote calls. Все теги, указавшие
+`realm`, обязаны указать одно и то же значение (у страницы ровно один realm); без атрибута
+identity остаётся `id` первого валидного script tag. Явный `realm` устойчив к переименованию
+или перестановке скриптов: сетевые адреса страницы не меняются от рефакторинга её тегов.
+
 Рабочий linked-пример можно открыть по адресу `vrwebresource://external_script.html`. В нём
 [external_script.html](../../test_pages/external_script.html) последовательно выполняет три
 скрипта в одном page realm:
@@ -46,7 +52,9 @@ end
 `vrwebresource://index.html` под названием «Luau: скрипт из соседнего файла».
 
 `src` и непустое тело одновременно являются ошибкой. Клиент получает и интерпретирует исходник;
-страница не поставляет bytecode. Профиль семантики runtime: `vrweb-luau/1`.
+страница не поставляет bytecode. Профиль семантики runtime: `vrweb-luau/1` — это отдельный от
+capability names namespace: профиль описывает язык и семантику VM целиком, а capability
+(`vrweb/<домен>/<версия>`) — обнаруживаемые возможности `document` внутри профиля.
 
 Knossos загружает linked source с таймаутом 15 секунд и не более чем через 8 redirects. HTTP(S)
 документ не может ссылкой прочитать `vrweblocal://` или `vrwebresource://`: локальная файловая
@@ -100,6 +108,23 @@ room reset и authority transition.
 scripts в браузере. Callback вызывается через контролируемый вход VM с interrupt deadline;
 фатальная ошибка callback или превышение CPU budget закрывает page realm вместе с его handlers,
 timers и owned objects, не обрушая клиент и декларативную сцену.
+
+### Фазовый контракт host API
+
+Поведение каждого вызова до `active` описывается ровно одной из трёх колонок; вызов вне своей
+фазы отказывает стандартным кодом `lifecycle`
+([контракт host-вызовов](scripting-api.md#контракт-host-вызовов)):
+
+| Поверхность | Staged top-level (`scene-ready` → commit) | После commit (`active`) |
+|---|---|---|
+| `query`/`get`/`values`/`clock`-чтения, `players.*`, `player.*`, `scene.object(s)`, `state.read/bindings/revision`, `assets.resolve`, `remote.expose`, `features`, `log` | доступно сразу | доступно |
+| `create`, `set`, `on`, таймеры, `on_update`, `state.define/ensure/command/on`, `scene.add/update/remove`, `remote.call`, `assets.fetch/load`, `resource.apply` | **стейджится**: side effect публикуется атомарно на commit | исполняется сразу |
+| `handle.call` (транспорт video/grabbable и методы узлов), `files.pick`, `assets.decode` | `lifecycle` | доступно |
+| `physics.bind` | доступно (только здесь) | `lifecycle` |
+
+Правило границы: чтения и декларации доступны всегда, отложимые side effects стейджатся,
+неотложимые операции (транспорт, системный диалог, немедленный декод) ждут `active`, а
+структурная регистрация физики принадлежит только staged top-level.
 
 ## Realtime replacement
 

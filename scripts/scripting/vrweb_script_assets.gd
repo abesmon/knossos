@@ -82,69 +82,81 @@ func close() -> void:
 	_owner = null
 
 
-func resolve(path: String) -> String:
-	if not _valid or path.to_utf8_buffer().size() > 4096:
-		return ""
+func resolve(path: String):
+	if not _valid:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if path.to_utf8_buffer().size() > 4096:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	return PageFetcher.resolve_url(path, _base_url)
 
 
-func fetch(path: String, response_type: String, callback: Callable) -> bool:
+func fetch(path: String, response_type: String, callback: Callable):
 	return _fetch(path, response_type, {}, callback)
 
 
 func fetch_with(path: String, response_type: String, options: Dictionary,
-		callback: Callable) -> bool:
+		callback: Callable):
 	return _fetch(path, response_type, options, callback)
 
 
 func _fetch(path: String, response_type: String, options: Dictionary,
-		callback: Callable) -> bool:
-	if not _valid or not callback.is_valid() or not RESPONSE_TYPES.has(response_type):
-		return false
+		callback: Callable):
+	if not _valid:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not callback.is_valid() or not RESPONSE_TYPES.has(response_type):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var url := _allowed_url(path, "script_asset_fetch")
 	if url.is_empty():
-		return false
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	var credentials := _credential_headers(url, options)
 	if not bool(credentials.ok):
-		return false
+		return VrwebScriptError.err(str(credentials.get("error", VrwebScriptError.DENIED)))
 	return _enqueue({"operation": "fetch", "url": url, "type": response_type,
 		"callback": callback, "headers": credentials.headers,
 		"credentials": credentials.mode})
 
 
-func load(path: String, resource_type: String, callback: Callable) -> bool:
+func load(path: String, resource_type: String, callback: Callable):
 	return _load(path, resource_type, {}, callback)
 
 
 func load_with(path: String, resource_type: String, options: Dictionary,
-		callback: Callable) -> bool:
+		callback: Callable):
 	return _load(path, resource_type, options, callback)
 
 
 func _load(path: String, resource_type: String, options: Dictionary,
-		callback: Callable) -> bool:
-	if not _valid or not callback.is_valid() or not RESOURCE_TYPES.has(resource_type):
-		return false
+		callback: Callable):
+	if not _valid:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not callback.is_valid() or not RESOURCE_TYPES.has(resource_type):
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var url := _allowed_url(path, "script_asset_load")
 	if url.is_empty():
-		return false
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
 	var credentials := _credential_headers(url, options)
 	if not bool(credentials.ok):
-		return false
+		return VrwebScriptError.err(str(credentials.get("error", VrwebScriptError.DENIED)))
 	return _enqueue({"operation": "load", "url": url, "type": resource_type,
 		"callback": callback, "headers": credentials.headers,
 		"credentials": credentials.mode})
 
 
 func decode(bytes: PackedByteArray, resource_type: String):
-	if not _valid or _staging or not RESOURCE_TYPES.has(resource_type) \
-			or bytes.is_empty() or bytes.size() > MAX_FETCH_BYTES:
-		return null
+	if not _valid:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if _staging:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not RESOURCE_TYPES.has(resource_type) or bytes.is_empty():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if bytes.size() > MAX_FETCH_BYTES:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_operation(
 			"script_asset_decode", {"type": resource_type, "bytes": bytes.size()},
 			{"source": "script", "script_id": _script_id})):
-		return null
-	return _store_resource(_decode_bytes(bytes, resource_type, ""), resource_type, "")
+		return VrwebScriptError.err(VrwebScriptError.DENIED)
+	var handle = _store_resource(_decode_bytes(bytes, resource_type, ""), resource_type, "")
+	return handle if handle != null else VrwebScriptError.err(VrwebScriptError.UNSUPPORTED)
 
 
 func resource(resource_id: int) -> Resource:
@@ -152,9 +164,9 @@ func resource(resource_id: int) -> Resource:
 	return record.get("value") as Resource
 
 
-func _enqueue(request: Dictionary) -> bool:
+func _enqueue(request: Dictionary):
 	if _request_count >= MAX_REQUESTS:
-		return false
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	_request_count += 1
 	if _staging:
 		_pending.append(request)
@@ -245,11 +257,13 @@ func _store_resource(value: Resource, resource_type: String, url: String):
 	_next_resource += 1
 	_resources[resource_id] = {"value": value, "type": resource_type, "url": url}
 	return {
+		"__vrweb_host": "resource",
 		"type": resource_type,
 		"url": url,
 		"apply": func(target: Dictionary, property: String):
-			return _valid and _apply.is_valid() \
-					and bool(_apply.call(resource_id, target, property)),
+			if not _valid or not _apply.is_valid():
+				return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+			return _apply.call(resource_id, target, property),
 	}
 
 
@@ -278,7 +292,8 @@ func _allowed_url(path: String, operation: String) -> String:
 func _credential_headers(url: String, options: Dictionary) -> Dictionary:
 	var mode := str(options.get("credentials", "same-origin"))
 	if mode not in ["omit", "same-origin", "include"]:
-		return {"ok": false, "headers": PackedStringArray(), "mode": mode}
+		return {"ok": false, "headers": PackedStringArray(), "mode": mode,
+			"error": VrwebScriptError.INVALID_ARGS}
 	var headers := PackedStringArray()
 	if mode != "omit":
 		# Bearer is stronger than federated identity and may authorize account APIs. It is only
@@ -291,9 +306,11 @@ func _credential_headers(url: String, options: Dictionary) -> Dictionary:
 		elif mode == "include" and url.begins_with("https://"):
 			headers = HomeServer.data_identity_headers_for(url)
 			if headers.is_empty():
-				return {"ok": false, "headers": headers, "mode": mode}
+				return {"ok": false, "headers": headers, "mode": mode,
+					"error": VrwebScriptError.DENIED}
 		elif mode == "include" and not PageFetcher.is_local(url):
-			return {"ok": false, "headers": headers, "mode": mode}
+			return {"ok": false, "headers": headers, "mode": mode,
+				"error": VrwebScriptError.DENIED}
 	return {"ok": true, "headers": headers, "mode": mode}
 
 

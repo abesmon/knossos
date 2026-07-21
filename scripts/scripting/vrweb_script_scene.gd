@@ -25,35 +25,38 @@ func setup(script_id: String, invoke: Callable) -> void:
 	_invoke = invoke
 
 
-## ВСЕ аргументы обязательны (callback/kind — nil допустим): луау-аддон при вызове
-## bound-метода с недостающим дефолтным аргументом падает (вплоть до segfault во вложенном
-## callback), а лямбда фикс-арности даёт чистую Lua-ошибку — поэтому api из лямбд.
+## api из лямбд фиксированной арности: доверенный bootstrap добивает опущенные хвостовые
+## аргументы (callback) значением nil по манифесту арности.
 func api() -> Dictionary:
 	return {
-		"add": func(spec, callback): return add_object(spec, callback),
-		"update": func(id, props, callback): return update_object(id, props, callback),
-		"remove": func(id, callback): return remove_object(id, callback),
+		"add": func(spec, callback = null): return add_object(spec, callback),
+		"update": func(id, props, callback = null): return update_object(id, props, callback),
+		"remove": func(id, callback = null): return remove_object(id, callback),
 		"object": func(id): return read_object(id),
-		"objects": func(kind): return list_objects(kind),
+		"objects": func(kind = null): return list_objects(kind),
 	}
 
 
-## add(spec, callback?) -> id|nil. spec: {kind, parent?, ttl?, props?}. id генерится клиентом
-## (адрес СВОЕГО объекта — по нему же update/remove). Исход коммита авторитетом придёт в
-## callback {ok, id}; без callback действие best-effort (как пузырь).
+## add(spec, callback?) -> id|nil,code. spec: {kind, parent?, ttl?, props?}. id генерится
+## клиентом (адрес СВОЕГО объекта — по нему же update/remove). Исход коммита авторитетом
+## придёт в callback {ok, id, error}; без callback действие best-effort (как пузырь).
 func add_object(spec, callback):
-	if _closed or typeof(spec) != TYPE_DICTIONARY:
-		return null
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if typeof(spec) != TYPE_DICTIONARY:
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var kind := str((spec as Dictionary).get("kind", ""))
 	if kind.is_empty() or kind.to_utf8_buffer().size() > MAX_KIND_BYTES:
-		return null
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var parent := str((spec as Dictionary).get("parent", ""))
 	if parent.to_utf8_buffer().size() > MAX_PARENT_BYTES:
-		return null
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var ttl := maxf(0.0, float((spec as Dictionary).get("ttl", 0.0)))
 	var props = (spec as Dictionary).get("props", {})
+	if props == null or (props is Array and (props as Array).is_empty()):
+		props = {}
 	if typeof(props) != TYPE_DICTIONARY:
-		return null
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var id := NetworkManager.new_object_id()
 	var action := {"op": SceneChanges.OP_ADD, "id": id, "kind": kind, "parent": parent,
 		"ttl": ttl, "props": (props as Dictionary).duplicate(true)}
@@ -61,17 +64,21 @@ func add_object(spec, callback):
 	return id
 
 
-func update_object(id, props, callback) -> bool:
-	if _closed or typeof(props) != TYPE_DICTIONARY or str(id).is_empty():
-		return false
+func update_object(id, props, callback):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if typeof(props) != TYPE_DICTIONARY or str(id).is_empty():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	_dispatch({"op": SceneChanges.OP_UPDATE, "id": str(id),
 		"props": (props as Dictionary).duplicate(true)}, str(id), callback)
 	return true
 
 
-func remove_object(id, callback) -> bool:
-	if _closed or str(id).is_empty():
-		return false
+func remove_object(id, callback):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if str(id).is_empty():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	_dispatch({"op": SceneChanges.OP_REMOVE, "id": str(id)}, str(id), callback)
 	return true
 
@@ -152,4 +159,6 @@ func _on_acked(token: int, accepted: bool) -> void:
 	_tokens.erase(token)
 	var cb: Callable = entry.callback
 	if cb.is_valid() and _invoke.is_valid():
-		_invoke.call(cb, {"ok": accepted, "id": str(entry.id)})
+		# Отказ авторитета — семантический deny слоя (права/лимиты), а не структурная ошибка.
+		_invoke.call(cb, {"ok": accepted, "id": str(entry.id),
+			"error": "" if accepted else VrwebScriptError.DENIED})

@@ -62,7 +62,11 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - home server, подтверждённая идентичность и анонимный режим;
 - persistence и personal spaces;
 - inline/linked Luau, общий browser-like page realm, opt-in integrity и staged lifecycle;
-- portable `document` API v1, client quotas и атомарная hot replacement.
+- portable `document` API v1, client quotas и атомарная hot replacement;
+- единый контракт host-вызовов (`value [, error_code]`, опускаемые опциональные аргументы,
+  наблюдаемый ACK команд), явный `realm` id страницы и фазовый контракт API;
+- переносимые инструменты-предметы: item-runtime (`vrweb-item`), `document.scene`, прицел,
+  выбор файла и скриптовая поверхность grabbable ([итог](space/portable-tools.md)).
 
 До завершения milestone остаются P0/P1-блоки ниже и server-to-server federation. Скриптинг
 страницы больше не зависит от Godot; user permissions и instance ACL остаются следующими слоями.
@@ -73,8 +77,9 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - user permissions и instance ACL поверх capability pool клиента;
 - расширенные представления клиента: VR/full-body и облегчённый voice-only клиент;
 - дальнейшие федеративные и social-возможности поверх открытых контрактов;
-- переносимые инструменты-предметы на базе grabbable + scripting вместо вшитых в клиент
-  (анализ и порядок работ — [space/portable-tools.md](space/portable-tools.md)).
+- локальный инвентарь переносимых предметов (сама item-модель уже реализована в Milestone 3,
+  см. [space/portable-tools.md](space/portable-tools.md); инвентарь отслеживается в
+  [P2 — Subject Bindings](#p2--subject-bindings-объектов-и-артефактов)).
 
 ## Ближайший критический путь
 
@@ -159,8 +164,31 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Проверить каталог из HTML и linked `.luau` в чистой сборке и полную очистку
   nodes/signals/timers при навигации.
 
-`document.fetch` и persistent namespaced storage с quota добавляются после появления первого
-реального потребителя; они не блокируют текущий Scripting API v1.
+Persistent namespaced storage с quota добавляется после появления первого реального
+потребителя; сетевое чтение уже закрыто `vrweb/assets/2` (`document.assets.fetch`) и текущий
+Scripting API v1 это не блокирует.
+
+### P2 — Консолидация стандарта scripting/VRWeb
+
+Итоги ревью стандарта (июль 2026). Единый контракт host-вызовов, арность, явный realm id,
+фазовый контракт и консолидация поверхности уже реализованы; остаются отложенные пункты:
+
+- [ ] Словарь переносимых событий: сейчас `handle.on` принимает имена объявленных сигналов
+  движка, и словарь сигналов Godot остаётся неявной частью стандарта. Легализовать его по
+  образцу shader-дескрипторов: каталог переносимых событий стандартных ролей (`pressed`,
+  `value_changed`, …) со статусами либо явный profile-дескриптор словаря сигналов.
+- [ ] Единая грамматика портируемых значений: сегодня сосуществуют VRWML-литералы,
+  JSON-массивы эфемерного слоя, `float[7]` wire-конвенция grabbable и `document.values`.
+  Вынести грамматику значений в отдельный нормативный документ, на который ссылаются все слои.
+- [ ] Реестр capability по образцу [vrwml-tags.md](space/vrwml-tags.md): имя, статус
+  (stable/evolving), документ-владелец контракта; там же — правила эволюции (что является
+  совместимым добавлением, когда рождается новая major-версия) и обнаружение суб-фич внутри
+  версии (сейчас `features.has` работает только на целых capability).
+- [ ] Выделить нормативный контракт Replicated State (COMMAND/DELTA/SNAPSHOT/ACK, схемы,
+  write-rules) из исследовательского [replicated-state.md](network/replicated-state.md) —
+  по образцу разделения [grabbable.md](space/grabbable.md) / client-документа.
+- [ ] Снять или явно объявить policy лимит «сигналы с 0–4 аргументами» — единственное число
+  реализации, выглядящее как контракт.
 
 ## Multiplayer, identity и persistence
 
@@ -314,7 +342,7 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - Нужен ли открытый формат community/site-specific правил трансляции HTML → 3D?
 - Какой default warning/skip profile выбрать для неизвестных декларативных классов после audit?
 - Достаточен ли `vrweb-instance` как общеэкосистемный private-instance contract?
-- Какие реальные потребители должны сформировать `fetch/storage` capabilities?
+- Какие реальные потребители должны сформировать persistent `storage` capability?
 - Когда масштаб комнат оправдает SFU и облегчённый voice-only клиент?
 
 ## Правило сопровождения

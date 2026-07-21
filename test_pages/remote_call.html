@@ -39,7 +39,7 @@ local function rank_text(player)
 end
 
 local function render_people(event)
-  local me = event["local"]
+  local me = event.local_player
   local_info.set("text", table.concat({
     "ЛОКАЛЬНЫЕ ПРАВА",
     "nick: " .. me.nick,
@@ -74,7 +74,7 @@ local function caller_text(caller)
 end
 
 local function accepted(label, event, reason)
-  local moved = document.player.set_position(event.args[1])
+  local moved = document.player.set("position", event.args[1])
   label.set("modulate", document.values.color(0.2, 1.0, 0.45, 1.0))
   label.set("text", "ПРИНЯТО: " .. caller_text(event.caller) .. "\n" .. reason
     .. (moved and "" or " · player пока недоступен"))

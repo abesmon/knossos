@@ -105,13 +105,16 @@ func _materialize(doc: HtmlNode, final_url: String, script_result: Dictionary) -
 	var scripts: Array = script_result.get("scripts", [])
 	if scripts.is_empty():
 		return   # предмет без поведения — легальный «просто объект»
-	# Namespace realm: id скриптов префиксуются id объекта слоя — wire-адреса state/remote
-	# у каждого экземпляра предмета свои.
+	# Namespace realm: id скриптов (и явный realm, если задан) префиксуются id объекта слоя —
+	# wire-адреса state/remote у каждого экземпляра предмета свои, даже при явном realm.
 	var namespaced: Array = []
 	var ns := "item-" + _object_id
 	for value in scripts:
 		var declaration: Dictionary = (value as Dictionary).duplicate(true)
 		declaration["id"] = "%s.%s" % [ns, str(declaration.get("id", ""))]
+		var declared_realm := str(declaration.get("realm", ""))
+		if not declared_realm.is_empty():
+			declaration["realm"] = "%s.%s" % [ns, declared_realm]
 		namespaced.append(declaration)
 
 	_runtime = VrwebLuauRuntime.new()

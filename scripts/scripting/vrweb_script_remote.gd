@@ -27,35 +27,42 @@ func setup(script_id: String, invoke: Callable) -> void:
 func api() -> Dictionary:
 	return {
 		"expose": expose,
-		"call": func(target_peer_id, target_script_id, endpoint, version, args = []):
+		"call": func(target_peer_id, target_script_id, endpoint, version, args = null):
 			return send(int(target_peer_id), str(target_script_id), str(endpoint), int(version),
 					args if args is Array else []),
 	}
 
 
-func expose(endpoint: String, schema: Dictionary, callback: Callable) -> bool:
-	if _closed or not VrwebScriptDeclaration.valid_id(endpoint) or not callback.is_valid() \
-			or _endpoints.size() >= MAX_ENDPOINTS or _endpoints.has(endpoint):
-		return false
+func expose(endpoint: String, schema: Dictionary, callback: Callable):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not VrwebScriptDeclaration.valid_id(endpoint) or not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if _endpoints.size() >= MAX_ENDPOINTS:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
+	if _endpoints.has(endpoint):
+		return VrwebScriptError.err(VrwebScriptError.BUSY)
 	var normalized := _normalize_schema(schema)
 	if normalized.is_empty():
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	_endpoints[endpoint] = {"schema": normalized, "callback": callback}
 	return true
 
 
 func send(target_peer_id: int, target_script_id: String, endpoint: String, version: int,
-		args: Array = []) -> bool:
-	if _closed or not VrwebScriptDeclaration.valid_id(target_script_id) \
+		args: Array = []):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not VrwebScriptDeclaration.valid_id(target_script_id) \
 			or not VrwebScriptDeclaration.valid_id(endpoint) or version < 1:
-		return false
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 	var record := {"target": target_peer_id, "script": target_script_id,
 		"endpoint": endpoint, "version": version, "args": args.duplicate(true)}
 	if _staging:
 		_pending_calls.append(record)
 		return true
-	return NetworkManager.send_script_remote_call(target_peer_id, target_script_id, endpoint,
-			version, args)
+	return true if NetworkManager.send_script_remote_call(target_peer_id, target_script_id,
+			endpoint, version, args) else VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 
 
 func commit() -> bool:

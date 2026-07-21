@@ -16,6 +16,7 @@ static func collect(doc: HtmlNode, base_url: String) -> Dictionary:
 	var scripts: Array[Dictionary] = []
 	var errors: Array[String] = []
 	var ids := {}
+	var page_realm := ""
 	for element in elements:
 		if scripts.size() >= MAX_SCRIPTS:
 			errors.append("слишком много VRWeb scripts (максимум %d)" % MAX_SCRIPTS)
@@ -28,9 +29,19 @@ static func collect(doc: HtmlNode, base_url: String) -> Dictionary:
 		if ids.has(declaration.id):
 			errors.append("дублирующийся script id «%s»" % declaration.id)
 			continue
+		# Identity page realm явно задаёт атрибут realm; все явные значения обязаны совпадать —
+		# у страницы ровно один realm. Без атрибута identity остаётся id первого скрипта.
+		var declared_realm := str(declaration.get("realm", ""))
+		if not declared_realm.is_empty():
+			if page_realm.is_empty():
+				page_realm = declared_realm
+			elif page_realm != declared_realm:
+				errors.append("script «%s»: атрибут realm «%s» не совпадает с realm страницы «%s»"
+						% [declaration.id, declared_realm, page_realm])
+				continue
 		ids[declaration.id] = true
 		scripts.append(declaration)
-	return {"scripts": scripts, "errors": errors}
+	return {"scripts": scripts, "errors": errors, "realm": page_realm}
 
 
 static func valid_id(value: String) -> bool:
@@ -56,6 +67,9 @@ static func _parse(element: HtmlNode, base_url: String) -> Dictionary:
 	var script_id := element.get_attr("id")
 	if not valid_id(script_id):
 		return _error("script id отсутствует или недопустим: «%s»" % script_id)
+	var realm := element.get_attr("realm").strip_edges()
+	if not realm.is_empty() and not valid_id(realm):
+		return _error("script «%s»: недопустимый realm «%s»" % [script_id, realm])
 	var src := element.get_attr("src").strip_edges()
 	var source := _raw_text(element)
 	if not src.is_empty() and not source.strip_edges().is_empty():
@@ -68,6 +82,7 @@ static func _parse(element: HtmlNode, base_url: String) -> Dictionary:
 		return _error("script «%s»: source превышает %d байт" % [script_id, MAX_SOURCE_BYTES])
 	return {"declaration": {
 		"id": script_id,
+		"realm": realm,
 		"profile": PROFILE,
 		"kind": "inline" if src.is_empty() else "linked",
 		"source": source if src.is_empty() else "",

@@ -10,7 +10,7 @@ vrwebresource://remote_call.html
 
 Три кнопки рассылают запрос всем из `document.players.all()` и ведут на три разные площадки:
 
-1. `move-unchecked` всегда вызывает `document.player.set_position`;
+1. `move-unchecked` всегда вызывает `document.player.set("position", ...)`;
 2. `move-authority` делает это только при `event.caller.is_authority`;
 3. `move-rank` требует назначенный `event.caller.rank <= 10`.
 

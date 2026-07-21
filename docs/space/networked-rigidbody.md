@@ -52,8 +52,8 @@ Authority принимает или отвергает команду обычн
 
 ```lua
 local item = assert(document.query("#throw-ball"))
-local holder = item.call("holder", {})
-local simulator = item.call("simulator", {})
+local holder = item.call("holder")
+local simulator = item.call("simulator")
 ```
 
 ## Решение автора через обычный reducer

@@ -574,7 +574,7 @@ Bindings намеренно не угадывают leave policy. В одном 
 
 ```lua
 document.players.on_changed(function(event)
-  local me = event["local"]
+  local me = event.local_player
   if not me or not me.is_authority then return end
 
   local present = {}
@@ -659,7 +659,7 @@ schema или посылать binding patches:
 
 ```lua
 local tool = document.query("#tool")
-local holder = tool.call("holder", {})
+local holder = tool.call("holder")
 
 tool.on("grab", function(event)
   print("holder:", event.user_id, "hand:", event.hand)

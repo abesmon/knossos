@@ -35,9 +35,11 @@ func setup(script_id: String, apply: Callable, policy: VrwebContentPolicy) -> vo
 	_policy = policy
 
 
+## Возвращает поверхность document.shaders (capability vrweb/shaders/1) — без промежуточного
+## namespace render: других жителей у него не было.
 func api() -> Dictionary:
-	return {"shaders": {"supports": supports_shader, "compile": compile_shader,
-		"constants": shader_constants}}
+	return {"supports": supports_shader, "compile": compile_shader,
+		"constants": shader_constants}
 
 
 func shader_constants() -> Array:
@@ -99,6 +101,7 @@ func _shader_handle(shader: Shader, descriptor: Dictionary) -> Dictionary:
 		"type": str(descriptor.get("type", "")),
 	}
 	return {
+		"__vrweb_host": "shader",
 		"format": func(): return format.duplicate(true),
 		"parameters": func(): return _shader_parameters(shader),
 		"create_material": func(): return _create_material(shader),
@@ -121,7 +124,7 @@ func _shader_parameters(shader: Shader) -> Array:
 
 func _create_material(shader: Shader):
 	if not _valid or shader == null:
-		return null
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
 	var material := ShaderMaterial.new()
 	material.shader = shader
 	material.set_shader_parameter("AUTHORITY_TIME", _authority_time)
@@ -132,15 +135,23 @@ func _create_material(shader: Shader):
 
 func _material_handle(material: ShaderMaterial) -> Dictionary:
 	return {
+		"__vrweb_host": "material",
 		"set_parameter": func(name: String, value):
-			if not _valid or material == null or value is Object or name == "AUTHORITY_TIME":
-				return false
+			if not _valid or material == null:
+				return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+			if name == "AUTHORITY_TIME":
+				# Зарезервированные VRWeb shader inputs read-only для автора.
+				return VrwebScriptError.err(VrwebScriptError.DENIED)
+			if value is Object:
+				return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
 			material.set_shader_parameter(name, value)
 			return true,
 		"get_parameter": func(name: String):
 			return material.get_shader_parameter(name) if _valid and material != null else null,
 		"apply": func(target: Dictionary, property: String):
-			return _apply.call(material, target, property) if _valid and _apply.is_valid() else false,
+			if not _valid or not _apply.is_valid():
+				return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+			return _apply.call(material, target, property),
 	}
 
 

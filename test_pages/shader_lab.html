@@ -13,7 +13,7 @@ if not editor or not apply or not diagnostics or not preview then
   error("shader demo scene ids are missing")
 end
 
-assert(document.features.require("vrweb/render-shaders/1"))
+assert(document.features.require("vrweb/shaders/1"))
 
 local initial_source = [[shader_type spatial;
 render_mode unshaded;
@@ -58,7 +58,7 @@ assert(document.state.ensure(object, schema, {
 
 local function compile_and_show(state)
   editor.set("text", state.source)
-  local result = document.render.shaders.compile({
+  local result = document.shaders.compile({
     language = state.language,
     version = state.language_version,
     type = state.shader_type,

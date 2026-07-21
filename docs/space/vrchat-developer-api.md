@@ -217,7 +217,7 @@ documentation существует, но является unofficial. Creator Gu
 
 ## Что особенно полезно перенять в VRWeb
 
-У нас уже есть scene handles, локальный `document.player.set_position`, capability contract и
+У нас уже есть scene handles, локальный `document.player.set("position", ...)`, capability contract и
 типизированный Replicated State. Наиболее ценные следующие слои:
 
 1. **Полный local-player capability**, а не только position: rotation/velocity, locomotion

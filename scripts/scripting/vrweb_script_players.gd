@@ -34,9 +34,13 @@ func all() -> Array:
 	return [] if _closed else roster_snapshot()
 
 
-func subscribe(callback: Callable) -> bool:
-	if _closed or not callback.is_valid() or _subscriptions.size() >= MAX_SUBSCRIPTIONS:
-		return false
+func subscribe(callback: Callable):
+	if _closed:
+		return VrwebScriptError.err(VrwebScriptError.LIFECYCLE)
+	if not callback.is_valid():
+		return VrwebScriptError.err(VrwebScriptError.INVALID_ARGS)
+	if _subscriptions.size() >= MAX_SUBSCRIPTIONS:
+		return VrwebScriptError.err(VrwebScriptError.LIMIT)
 	_subscriptions.append(callback)
 	if not _staging:
 		_invoke_callback(callback)
@@ -171,6 +175,8 @@ func _emit_changed() -> void:
 
 
 func _invoke_callback(callback: Callable) -> void:
+	# Поле называется local_player: "local" — зарезервированное слово Luau, и стандартный
+	# контракт не должен вынуждать event["local"].
 	if callback.is_valid() and _invoke.is_valid():
-		_invoke.call(callback, {"local": local_snapshot(), "players": roster_snapshot()})
+		_invoke.call(callback, {"local_player": local_snapshot(), "players": roster_snapshot()})
 
