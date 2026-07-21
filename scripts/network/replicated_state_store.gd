@@ -16,6 +16,11 @@ const MAX_DELTA_BYTES := 16 * 1024
 
 var _schemas: Dictionary = {} # schema_id -> definition
 var _objects: Dictionary = {} # "schema\nobject" -> record
+## Snapshot комнаты может прийти раньше, чем страница загрузилась и зарегистрировала свою
+## схему. Такие записи нельзя выбрасывать: sequence снимка уже принят, поэтому следующая
+## delta этого объекта увидит локальную revision=0 и уйдёт в resync. Храним неприменённые
+## records до ensure_object после регистрации схемы; до этого они недоступны потребителям.
+var _deferred_objects: Dictionary = {} # "schema\nobject" -> непроверенный schema record
 var _epoch := 0
 var _seq := 0
 var _applied_epoch := 0
@@ -47,10 +52,14 @@ func unregister_schema(schema_id: String) -> void:
 	for key in _objects.keys():
 		if (_objects[key] as Dictionary).get("schema_id", "") == schema_id:
 			_objects.erase(key)
+	for key in _deferred_objects.keys():
+		if (_deferred_objects[key] as Dictionary).get("schema_id", "") == schema_id:
+			_deferred_objects.erase(key)
 
 
 func reset_session() -> void:
 	_objects.clear()
+	_deferred_objects.clear()
 	_epoch = 0
 	_seq = 0
 	_applied_epoch = 0
@@ -58,11 +67,17 @@ func reset_session() -> void:
 
 
 func ensure_object(object_id: String, schema_id: String, initial: Dictionary = {}, owner_user_id: String = "") -> bool:
-	if object_id.is_empty() or not _schemas.has(schema_id) or _objects.size() >= MAX_OBJECTS:
+	if object_id.is_empty() or not _schemas.has(schema_id):
 		return false
 	var key := _key(object_id, schema_id)
+	if _deferred_objects.has(key):
+		_materialize_deferred_object(key)
 	if _objects.has(key):
 		return true
+	# Deferred snapshot records consume the same room-wide object budget even though consumers
+	# cannot see them yet. Иначе поздняя регистрация схем могла бы поднять Store выше лимита.
+	if _objects.size() + _deferred_objects.size() >= MAX_OBJECTS:
+		return false
 	var state := _default_state(schema_id)
 	for field in initial:
 		if not _validate_field(schema_id, str(field), initial[field]):
@@ -214,18 +229,28 @@ func apply_snapshot(data: Dictionary) -> bool:
 	if typeof(data.get("objects")) != TYPE_ARRAY or (data["objects"] as Array).size() > MAX_OBJECTS:
 		return false
 	var incoming: Dictionary = {}
+	var deferred: Dictionary = {}
 	for value in data["objects"]:
 		if typeof(value) != TYPE_DICTIONARY:
 			return false
 		var record: Dictionary = value
 		var schema_id := str(record.get("schema_id", ""))
 		var object_id := str(record.get("object_id", ""))
-		if not _schemas.has(schema_id) or object_id.is_empty() \
-				or int(record.get("version", 0)) != int((_schemas[schema_id] as Dictionary)["version"]):
-			continue # неизвестные локальному клиенту схемы не делают весь snapshot непригодным
+		if object_id.is_empty() or schema_id.is_empty() or int(record.get("version", 0)) <= 0:
+			return false
 		var state = record.get("state")
 		if typeof(state) != TYPE_DICTIONARY:
 			return false
+		# Схема может появиться после snapshot (страница/portable item ещё грузится).
+		# Пока её нет, проверяем общий контейнер и бюджет; поля провалидируем при регистрации.
+		if not _schemas.has(schema_id):
+			var pending := record.duplicate(true)
+			if not _valid_container(pending, 0) or var_to_bytes(pending).size() > MAX_OBJECT_BYTES:
+				return false
+			deferred[_key(object_id, schema_id)] = pending
+			continue
+		if int(record["version"]) != int((_schemas[schema_id] as Dictionary)["version"]):
+			continue
 		for field in state:
 			if not _validate_field(schema_id, str(field), state[field]):
 				return false
@@ -238,6 +263,7 @@ func apply_snapshot(data: Dictionary) -> bool:
 			return false
 		incoming[_key(object_id, schema_id)] = normalized
 	_objects = incoming
+	_deferred_objects = deferred
 	_applied_epoch = maxi(0, int(data.get("epoch", 0)))
 	_applied_seq = maxi(0, int(data.get("seq", 0)))
 	_epoch = maxi(_epoch, _applied_epoch)
@@ -246,6 +272,37 @@ func apply_snapshot(data: Dictionary) -> bool:
 		state_changed.emit(r["object_id"], r["schema_id"], (r["state"] as Dictionary).duplicate(true),
 				(r["state"] as Dictionary).duplicate(true), int(r["revision"]))
 	return true
+
+
+## Активировать канонический record, приехавший до того, как consumer объявил свою схему и
+## объект. Запись с несовместимой версией/полями локально отбрасывается.
+func _materialize_deferred_object(key: String) -> void:
+	var record: Dictionary = _deferred_objects.get(key, {})
+	_deferred_objects.erase(key)
+	if record.is_empty():
+		return
+	var schema_id := str(record.get("schema_id", ""))
+	if not _schemas.has(schema_id) \
+			or int(record.get("version", 0)) != int((_schemas[schema_id] as Dictionary)["version"]):
+		return
+	var state = record.get("state")
+	if typeof(state) != TYPE_DICTIONARY:
+		return
+	for field in state:
+		if not _validate_field(schema_id, str(field), state[field]):
+			return
+	var normalized := {
+		"object_id": str(record.get("object_id", "")), "schema_id": schema_id,
+		"version": int(record["version"]), "revision": maxi(0, int(record.get("revision", 0))),
+		"owner_user_id": str(record.get("owner_user_id", "")),
+		"state": (state as Dictionary).duplicate(true),
+	}
+	if normalized["object_id"].is_empty() or var_to_bytes(normalized).size() > MAX_OBJECT_BYTES:
+		return
+	_objects[key] = normalized
+	state_changed.emit(normalized["object_id"], schema_id,
+			(normalized["state"] as Dictionary).duplicate(true),
+			(normalized["state"] as Dictionary).duplicate(true), int(normalized["revision"]))
 
 
 static func evaluate_rule(rule, context: Dictionary) -> bool:

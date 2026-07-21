@@ -9,6 +9,7 @@ var _failed := false
 func _initialize() -> void:
 	_test_access_rules()
 	_test_command_delta_and_snapshot()
+	_test_snapshot_before_schema()
 	_test_validation_and_gap()
 	_test_size_budgets()
 	_test_state_switch_consumer()
@@ -130,6 +131,34 @@ func _test_command_delta_and_snapshot() -> void:
 	late.register_schema("test", _schema())
 	_eq(late.apply_snapshot(authority.snapshot()), true, "late join snapshot loaded")
 	_eq(float(late.state_of("one", "test")["value"]), 42.0, "late join state complete")
+
+
+## Реальный порядок late join: сетевой snapshot приходит раньше, чем страница загрузилась и
+## её consumer зарегистрировал схему. Канон нельзя терять только из-за порядка lifecycle.
+func _test_snapshot_before_schema() -> void:
+	var authority := ReplicatedStateStore.new()
+	authority.register_schema("late.tool", _schema())
+	authority.ensure_object("held-pencil", "late.tool")
+	authority.begin_authority()
+	authority.commit_command("held-pencil", "late.tool", 1, "set", {"value": 7.0},
+			{"rank": 0, "user_id": "holder", "is_authority": true})
+
+	var late := ReplicatedStateStore.new()
+	var received := []
+	late.state_changed.connect(func(object_id, schema_id, state, _changed, revision):
+		received.append({"object": object_id, "schema": schema_id,
+				"state": state, "revision": revision}))
+	_eq(late.apply_snapshot(authority.snapshot()), true,
+			"snapshot accepted before consumer schema exists")
+	_eq(late.revision_of("held-pencil", "late.tool"), -1,
+			"unknown schema remains hidden before registration")
+	_eq(late.register_schema("late.tool", _schema()), true, "late consumer schema registered")
+	_eq(late.ensure_object("held-pencil", "late.tool"), true, "late consumer object registered")
+	_eq(late.revision_of("held-pencil", "late.tool"), 1,
+			"deferred snapshot record materialized with canonical revision")
+	_eq(float(late.state_of("held-pencil", "late.tool")["value"]), 7.0,
+			"deferred snapshot preserves canonical state")
+	_eq(received.size(), 1, "materialized state emitted once to consumer")
 
 
 func _test_validation_and_gap() -> void:

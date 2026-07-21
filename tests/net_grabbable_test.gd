@@ -4,7 +4,7 @@ extends Node
 ## item-инструмент и берёт его в руку; late заходит позже и обязан увидеть предмет В РУКЕ
 ## держателя, а не висящим в воздухе. Процессы запускает tests/run_net_grabbable_test.py.
 
-const ITEM_SRC := "vrwebresource://items/color_cube.html"
+const ITEM_SRC := "vrwebresource://items/pencil.html"
 const ROOM := "grabbable-late-join-e2e"
 
 var _role := "holder"
@@ -24,7 +24,10 @@ func _ready() -> void:
 	Settings.nick = _role
 	Settings.online_enabled = true
 
-	_build_world()
+	# У holder мир уже загружен. Late намеренно подключается БЕЗ мира/GrabManager: в настоящем
+	# клиенте WebRTC snapshot способен обогнать fetch и materialization страницы.
+	if _role == "holder":
+		_build_world()
 	NetworkManager.p2p_peer_connected.connect(func(id):
 		_p2p += 1
 		_log("P2P %d" % id))
@@ -93,15 +96,28 @@ func _run_holder() -> void:
 		_finish(false, "holder could not grab item")
 		return
 	_log("HOLDING %s" % cube.grab_id)
-	# Держим предмет, пока поздний участник проверяет картину, и уходим последними.
-	await get_tree().create_timer(16.0).timeout
-	_finish(_manager.local_held() == cube, "held item while late joiner checked")
+	# Late joiner затем перехватывает theft=allow предмет. Оба клиента обязаны сойтись на нём,
+	# а не только authority (исходный баг показывал новый holder лишь первому пользователю).
+	if not await _wait_for(func(): return _manager.holder_of(cube) != Settings.user_id, 16.0):
+		_finish(false, "holder never observed late joiner takeover")
+		return
+	var takeover_holder := _manager.holder_of(cube)
+	# Дать reliable DELTA/ACK физически уйти в сокет до завершения процесса authority.
+	await get_tree().create_timer(2.0).timeout
+	_finish(_manager.local_held() != cube and takeover_holder != "",
+			"authority released local hand and observed late joiner takeover")
 
 
 func _run_late() -> void:
 	if not await _wait_for(func(): return _p2p >= 1 and not NetworkManager.has_authority(), 12.0):
 		_finish(false, "late did not connect as follower")
 		return
+	if not await _wait_for(func(): return int(NetworkManager.replicated_metrics() \
+			.get("snapshot_applied_count", 0)) >= 1, 8.0):
+		_finish(false, "late did not receive pre-page replicated snapshot")
+		return
+	_log("PRE-PAGE SNAPSHOT APPLIED")
+	_build_world()
 	if not await _wait_for(func(): return _find_item() != null, 10.0):
 		_finish(false, "late did not materialize item")
 		return
@@ -131,9 +147,19 @@ func _run_late() -> void:
 			"none" if node == null else _manager.holder_of(node),
 			NetworkManager.replicated_revision(hold_id, GrabStateSchema.ID)])
 		return
-	# Визуальная привязка к якорю руки покрыта headless-тестом (tests/test_portable_base.gd):
-	# капсулы чужих игроков в этом стенде не поднимаются.
-	_finish(true, "late joiner tracks item held by remote user")
+	var item := _find_item()
+	if not _manager.can_local_grab(item):
+		_finish(false, "theft=allow item unexpectedly cannot be taken")
+		return
+	_manager.request_grab(item)
+	if not await _wait_for(func():
+		var node := _find_item()
+		return node != null and _manager.local_held() == node, 8.0):
+		_finish(false, "takeover committed on authority but not on late joiner")
+		return
+	# Визуальная привязка к чужому якорю покрыта headless-тестом; здесь проверяется полная
+	# последовательность репликации до и после пользовательского Equip/«Забрать».
+	_finish(true, "late joiner restored hold state and then equipped item locally")
 
 
 func _find_item() -> Grabbable:

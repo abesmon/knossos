@@ -66,9 +66,12 @@ func _ready() -> void:
 ## предметы РАНЬШЕ менеджера (бандловый item собирается синхронно), и без усыновления такой
 ## предмет навсегда остался бы без владельца — висел бы в воздухе и не брался в руку.
 func bind_manager(manager: Node) -> void:
-	if _manager == manager or manager == null or not manager.has_method("register_grabbable"):
+	if manager == null or not manager.has_method("register_grabbable"):
 		return
-	_manager = manager
+	if _manager != manager:
+		_manager = manager
+	# Повторный вызов намеренный: GrabManager использует его для самовосстановления, если
+	# scene_reset заменил/удалил registry-запись между _ready нового и _exit_tree старого узла.
 	manager.register_grabbable(self)
 
 

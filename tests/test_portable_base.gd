@@ -344,6 +344,24 @@ func _test_late_join_attach(world: Node3D, player: Player, manager: GrabManager)
 		_check(distance < 1.5,
 				"предмет прицеплен к руке чужого аватара (%.2f м от капсулы)" % distance)
 
+	# Второй scene snapshot после materialization перемонтирует VrwebItemHost. queue_free
+	# помечает родителя, но старый Grabbable-потомок ещё может выглядеть живым и не queued —
+	# именно этот порядок оставлял новый экземпляр без регистрации у late joiner.
+	NetworkManager.scene_reset.emit()
+	for i in 14:
+		await get_tree().process_frame
+	var remounted: Grabbable = null
+	for g in get_tree().get_nodes_in_group(Grabbable.GROUP):
+		if g is Grabbable and (g as Grabbable).grab_id == "item-%s.item-cube" % item_id:
+			remounted = g
+	_check(remounted != null and remounted != cube, "scene_reset перемонтировал late-join item")
+	if remounted != null:
+		_check(room_manager.holder_of(remounted) == remote_user,
+				"перемонтированный item сохранил канонического держателя")
+		var remount_distance := remounted.global_position.distance_to(capsule.global_position)
+		_check(remount_distance < 1.5,
+				"перемонтированный item продолжает следовать за чужой рукой (%.2f м)" % remount_distance)
+
 	NetworkManager.request_scene_action({"op": SceneChanges.OP_REMOVE, "id": item_id})
 	await get_tree().process_frame
 	room_manager.queue_free()

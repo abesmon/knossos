@@ -90,15 +90,31 @@ func register_grabbable(g: Grabbable) -> void:
 	var previous = _grabbables.get(oid)
 	if previous != null and previous != g and is_instance_valid(previous) \
 			and (previous as Node).is_inside_tree() \
-			and not (previous as Node).is_queued_for_deletion():
+			and not _node_or_ancestor_queued(previous as Node):
 		Log.warn("grab", "дубль id grabbable «%s» — второй экземпляр игнорируется" % g.grab_id)
 		return
+	# queue_free ставится на VrwebItemHost, а не обязательно на самого Grabbable-потомка.
+	# При scene_reset новый локальный item способен собраться в тот же кадр, пока старый
+	# потомок ещё inside_tree и сам is_queued_for_deletion()==false. Это перемонтаж, не дубль.
+	if previous != null and previous != g and is_instance_valid(previous):
+		var held_info: Dictionary = _held.get(oid, {})
+		if str(held_info.get("holder", "")) == _my_user():
+			_set_player_aim_exception(previous as Grabbable, false)
 	_grabbables[oid] = g
 	_register_state_object(oid, g)
 	# Snapshot комнаты мог прийти раньше материализации узла — догоняем текущее состояние.
 	if NetworkManager.replicated_revision(oid, SCHEMA_ID) > 0:
 		var state := NetworkManager.replicated_state(oid, SCHEMA_ID)
 		_apply_state(oid, state, state)
+
+
+func _node_or_ancestor_queued(node: Node) -> bool:
+	var current := node
+	while current != null:
+		if current.is_queued_for_deletion():
+			return true
+		current = current.get_parent()
+	return false
 
 
 ## Узел предмета ушёл из дерева — снимаем ТОЛЬКО локальное отслеживание.
@@ -162,6 +178,12 @@ func _apply_state(object_id: String, state: Dictionary, changed: Dictionary) -> 
 		return
 	if not prev.is_empty() and str(prev["holder"]) == holder and str(prev["hand"]) == hand:
 		_held[object_id]["grip"] = GrabStateSchema.unpack_transform(state.get("grip"))
+		# Тот же канон мог применяться уже к ПРЕДЫДУЩЕМУ экземпляру узла. После scene_reset
+		# новый Grabbable обязан получить held-презентацию и локальные исключения заново.
+		g.set_held(true)
+		if holder == _my_user():
+			_set_player_aim_exception(g, true)
+			_set_player_holding(hand, true)
 		return
 	if not prev.is_empty():
 		_detach(object_id, g)   # перехват (theft): drop прежнему держателю, grab новому
@@ -390,7 +412,35 @@ func _process(delta: float) -> void:
 	_sweep_accum += delta
 	if _sweep_accum >= SWEEP_INTERVAL:
 		_sweep_accum = 0.0
+		_recover_tracking()
 		_authority_sweep()
+
+
+## Lifecycle-сигналы Godot могут схлопнуться в неудобном порядке при двух близких
+## scene_reset: новый item уже вошёл, старый descendant ещё не вышел, затем старый снимает
+## registry. Раз в секунду восстанавливаем только отсутствующие записи и повторно накатываем
+## канон Store. Это не сетевой polling: читается локальная копия без трафика.
+func _recover_tracking() -> void:
+	for node in get_tree().get_nodes_in_group(Grabbable.GROUP):
+		if not node is Grabbable:
+			continue
+		var g := node as Grabbable
+		if g.grab_id == "":
+			continue
+		var oid := OBJECT_PREFIX + g.grab_id
+		var tracked = _grabbables.get(oid)
+		if tracked == g:
+			continue
+		if tracked == null or not is_instance_valid(tracked) \
+				or not (tracked as Node).is_inside_tree() \
+				or _node_or_ancestor_queued(tracked as Node):
+			g.bind_manager(self)
+	for oid in _grabbables.keys():
+		if not is_instance_valid(_grabbables[oid]):
+			continue
+		if NetworkManager.replicated_revision(oid, SCHEMA_ID) > 0:
+			var state := NetworkManager.replicated_state(oid, SCHEMA_ID)
+			_apply_state(oid, state, state)
 
 
 ## Якорь руки держателя (мировой Transform3D) или null, если держатель сейчас не материализован
