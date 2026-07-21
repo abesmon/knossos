@@ -148,7 +148,8 @@ func api() -> Dictionary:
 			"authority_ready": authority_clock_ready, "set_timeout": set_timeout,
 			"set_interval": set_interval, "cancel": cancel_timer},
 		"on_update": on_update,
-		"values": {"vector3": make_vector3, "color": make_color},
+		"values": {"vector3": make_vector3, "color": make_color,
+			"transform_facing": make_transform_facing, "to_literal": to_literal},
 		"player": {"get": player_get, "set_position": player_set_position, "aim": player_aim},
 		"log": {"debug": log_debug, "info": log_info, "warning": log_warning,
 			"error": log_error},
@@ -473,6 +474,34 @@ func make_color(r: float, g: float, b: float, a := 1.0) -> Color:
 	return Color(r, g, b, a) if _allow_call() else Color.TRANSPARENT
 
 
+## Поза для объекта, который «смотрит» лицевой стороной (+Z) вдоль front — размещение на
+## поверхности по её нормали. Общая математика, нужная любому инструменту, который что-то
+## ставит на стену/пол: у почти вертикального front (пол/потолок) мировой «верх» вырождается,
+## тогда в роли верха берётся горизонтальная часть up_hint (обычно направление взгляда).
+func make_transform_facing(origin: Vector3, front: Vector3, up_hint: Vector3) -> Transform3D:
+	if not _allow_call():
+		return Transform3D.IDENTITY
+	if not front.is_finite() or front.length() < 0.0001 or not origin.is_finite():
+		return Transform3D.IDENTITY
+	var z := front.normalized()
+	var up := Vector3.UP
+	if absf(z.dot(up)) > 0.99:
+		up = Vector3(up_hint.x, 0.0, up_hint.z)
+		up = up.normalized() if up.length() > 0.001 else Vector3.FORWARD
+	var x := up.cross(z).normalized()
+	var y := z.cross(x).normalized()
+	return Transform3D(Basis(x, y, z), origin)
+
+
+## Портируемое значение → литерал VRWML (та же грамматика, что у атрибутов разметки).
+## Нужен, чтобы строить props объектов слоя из вычисленных значений, не клея строки руками.
+func to_literal(value) -> String:
+	if not _allow_call() or not _portable(value):
+		return ""
+	var text := var_to_str(value)
+	return text if text.to_utf8_buffer().size() <= 4096 else ""
+
+
 func cancel_timer(timer_id: int) -> bool:
 	if not _timers.has(timer_id):
 		return false
@@ -552,23 +581,50 @@ func files_pick(kind: String, callback: Callable) -> bool:
 			or not file_picker.is_valid() or _staging:
 		return false
 	_pick_pending = true
-	file_picker.call(str(kind), func(ok: bool, name: String, bytes: PackedByteArray) -> void:
+	# Диалог открывается ВНЕ стека скрипта (call_deferred ниже), а результат доставляется
+	# отложенно (_deliver_pick). Оба конца обязательны: модальный диалог ОС крутит собственный
+	# вложенный цикл событий, и если открыть его прямо из host-вызова, движок продолжит
+	# прокручивать кадры, пока VM ещё находится в этом вызове, — приложение встаёт намертво.
+	# Симметрично, колбэк выбора приходит из того же вложенного контекста (а местами из чужого
+	# потока), поэтому входить оттуда в VM тоже нельзя.
+	_open_picker.call_deferred(str(kind), callback)
+	return true
+
+
+func _open_picker(kind: String, callback: Callable) -> void:
+	if not _valid or not file_picker.is_valid():
 		_pick_pending = false
-		if not _valid or not _invoke.is_valid():
+		return
+	file_picker.call(kind, func(ok: bool, name: String, bytes: PackedByteArray) -> void:
+		_pick_pending = false
+		if not _valid:
 			return
 		if not ok or bytes.size() == 0 or bytes.size() > MAX_PICK_FILE_BYTES:
-			_invoke.call(callback, {"ok": false, "name": str(name), "size": bytes.size(),
-				"url": ""})
+			_deliver_pick(callback, {"ok": false, "name": str(name), "size": bytes.size(),
+				"url": "", "error": "unreadable"})
 			return
-		var hex := BlobProtocol.hash_bytes(bytes)
-		if not BlobStore.has_hex(hex):
-			BlobStore.ingest(hex, bytes)
-		var event := {"ok": true, "name": str(name), "size": bytes.size(),
-			"url": BlobProtocol.url_of(hex)}
+		# Изображения импортируются как realtime-ресурс: BlobStore проверяет формат по
+		# сигнатуре и при необходимости ужимает под лимит блоба. Сырой файл (в т.ч. крупный)
+		# иначе не уехал бы к пирам. Прочие типы кладём как есть — их лимит тот же.
+		var url := BlobStore.import_image(bytes) if str(kind) == "image" else BlobStore.add(bytes)
+		if url == "":
+			_deliver_pick(callback, {"ok": false, "name": str(name), "size": bytes.size(),
+				"url": "", "error": "unsupported_or_too_large"})
+			return
+		var event := {"ok": true, "name": str(name), "size": bytes.size(), "url": url}
 		if bytes.size() <= MAX_PICK_INLINE_BYTES:
 			event["bytes"] = bytes
-		_invoke.call(callback, event))
-	return true
+		_deliver_pick(callback, event))
+
+
+## Отложенный вход в VM с результатом выбора файла.
+func _deliver_pick(callback: Callable, event: Dictionary) -> void:
+	_invoke_deferred.call_deferred(callback, event)
+
+
+func _invoke_deferred(callback: Callable, event: Dictionary) -> void:
+	if _valid and _invoke.is_valid():
+		_invoke.call(callback, event)
 
 
 func player_set_position(position: Vector3) -> bool:

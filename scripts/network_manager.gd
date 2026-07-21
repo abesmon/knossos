@@ -927,7 +927,7 @@ func request_scene_action(action: Dictionary) -> void:
 		return
 	if has_authority():
 		_authority_handle_action(action, Settings.user_id, my_rank())
-	elif _is_standalone_state_authority():
+	elif _scene_standalone():
 		_standalone_scene_commit(action)
 	elif _can_rpc():
 		var a := authority_id()
@@ -949,7 +949,7 @@ func request_scene_action_tracked(action: Dictionary) -> int:
 	elif has_authority():
 		var accepted := _authority_handle_action(action, Settings.user_id, my_rank())
 		call_deferred("emit_signal", "scene_action_acked", token, accepted)
-	elif _is_standalone_state_authority():
+	elif _scene_standalone():
 		call_deferred("emit_signal", "scene_action_acked", token, _standalone_scene_commit(action))
 	elif _can_rpc() and authority_id() != 0:
 		var a := action.duplicate(true)
@@ -997,10 +997,16 @@ func scene_config() -> Dictionary:
 	return _scene.config()
 
 
-## Офлайн-режим: эфемерный слой остаётся полноценной ЛОКАЛЬНОЙ машиной — та же ветка, что
-## standalone authority у Replicated State (_is_standalone_state_authority): коммитим сами с
-## правами админа, событий по RPC нет (_can_rpc() ложно). Локальные объекты — сессионные:
-## при входе в комнату сцена сбрасывается и заменяется снимком её авторитета.
+## Вне комнаты эфемерный слой — полноценная ЛОКАЛЬНАЯ машина. Условие шире, чем offline mode:
+## пока комнаты нет, авторитета не существует вовсе, и мы единственный участник — значит
+## коммитим сами. Иначе действия молча терялись бы у любого, кто просто не в комнате
+## (онлайн включён, но страница локальная/одиночная) — так пропадали штрихи и картинки.
+## Локальные объекты сессионные: при входе в комнату сцена сбрасывается и заменяется снимком.
+func _scene_standalone() -> bool:
+	return not in_room() or _is_standalone_state_authority()
+
+
+## Коммит локальной машины: правами админа, событий по RPC нет (_can_rpc() ложно).
 func _standalone_scene_commit(action: Dictionary) -> bool:
 	if not _scene_standalone_begun:
 		_scene_standalone_begun = true

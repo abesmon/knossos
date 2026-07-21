@@ -117,6 +117,10 @@ func _materialize(doc: HtmlNode, final_url: String, script_result: Dictionary) -
 	_runtime = VrwebLuauRuntime.new()
 	_runtime.name = "ItemRuntime"
 	_runtime.file_picker = _context.get("file_picker", Callable())
+	# Ошибка в callback закрывает realm предмета: снаружи это выглядит как «инструмент
+	# внезапно перестал реагировать». Без лога такое молча не диагностируется.
+	_runtime.script_failed.connect(func(failed_id: String, phase: String, message: String):
+		Log.warn("item", "item «%s» скрипт %s/%s: %s" % [_object_id, failed_id, phase, message]))
 	add_child(_runtime)
 	_runtime.setup(root, targets, final_url, _context.get("player") as Node, policy)
 	var activation := _runtime.activate(namespaced)

@@ -264,8 +264,31 @@ func _run() -> void:
 	_check(not cube_alive, "grabbable предмета удалён вместе с item")
 
 	await _test_instance_isolation(manager)
+	await _test_scene_outside_room()
 	_check(_script_errors.is_empty(), "callbacks без ошибок: %s" % str(_script_errors))
 	get_tree().quit(1 if _failed else 0)
+
+
+## Регрессия: действия слоя вне комнаты. Раньше standalone-ветка включалась ТОЛЬКО в offline
+## mode, поэтому у пользователя с включённым онлайном, но не в комнате (локальная/одиночная
+## страница), add молча терялся — пропадали и штрихи, и размещённые картинки.
+func _test_scene_outside_room() -> void:
+	var was_online := Settings.online_enabled
+	Settings.online_enabled = true
+	_check(not NetworkManager.in_room(), "предусловие: онлайн включён, но комнаты нет")
+
+	var id := NetworkManager.new_object_id()
+	NetworkManager.request_scene_action({"op": SceneChanges.OP_ADD, "id": id,
+		"kind": "vrweb-node", "parent": "", "ttl": 0.0,
+		"props": {"tag": "Label3D", "attrs": {"text": "outside-room"}}})
+	await get_tree().process_frame
+	_check(not NetworkManager.scene_object(id).is_empty(),
+			"add вне комнаты закоммичен локально (онлайн включён)")
+
+	NetworkManager.request_scene_action({"op": SceneChanges.OP_REMOVE, "id": id})
+	await get_tree().process_frame
+	_check(NetworkManager.scene_object(id).is_empty(), "remove вне комнаты тоже работает")
+	Settings.online_enabled = was_online
 
 
 ## Гарантия модовой модели (docs/space/tool-authoring.md): два экземпляра ОДНОГО предмета в

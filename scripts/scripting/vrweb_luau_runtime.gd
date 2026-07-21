@@ -29,6 +29,9 @@ var _policy: VrwebContentPolicy
 var _deadline_by_script: Dictionary = {}
 var _limit_reason_by_script: Dictionary = {}
 var _active_execution_id := ""
+## Глубина вложенности вызовов VM. Вложенность сама по себе законна (callback → host →
+## reducer), но кадровый цикл входить в VM повторно не должен — см. _process.
+var _invoke_depth := 0
 var _closed := false
 var _scene_time := 0.0
 
@@ -37,6 +40,12 @@ func _process(delta: float) -> void:
 	if _closed or _realm.is_empty():
 		return
 	_scene_time += delta
+	# Кадровый цикл не входит в VM, пока мы уже внутри вызова скрипта. Модальный диалог ОС
+	# (и любой host-вызов, крутящий собственный цикл событий) продолжает прокручивать кадры,
+	# находясь внутри нашего pcall, — без этой проверки приложение зависает на том же
+	# lua_State. Вложенность из host-вызовов (callback → reducer) при этом остаётся законной.
+	if _invoke_depth > 0:
+		return
 	var host: VrwebDocumentHost = _realm.get("host")
 	if host != null:
 		host.update(delta, _clock_snapshot())
@@ -292,6 +301,7 @@ func _invoke_page(callback: Callable, event, wants_result := false):
 	if state == null or not state.is_valid():
 		return null
 	(_realm.host as VrwebDocumentHost).begin_invocation()
+	_invoke_depth += 1
 	var execution_id := _page_id
 	_active_execution_id = execution_id
 	_deadline_by_script[execution_id] = Time.get_ticks_msec() + CALLBACK_BUDGET_MS
@@ -299,6 +309,7 @@ func _invoke_page(callback: Callable, event, wants_result := false):
 	state.push_callable(callback)
 	state.push_variant(event)
 	var status: int = state.pcall(1, 1 if wants_result else 0)
+	_invoke_depth = maxi(0, _invoke_depth - 1)
 	_deadline_by_script.erase(execution_id)
 	_active_execution_id = ""
 	var limit_reason := str(_limit_reason_by_script.get(execution_id, ""))
