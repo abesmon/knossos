@@ -9,6 +9,70 @@ signal script_replaced(script_id: String, old_hash: String, new_hash: String)
 const TOP_LEVEL_BUDGET_MS := 75
 const CALLBACK_BUDGET_MS := 25
 const SOFT_MEMORY_BYTES := 16 * 1024 * 1024
+## luau_gdextension invokes GDScript Callables with exactly the Lua argument count and does not
+## apply GDScript defaults. Keep the sandbox-facing optional handle.on hint in Luau, while the
+## underlying host Callable remains a strict three-argument boundary.
+const HANDLE_BINDING_BOOTSTRAP := """
+local wrapped_handles = {}
+local wrap_handle
+
+local function wrap_value(value, seen)
+    if type(value) ~= "table" then
+        return value
+    end
+    if value.id ~= nil and value.on ~= nil then
+        return wrap_handle(value)
+    end
+    if seen[value] then
+        return value
+    end
+    seen[value] = true
+    for key, child in pairs(value) do
+        value[key] = wrap_value(child, seen)
+    end
+    return value
+end
+
+wrap_handle = function(handle)
+    if type(handle) ~= "table" or wrapped_handles[handle] then
+        return handle
+    end
+    local raw_on = handle.on
+    -- Godot Callable crosses the extension boundary as callable userdata, not a Luau function.
+    if raw_on == nil then
+        return handle
+    end
+    wrapped_handles[handle] = true
+    handle.on = function(event_name, callback, hint)
+        if hint == nil then
+            hint = ""
+        end
+        return raw_on(event_name, function(event)
+            return callback(wrap_value(event, {}))
+        end, hint)
+    end
+    return handle
+end
+
+local raw_query = document.query
+document.query = function(selector)
+    return wrap_handle(raw_query(selector))
+end
+
+local raw_query_all = document.query_all
+document.query_all = function(selector)
+    local handles = raw_query_all(selector)
+    for index, handle in ipairs(handles) do
+        handles[index] = wrap_handle(handle)
+    end
+    return handles
+end
+
+local raw_create = document.create
+document.create = function(type_name, properties)
+    return wrap_handle(raw_create(type_name, properties))
+end
+"""
 const SAFE_LIBS := LuaState.LIB_BASE | LuaState.LIB_COROUTINE | LuaState.LIB_TABLE \
 		| LuaState.LIB_STRING | LuaState.LIB_BIT32 | LuaState.LIB_BUFFER | LuaState.LIB_UTF8 \
 		| LuaState.LIB_MATH | LuaState.LIB_VECTOR
@@ -246,6 +310,15 @@ func _prepare_page(scripts: Array, previous_session: Dictionary) -> Dictionary:
 	host.file_picker = file_picker
 	root_state.register_library("document", host.api())
 	root_state.pop(1)
+	var bootstrap_bytecode: PackedByteArray = Luau.compile(HANDLE_BINDING_BOOTSTRAP)
+	if bootstrap_bytecode.is_empty() or not root_state.load_bytecode(bootstrap_bytecode,
+			"@vrweb-host-bootstrap.luau") or root_state.pcall(0, 0) != Luau.LUA_OK:
+		var bootstrap_error := str(root_state.to_variant(-1)) \
+				if root_state.get_top() > 0 else "host bootstrap rejected"
+		host.close()
+		root_state.close()
+		errors.append({"script_id": page_id, "phase": "load", "message": bootstrap_error})
+		return {"realm": {}, "declarations": [], "errors": errors}
 	root_state.set_interrupts(true)
 	# Luau keeps the sandboxed root globals read-only. A sandboxed child thread inherits those
 	# safe globals through __index and owns the writable page-global table shared by every tag.

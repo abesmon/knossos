@@ -105,7 +105,7 @@ player.on("transport_changed", function(event)
   elseif event.action == "seek" then
     document.state.command(object, schema, version, "seek", { position = pos })
   end
-end, "Публикация локального транспорта в канон")
+end)
 
 -- Применение канона: смена источника, play/pause, позиция при паузе.
 local function render(state)

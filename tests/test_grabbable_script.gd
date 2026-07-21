@@ -2,7 +2,7 @@ extends Node
 
 ## Интеграция grabbable + скриптинг: прогоняет НАСТОЯЩИЙ скрипт demo-страницы grabbable.html
 ## через VrwebLuauRuntime — ловит разрыв между тегом, script targets и событиями grab/use,
-## включая регрессии в самой странице (напр. handle.on без обязательного 3-го аргумента hint).
+## включая регрессии в самой странице (напр. handle.on без опционального 3-го аргумента hint).
 ## Запуск: godot --headless tests/test_grabbable_script.tscn
 
 var _failed := false
@@ -66,7 +66,7 @@ func _run() -> void:
 	_check(ball_node != null and ball_node.grab_id == "demo-ball", "target — сам Grabbable")
 
 	# Активируем НАСТОЯЩИЙ скрипт страницы (как это делает главный runtime) — тест ловит
-	# регрессии в самом demo (напр. handle.on без обязательного hint валит активацию).
+	# регрессии в самом demo (напр. короткая форма handle.on должна активироваться).
 	var collected := VrwebScriptDeclaration.collect(doc, "vrwebresource://grabbable.html")
 	_check(collected.errors.is_empty() and collected.scripts.size() == 1,
 			"скрипт страницы объявлен корректно: %s" % str(collected.errors))

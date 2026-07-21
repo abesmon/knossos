@@ -3,6 +3,21 @@ extends RefCounted
 
 ## Narrow, engine-independent capability surface exposed to one Luau script.
 
+## Stable three-argument host endpoint for handle.on. The trusted Luau bootstrap in
+## VrwebLuauRuntime owns the optional-argument surface and always calls this method with a hint.
+## WeakRef avoids a host <-> binding lifetime cycle.
+class HandleOnBinding extends RefCounted:
+	var _host: WeakRef
+	var _handle_id: int
+
+	func _init(host: Object, handle_id: int) -> void:
+		_host = weakref(host)
+		_handle_id = handle_id
+
+	func invoke(event_name: String, callback: Callable, hint: String) -> bool:
+		var host = _host.get_ref()
+		return host.on_event(_handle_id, event_name, callback, hint) if host != null else false
+
 const MAX_HANDLES := 256
 const MAX_TIMERS := 64
 const MAX_UPDATE_CALLBACKS := 8
@@ -83,6 +98,7 @@ var _calls := 0
 var _next_handle := 1
 var _handles: Dictionary = {}
 var _reverse_handles: Dictionary = {}
+var _on_bindings: Dictionary = {}
 var _owned: Dictionary = {}
 var _pending_sets: Array[Dictionary] = []
 var _overrides: Dictionary = {}
@@ -217,6 +233,7 @@ func close(preserve_replicated_state := false) -> void:
 	_owned.clear()
 	_handles.clear()
 	_reverse_handles.clear()
+	_on_bindings.clear()
 	_state.close(not preserve_replicated_state)
 	_remote.close()
 	_players.close()
@@ -729,13 +746,16 @@ func _handle_for(object: Object) -> Dictionary:
 		_next_handle += 1
 		_handles[handle_id] = object
 		_reverse_handles[instance_id] = handle_id
+	var on_binding: HandleOnBinding = _on_bindings.get(handle_id)
+	if on_binding == null:
+		on_binding = HandleOnBinding.new(self, handle_id)
+		_on_bindings[handle_id] = on_binding
 	return {
 		"id": handle_id,
 		"get": func(property: String): return get_property(handle_id, property),
 		"set": func(property: String, value): return set_property(handle_id, property, value),
 		"call": func(method: String, arguments = []): return call_method(handle_id, method, arguments),
-		"on": func(event_name: String, callback: Callable, hint := ""): return on_event(
-			handle_id, event_name, callback, hint),
+		"on": on_binding.invoke,
 		"destroy": func(): return destroy(handle_id),
 	}
 
@@ -839,6 +859,7 @@ func _forget_owned(handle_id: int, immediate: bool) -> void:
 	var node: Node = _owned.get(handle_id)
 	_owned.erase(handle_id)
 	_handles.erase(handle_id)
+	_on_bindings.erase(handle_id)
 	if is_instance_valid(node):
 		_reverse_handles.erase(node.get_instance_id())
 		if immediate and not node.is_inside_tree():

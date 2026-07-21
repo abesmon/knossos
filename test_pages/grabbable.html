@@ -23,15 +23,15 @@ local palette = {
 local color_index = 1
 
 -- grab/drop приходят на ВСЕХ клиентах из канонических дельт hold-состояния.
--- Третий аргумент on(event, callback, hint) обязателен (сигнал-события хинт не используют — "").
+-- Для переносимого activate можно передать UI hint; сигнал-события в нём не нуждаются.
 ball.on("grab", function(event)
   status.set("text", "Мяч в руке (" .. tostring(event.hand) .. ") у " ..
       string.sub(tostring(event.user_id), 1, 8))
-end, "")
+end)
 
 ball.on("drop", function(_event)
   status.set("text", "Мяч свободен — возьми его (ЛКМ), положи (G)")
-end, "")
+end)
 
 -- use — transient-событие только у держателя: результат (цвет) держатель делает каноном сам.
 -- Здесь для простоты цвет меняется локально; синхронный вариант делал бы
@@ -39,7 +39,7 @@ end, "")
 ball.on("use", function(_event)
   color_index = color_index % #palette + 1
   ball_material.set("albedo_color", palette[color_index])
-end, "")
+end)
   </script>
 </head>
 <body>

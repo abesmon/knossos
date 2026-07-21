@@ -52,9 +52,14 @@ assert(document.state.define("lamp_state", {
     commands = {},
 }))
 assert(document.state.ensure("lamp", "lamp_state", { enabled = false }, ""))
+-- Regression: handle.on must accept the documented two-argument form; the optional hint
+-- is supplied by the trusted runtime wrapper before crossing the host boundary.
 lamp.on("activate", function(_event)
     lamp.set("visible", true)
-end, "Switch")
+end)
+lamp.on("visibility_changed", function(_event)
+    document.session.signal_seen = true
+end)
 """
 	var utility_source := """
 SharedUtils = {}
@@ -71,7 +76,7 @@ end
 		{"id": "page.lamp", "profile": "vrweb-luau/1", "kind": "inline",
 			"source": source, "hash": source.sha256_text()},
 	])
-	_eq(activated.ok, true, "page script activates")
+	_eq(activated.ok, true, "page script with two-argument handle.on activates")
 	_eq(activated.activated, ["page.utils", "page.lamp"],
 			"linked utility and inline consumer execute in document order")
 	_eq(lamp.visible, false, "top-level mutation commits after successful execution")
@@ -84,8 +89,11 @@ end
 	var bridge = lamp.get_meta(VrwebScriptInputBridge.META, null)
 	_eq(bridge is VrwebScriptInputBridge, true, "activation handler uses opaque host bridge")
 	if bridge is VrwebScriptInputBridge:
+		_eq(bridge.hint(), "", "two-argument handle.on supplies an empty hint")
 		bridge.dispatch(Vector3.ZERO)
 	_eq(lamp.visible, true, "Luau callback mutates borrowed handle")
+	_eq(runtime.session_of("page.lamp").get("signal_seen"), true,
+			"two-argument handle.on dispatches a native signal")
 
 	var bad := runtime.replace("page.lamp", "local = broken", runtime.active_hashes()["page.lamp"])
 	_eq(bad.ok, false, "invalid hot reload is rejected")
@@ -115,6 +123,7 @@ end, "Switch v2")
 	_eq(runtime.session_of("page.lamp").get("count"), 2, "hot reload preserves session")
 	bridge = lamp.get_meta(VrwebScriptInputBridge.META, null)
 	if bridge is VrwebScriptInputBridge:
+		_eq(bridge.hint(), "Switch v2", "three-argument handle.on preserves its hint")
 		bridge.dispatch(Vector3.ZERO)
 	_eq(lamp.visible, false, "hot reload atomically replaces handlers")
 	var callback_loop := """
