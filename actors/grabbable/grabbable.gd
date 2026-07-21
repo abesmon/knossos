@@ -57,9 +57,19 @@ func _ready() -> void:
 	child_entered_tree.connect(_on_child_changed)
 	child_exiting_tree.connect(_on_child_changed)
 	var manager := get_tree().get_first_node_in_group("grab_manager")
-	if manager != null and manager.has_method("register_grabbable"):
-		_manager = manager
-		manager.register_grabbable(self)
+	if manager != null:
+		bind_manager(manager)
+
+
+## Привязка к менеджеру. Зовётся с двух сторон: самим предметом (если менеджер уже есть) и
+## менеджером при его появлении. Второе обязательно: снимок сцены может материализовать
+## предметы РАНЬШЕ менеджера (бандловый item собирается синхронно), и без усыновления такой
+## предмет навсегда остался бы без владельца — висел бы в воздухе и не брался в руку.
+func bind_manager(manager: Node) -> void:
+	if _manager == manager or manager == null or not manager.has_method("register_grabbable"):
+		return
+	_manager = manager
+	manager.register_grabbable(self)
 
 
 func _exit_tree() -> void:

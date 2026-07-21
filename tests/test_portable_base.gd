@@ -10,6 +10,16 @@ extends Node
 
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 
+
+## Заглушка RemotePlayersView: отдаёт «капсулу» чужого игрока по user_id — ровно то, чем
+## GrabManager резолвит якорь руки удалённого держателя.
+class StubRemoteView extends Node:
+	var capsule: Node3D = null
+	var user_id := ""
+
+	func capsule_for_user(requested: String) -> Node3D:
+		return capsule if requested == user_id else null
+
 const PAGE := """
 <html><body>
 <vrwml mode="exclusive">
@@ -267,9 +277,80 @@ func _run() -> void:
 	_check(not cube_alive, "grabbable предмета удалён вместе с item")
 
 	await _test_instance_isolation(manager)
+	await _test_late_join_attach(world, player, manager)
 	await _test_scene_outside_room()
 	_check(_script_errors.is_empty(), "callbacks без ошибок: %s" % str(_script_errors))
 	get_tree().quit(1 if _failed else 0)
+
+
+## Late join: заходим в комнату, где предмет УЖЕ держит другой участник. Каноническое
+## hold-состояние приезжает снимком до того, как предмет успел материализоваться (документ
+## item'а качается асинхронно), а держатель — не мы. Предмет обязан прицепиться к руке
+## чужого аватара, а не остаться висеть в воздухе.
+func _test_late_join_attach(world: Node3D, player: Player, manager: GrabManager) -> void:
+	var remote_user := "late-join-holder"
+	var remote_view := StubRemoteView.new()
+	remote_view.user_id = remote_user
+	var capsule := Node3D.new()
+	world.add_child(capsule)
+	capsule.global_position = Vector3(6, 1, 6)
+	remote_view.capsule = capsule
+	world.add_child(remote_view)
+
+	# Менеджер этой «комнаты» ещё не создан: выводим прежний из игры, чтобы в группе не было
+	# ни одного — ровно как на сборке мира при входе в комнату.
+	manager.remove_from_group("grab_manager")
+	await get_tree().process_frame
+
+	# Состояние комнаты ДО материализации предмета: чужой пользователь держит его в руке.
+	var item_id := NetworkManager.new_object_id()
+	var hold_id := "grab:item-%s.item-cube" % item_id
+	NetworkManager.register_replicated_object(hold_id, GrabStateSchema.ID,
+			{"rest": GrabStateSchema.pack_transform(Transform3D.IDENTITY)})
+	var previous_user := Settings.user_id
+	Settings.user_id = remote_user
+	NetworkManager.request_replicated_command(hold_id, GrabStateSchema.ID,
+			GrabStateSchema.VERSION, "grab",
+			{"hand": "right", "grip": GrabStateSchema.POSE_IDENTITY.duplicate()})
+	Settings.user_id = previous_user
+	_check(str(NetworkManager.replicated_state(hold_id, GrabStateSchema.ID) \
+			.get("holder_user_id", "")) == remote_user,
+			"предусловие: предмет уже держит другой участник")
+
+	# Предмет материализуется, ПОКА МЕНЕДЖЕРА НЕТ: бандловый item (локальный документ +
+	# inline-скрипты) собирается синхронно, и его grabbable не находит менеджера в группе.
+	NetworkManager.request_scene_action({"op": SceneChanges.OP_ADD, "id": item_id,
+		"kind": "vrweb-item", "parent": "", "ttl": 0.0,
+		"props": {"src": "vrwebresource://items/color_cube.html",
+			"position": [0.0, 5.0, 0.0]}})
+	for i in 14:
+		await get_tree().process_frame
+
+	# Менеджер комнаты создаётся ПОСЛЕ — и обязан сам подобрать уже существующие предметы.
+	var room_manager := GrabManager.new()
+	room_manager.name = "RoomGrabManager"
+	world.add_child(room_manager)
+	room_manager.setup(player, remote_view)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var cube: Grabbable = null
+	for g in get_tree().get_nodes_in_group(Grabbable.GROUP):
+		if g is Grabbable and (g as Grabbable).grab_id == "item-%s.item-cube" % item_id:
+			cube = g
+	_check(cube != null, "предмет late join материализован")
+	if cube != null:
+		var distance := cube.global_position.distance_to(capsule.global_position)
+		_check(distance < 1.5,
+				"предмет прицеплен к руке чужого аватара (%.2f м от капсулы)" % distance)
+
+	NetworkManager.request_scene_action({"op": SceneChanges.OP_REMOVE, "id": item_id})
+	await get_tree().process_frame
+	room_manager.queue_free()
+	manager.add_to_group("grab_manager")
+	remote_view.queue_free()
+	capsule.queue_free()
+	await get_tree().process_frame
 
 
 ## Регрессия: действия слоя вне комнаты. Раньше standalone-ветка включалась ТОЛЬКО в offline

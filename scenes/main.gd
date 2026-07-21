@@ -791,6 +791,16 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	_world.add_child(_remote_view)
 	_remote_view.setup(_player)
 
+	# Менеджер grabbable-предметов: hold-состояние через Replicated State + attachment-модель
+	# (предмет в руке следует за якорем аватара держателя). Живёт в мире и сносится при
+	# навигации. Создаётся ДО вьюхи эфемерных изменений: её setup сразу материализует текущее
+	# состояние комнаты, и предметы из снимка (при входе в комнату) должны найти менеджера
+	# уже готовым. См. docs/client/grabbable.md.
+	_grab_manager = GrabManager.new()
+	_grab_manager.name = "GrabManager"
+	_world.add_child(_grab_manager)
+	_grab_manager.setup(_player, _remote_view)
+
 	# Вьюха эфемерных изменений: материализует журнал NetworkManager (пузыри и будущие
 	# инструменты) в объекты мира. Тоже живёт в world — при навигации сносится и пересоздаётся
 	# для новой комнаты. Клики кликабельных объектов идут в тот же _activate_transition, что и
@@ -821,15 +831,6 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	_video_manager = VrwebVideoManager.new()
 	_video_manager.name = "VrwebVideoManager"
 	_world.add_child(_video_manager)
-
-	# Менеджер grabbable-предметов: hold-состояние через Replicated State + attachment-модель
-	# (предмет в руке следует за якорем аватара держателя). Тоже живёт в мире и сносится при
-	# навигации. Grabbable-узлы регистрируются в нём сами при входе в дерево — важно лишь,
-	# чтобы менеджер был создан ДО добавления vrweb-узлов. См. docs/client/grabbable.md.
-	_grab_manager = GrabManager.new()
-	_grab_manager.name = "GrabManager"
-	_world.add_child(_grab_manager)
-	_grab_manager.setup(_player, _remote_view)
 
 	# Тулбелт item-инструментов: хоткеи слотов спавнят переносимые предметы (карандаш/ластик/
 	# рамка картинок) вместо вшитых в клиент инструментов. См. docs/space/portable-tools.md.

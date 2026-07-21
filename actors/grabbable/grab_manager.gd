@@ -54,6 +54,16 @@ func _ready() -> void:
 			GrabStateSchema.definition(NetworkManager.DEFAULT_RANK))
 	NetworkManager.replicated_state_received.connect(_on_replicated_state)
 	NetworkManager.authority_changed.connect(_on_authority_changed)
+	adopt_existing()
+
+
+## Усыновить предметы, материализовавшиеся РАНЬШЕ менеджера. При входе в комнату снимок
+## сцены применяется на сборке мира, и бандловый item (локальный документ + inline-скрипты)
+## собирается синхронно — его grabbable ищет менеджера, которого ещё нет.
+func adopt_existing() -> void:
+	for node in get_tree().get_nodes_in_group(Grabbable.GROUP):
+		if node is Grabbable:
+			(node as Grabbable).bind_manager(self)
 
 
 func setup(player: Node3D, remote_view: Node) -> void:
@@ -72,7 +82,15 @@ func register_grabbable(g: Grabbable) -> void:
 		Log.warn("grab", "<VRWebGrabbable> без id — предмет не синхронизируется и не интерактивен")
 		return
 	var oid := OBJECT_PREFIX + g.grab_id
-	if _grabbables.has(oid) and _grabbables[oid] != g and is_instance_valid(_grabbables[oid]):
+	# Настоящий дубль (два ЖИВЫХ узла с одним id) игнорируем. А вот перемонтаж — нет: при
+	# пересборке вьюхи по снимку сцены новый узел входит в дерево РАНЬШЕ, чем отработает
+	# _exit_tree старого (queue_free откладывает его до конца кадра). Если такую регистрацию
+	# отвергнуть, старый узел следом снимет запись — и предмет останется вообще не
+	# отслеживаемым: висел бы в воздухе, хотя каноническое состояние держит его в руке.
+	var previous = _grabbables.get(oid)
+	if previous != null and previous != g and is_instance_valid(previous) \
+			and (previous as Node).is_inside_tree() \
+			and not (previous as Node).is_queued_for_deletion():
 		Log.warn("grab", "дубль id grabbable «%s» — второй экземпляр игнорируется" % g.grab_id)
 		return
 	_grabbables[oid] = g
@@ -83,6 +101,15 @@ func register_grabbable(g: Grabbable) -> void:
 		_apply_state(oid, state, state)
 
 
+## Узел предмета ушёл из дерева — снимаем ТОЛЬКО локальное отслеживание.
+##
+## Каноническое hold-состояние принадлежит комнате (его ведёт авторитет), а не нашему узлу:
+## локальный узел исчезает по причинам, к состоянию комнаты отношения не имеющим —
+## пересборка вьюхи по снимку сцены, перемонтаж, навигация. Удалять из-за этого объект в
+## Store нельзя: у поздно вошедшего снимок приходит РАНЬШЕ материализации предмета, вьюха
+## затем пересобирает сцену, и такое удаление стирало только что полученное состояние —
+## предмет оставался «свободным» и висел в воздухе вместо руки держателя.
+## Состояние комнаты чистится своим путём: reset_session при выходе из комнаты.
 func unregister_grabbable(g: Grabbable) -> void:
 	var oid := OBJECT_PREFIX + g.grab_id
 	if _grabbables.get(oid) != g:
@@ -90,7 +117,6 @@ func unregister_grabbable(g: Grabbable) -> void:
 	if _held.has(oid):
 		_detach(oid, g)
 	_grabbables.erase(oid)
-	NetworkManager.unregister_replicated_object(oid, SCHEMA_ID)
 
 
 func _register_state_object(oid: String, g: Grabbable) -> void:
