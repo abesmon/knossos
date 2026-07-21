@@ -36,6 +36,13 @@ func _held_id(manager: GrabManager) -> String:
 
 ## Текстура картинки (или null): читаем материал лицевого меша — публичного геттера у
 ## ImagePanel нет, а заводить его ради теста не стоит.
+## Размер квада панели в метрах — им и различаются картинки разного натурального размера.
+func _panel_size(panel: ImagePanel) -> Vector2:
+	var front := panel.get_node_or_null("Front") as MeshInstance3D
+	var quad := front.mesh as QuadMesh if front != null else null
+	return quad.size if quad != null else Vector2.ZERO
+
+
 func _panel_texture(panel: ImagePanel) -> Texture2D:
 	var front := panel.get_node_or_null("Front") as MeshInstance3D
 	if front == null:
@@ -96,6 +103,12 @@ func _run() -> void:
 	var picked_png := source_image.save_png_to_buffer()
 	_check(picked_png.size() > 512 * 1024,
 			"тестовая картинка достаточно крупная для пережима (%d КиБ)" % (picked_png.size() / 1024))
+	# Вторая картинка ЗАМЕТНО меньше: размещённые изображения обязаны сохранять натуральный
+	# размер, а не нормализоваться к одной ширине.
+	var small_noise := Crypto.new().generate_random_bytes(220 * 160 * 4)
+	var small_png := Image.create_from_data(220, 160, false, Image.FORMAT_RGBA8,
+			small_noise).save_png_to_buffer()
+	var pick_queue: Array = [picked_png, small_png]
 
 	# Загрузчик картинок живёт в мире (как в main): без него <VRWebImage> останется заглушкой.
 	var image_loader := ImageLoader.new()
@@ -111,7 +124,11 @@ func _run() -> void:
 		"player": player,
 		"file_picker": func(_kind: String, done: Callable) -> void:
 			picker_log.append("open")
-			done.call(true, "poster.png", picked_png),
+			var bytes: PackedByteArray = pick_queue[0] if pick_queue.size() > 1 \
+					else pick_queue[pick_queue.size() - 1]
+			if pick_queue.size() > 1:
+				pick_queue.pop_front()
+			done.call(true, "poster.png" if bytes == picked_png else "small.png", bytes),
 	})
 	await get_tree().process_frame
 
@@ -260,6 +277,10 @@ func _run() -> void:
 		_check(str(attrs.get("alt", "")) == "poster.png", "alt — имя выбранного файла")
 		_check(str(attrs.get("transform", "")).begins_with("Transform3D("),
 				"поза размещения — полный transform (%s)" % str(attrs.get("transform", "")).left(24))
+		# Размер НЕ навязывается: иначе панель возьмёт width как есть и все размещённые
+		# картинки станут одинаковой ширины вместо натурального размера.
+		_check(not attrs.has("width") and not attrs.has("height"),
+				"размер картинки не форсируется (attrs=%s)" % str(attrs.keys()))
 
 	# Картинка должна ПОЯВИТЬСЯ в мире: узел материализован и текстура доехала из блоба.
 	var panel: ImagePanel = null
@@ -276,6 +297,33 @@ func _run() -> void:
 	_check(textured, "текстура картинки загрузилась из блоба")
 	_check(item_errors.is_empty(),
 			"пережим крупного файла не убил realm по CPU-бюджету: %s" % str(item_errors))
+
+	# --- Вторая картинка, заметно меньше: размеры не должны нормализоваться ---
+	var big_size := _panel_size(panel)
+	manager.use_held()
+	for i in 40:
+		await get_tree().process_frame
+	var second: ImagePanel = null
+	for node in view.find_children("*", "", true, false):
+		if node is ImagePanel and node != panel:
+			second = node
+	_check(second != null, "вторая картинка материализована")
+	if second != null:
+		var textured2 := false
+		for i in 30:
+			await get_tree().process_frame
+			if _panel_texture(second) != null:
+				textured2 = true
+				break
+		_check(textured2, "текстура второй картинки загрузилась")
+		# При нормализации ширина была бы ОДИНАКОВОЙ; натуральный размер даёт явный разрыв.
+		var small_size := _panel_size(second)
+		_check(small_size.x < big_size.x * 0.8,
+				"маленькая картинка заметно меньше большой (%.2f×%.2f против %.2f×%.2f м)"
+				% [small_size.x, small_size.y, big_size.x, big_size.y])
+		_check(absf(small_size.x / maxf(0.001, small_size.y) - 220.0 / 160.0) < 0.05,
+				"пропорции маленькой картинки сохранены (%.2f)"
+				% (small_size.x / maxf(0.001, small_size.y)))
 
 	# --- Слот 3 ещё раз: рамка убрана; превью гаснет ---
 	belt.handle_slot(&"tool_slot_3")

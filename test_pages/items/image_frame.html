@@ -19,7 +19,9 @@ assert(frame ~= nil and beam ~= nil and marker ~= nil, "image frame item scene i
 
 local REACH = 1.5           -- длина луча размещения, м
 local SURFACE_GAP = 0.02    -- отступ от поверхности вдоль нормали (антизазор), м
-local PLACE_WIDTH = 1.0     -- ширина размещаемой картинки, м (высота — по пропорциям)
+-- Размер картинки НЕ задаём: без width/height панель берёт натуральный размер текстуры
+-- (пиксели в метрах, с потолком). Зададим width — и все размещённые картинки станут
+-- одинаковой ширины, что убивает разницу между большим постером и маленькой иконкой.
 
 local me = document.players.local_info()
 local aiming = false        -- держим ли рамку МЫ (превью только у держателя)
@@ -81,7 +83,6 @@ frame.on("use", function(_event)
       attrs = {
         src = url,
         alt = tostring(pick.name),
-        width = document.values.to_literal(PLACE_WIDTH),
         -- Полная поза одним атрибутом: позиция + разворот по нормали/лицом к игроку.
         transform = document.values.to_literal(pose),
       },
