@@ -72,10 +72,14 @@ frame.on("use", function(_event)
   local pose = last_pose        -- фиксируем позу на момент нажатия (диалог откроется позже)
   document.files.pick("image", function(pick)
     if not pick.ok then return end
+    -- Публикуем выбранный файл как изображение: тип задаём МЫ, host по имени файла ничего
+    -- не решает. Крупное фото при этом не втаскивается в память скрипта.
+    local url = pick.file.publish("image")
+    if url == "" then return end
     document.scene.add({ kind = "vrweb-node", parent = "", ttl = 0, props = {
       tag = "VRWebImage",
       attrs = {
-        src = tostring(pick.url),
+        src = url,
         alt = tostring(pick.name),
         width = document.values.to_literal(PLACE_WIDTH),
         -- Полная поза одним атрибутом: позиция + разворот по нормали/лицом к игроку.

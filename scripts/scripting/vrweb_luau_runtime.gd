@@ -335,6 +335,18 @@ func _invoke_page(callback: Callable, event, wants_result := false):
 	return result
 
 
+## Продлить дедлайн текущего вызова на время, проведённое ВНУТРИ host-операции.
+## CPU-бюджет ограничивает исполнение скрипта, а не длительность операций, которые скрипт
+## законно попросил у клиента (пережим картинки, декод ресурса, компиляция шейдера). Без
+## этого любой небыстрый host-вызов убивал бы realm по «execution deadline exceeded».
+func extend_deadline(msec: int) -> void:
+	if msec <= 0 or _active_execution_id.is_empty():
+		return
+	if _deadline_by_script.has(_active_execution_id):
+		_deadline_by_script[_active_execution_id] = \
+				int(_deadline_by_script[_active_execution_id]) + msec
+
+
 func _on_interrupt(state, _gc_state: int) -> void:
 	var script_id := _active_execution_id
 	if script_id.is_empty():

@@ -88,10 +88,14 @@ func _run() -> void:
 
 	var picker_log: Array = []   # когда именно открывался «диалог» (см. проверку ниже)
 
-	# Настоящий PNG: импорт картинки проверяет формат по сигнатуре байтов, мусор он отвергнет.
-	var source_image := Image.create_empty(24, 16, false, Image.FORMAT_RGBA8)
-	source_image.fill(Color(0.2, 0.7, 0.4, 1.0))
+	# Настоящий PNG, и намеренно КРУПНЫЙ (шум не сжимается → больше IMPORT_KEEP_BYTES).
+	# Мелкая картинка проходит импорт мгновенно и не проверяет главного: пережим — небыстрая
+	# host-операция, и её время не должно съедать CPU-бюджет скриптового callback.
+	var noise := Crypto.new().generate_random_bytes(1200 * 900 * 4)
+	var source_image := Image.create_from_data(1200, 900, false, Image.FORMAT_RGBA8, noise)
 	var picked_png := source_image.save_png_to_buffer()
+	_check(picked_png.size() > 512 * 1024,
+			"тестовая картинка достаточно крупная для пережима (%d КиБ)" % (picked_png.size() / 1024))
 
 	# Загрузчик картинок живёт в мире (как в main): без него <VRWebImage> останется заглушкой.
 	var image_loader := ImageLoader.new()
@@ -173,6 +177,16 @@ func _run() -> void:
 		await get_tree().process_frame
 	_check(_held_id(manager).ends_with(".image-frame-item"), "слот 3: рамка в руке (%s)"
 			% _held_id(manager))
+
+	# Ошибки скрипта предмета молча закрывают его realm — ловим их явно.
+	var item_errors: Array = []
+	for host_node in world.find_children("*", "", true, false):
+		if host_node is VrwebItemHost:
+			for child in host_node.get_children():
+				if child is VrwebLuauRuntime:
+					(child as VrwebLuauRuntime).script_failed.connect(
+							func(sid, phase, message): item_errors.append(
+									"%s/%s: %s" % [sid, phase, message]))
 
 	# Прицельное превью: луч и маркер видны у держателя и стоят в точке прицела.
 	await get_tree().process_frame
@@ -260,6 +274,8 @@ func _run() -> void:
 			textured = true
 			break
 	_check(textured, "текстура картинки загрузилась из блоба")
+	_check(item_errors.is_empty(),
+			"пережим крупного файла не убил realm по CPU-бюджету: %s" % str(item_errors))
 
 	# --- Слот 3 ещё раз: рамка убрана; превью гаснет ---
 	belt.handle_slot(&"tool_slot_3")

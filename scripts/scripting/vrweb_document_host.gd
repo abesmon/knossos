@@ -59,10 +59,12 @@ const GRABBABLE_METHODS := {
 	"set_enabled": [TYPE_BOOL], "is_enabled": [],
 }
 
-## Максимум байт файла, который files.pick вернёт скрипту инлайном (bytes); файл целиком в
-## любом случае уезжает в BlobStore и доступен по vrwebblob:// URL.
+## Максимум байт файла, который handle отдаст скрипту через file.bytes(); publish работает и
+## с файлами крупнее — байты просто не попадают в VM.
 const MAX_PICK_INLINE_BYTES := 2 * 1024 * 1024
 const MAX_PICK_FILE_BYTES := 32 * 1024 * 1024
+## Сколько выбранных файлов realm держит одновременно (освобождаются при закрытии realm).
+const MAX_PICKED_FILES := 8
 
 var script_id := ""
 var script_hash := ""
@@ -100,6 +102,8 @@ var _scene := VrwebScriptScene.new()
 ## file_picker.call(kind: String, done: Callable(ok, name, bytes)).
 var file_picker: Callable = Callable()
 var _pick_pending := false
+var _files: Dictionary = {}   # file_id -> {name, bytes} выбранных пользователем файлов
+var _next_file_id := 1
 var _assets = ASSETS_SCRIPT.new()
 var _render = RENDER_SCRIPT.new()
 var _pending_resource_applies: Array[Dictionary] = []
@@ -217,6 +221,7 @@ func close(preserve_replicated_state := false) -> void:
 	_remote.close()
 	_players.close()
 	_scene.close()
+	_files.clear()
 	_assets.close()
 	_render.close()
 	_invoke = Callable()
@@ -573,9 +578,14 @@ func _target_id_of(node: Node) -> String:
 
 ## Выбор файла пользователем (capability vrweb/files/1): OS-диалог показывает владелец
 ## runtime (провайдер file_picker), сам выбор — явное согласие пользователя (модель
-## <input type="file">). callback: {ok, name, size, url, bytes?}; url — vrwebblob:// адрес
-## (файл уезжает в BlobStore и готов для vrweb-node/realtime-ресурсов), bytes — инлайн для
-## небольших файлов (decode в скрипте).
+## <input type="file">). `kind` — ТОЛЬКО подсказка фильтра диалога: содержимое файла она не
+## меняет и ничего не гарантирует.
+##
+## callback получает {ok, name, size, error?, file?}, где file — НЕПРОЗРАЧНЫЙ handle
+## выбранного файла (тот же приём, что у ресурсов document.assets): байты не попадают в VM
+## сами по себе, а с файлом можно сделать ровно две вещи — опубликовать в
+## контент-адресуемом сторе (file.publish) или прочитать байты (file.bytes). Так host не
+## решает за скрипт, что это за файл и что с ним делать.
 func files_pick(kind: String, callback: Callable) -> bool:
 	if not _allow_call() or not callback.is_valid() or _pick_pending \
 			or not file_picker.is_valid() or _staging:
@@ -601,20 +611,64 @@ func _open_picker(kind: String, callback: Callable) -> void:
 			return
 		if not ok or bytes.size() == 0 or bytes.size() > MAX_PICK_FILE_BYTES:
 			_deliver_pick(callback, {"ok": false, "name": str(name), "size": bytes.size(),
-				"url": "", "error": "unreadable"})
+				"error": "unreadable"})
 			return
-		# Изображения импортируются как realtime-ресурс: BlobStore проверяет формат по
-		# сигнатуре и при необходимости ужимает под лимит блоба. Сырой файл (в т.ч. крупный)
-		# иначе не уехал бы к пирам. Прочие типы кладём как есть — их лимит тот же.
-		var url := BlobStore.import_image(bytes) if str(kind) == "image" else BlobStore.add(bytes)
-		if url == "":
+		if _files.size() >= MAX_PICKED_FILES:
 			_deliver_pick(callback, {"ok": false, "name": str(name), "size": bytes.size(),
-				"url": "", "error": "unsupported_or_too_large"})
+				"error": "too_many_files"})
 			return
-		var event := {"ok": true, "name": str(name), "size": bytes.size(), "url": url}
-		if bytes.size() <= MAX_PICK_INLINE_BYTES:
-			event["bytes"] = bytes
-		_deliver_pick(callback, event))
+		var file_id := _next_file_id
+		_next_file_id += 1
+		_files[file_id] = {"name": str(name), "bytes": bytes}
+		_deliver_pick(callback, {"ok": true, "name": str(name), "size": bytes.size(),
+			"file": _file_handle(file_id)}))
+
+
+## Непрозрачный handle выбранного файла. Публикация и чтение байт — раздельные операции,
+## поэтому крупный файл можно положить в стор, ни разу не втащив его в память VM.
+func _file_handle(file_id: int) -> Dictionary:
+	return {
+		"name": str((_files.get(file_id, {}) as Dictionary).get("name", "")),
+		"size": ((_files.get(file_id, {}) as Dictionary).get("bytes",
+				PackedByteArray()) as PackedByteArray).size(),
+		"publish": func(resource_type: String): return _publish_file(file_id, str(resource_type)),
+		"bytes": func(): return _file_bytes(file_id),
+	}
+
+
+## Опубликовать файл в контент-адресуемом сторе → vrwebblob:// URL ("" при отказе).
+## resource_type — словарь document.assets ("image" | "audio-*" | "mesh-gltf" | "binary").
+## Для типов, у которых нормализация осмысленна, host приводит содержимое к бюджету блоба
+## (сейчас это изображения: проверка сигнатуры + пережим). Для остальных — байты как есть.
+## Тип задаёт СКРИПТ и знает, что получит; host ничего не решает за него по имени файла.
+func _publish_file(file_id: int, resource_type: String) -> String:
+	if not _allow_call() or not _files.has(file_id):
+		return ""
+	var bytes: PackedByteArray = (_files[file_id] as Dictionary)["bytes"]
+	# Пережим крупного файла занимает сотни миллисекунд — это время host-операции, а не
+	# исполнения скрипта, поэтому оно не должно съедать его CPU-бюджет (см. _host_operation).
+	return _host_operation(func() -> String:
+		return BlobStore.import_image(bytes) if resource_type == "image" else BlobStore.add(bytes))
+
+
+## Выполнить потенциально небыструю нативную операцию, вернув скрипту его CPU-бюджет:
+## затраченное время возвращается рантайму, который сдвигает дедлайн текущего вызова.
+func _host_operation(operation: Callable):
+	var started := Time.get_ticks_msec()
+	var result = operation.call()
+	var elapsed := Time.get_ticks_msec() - started
+	if elapsed > 0 and is_instance_valid(_owner) and _owner.has_method("extend_deadline"):
+		_owner.call("extend_deadline", elapsed)
+	return result
+
+
+## Байты файла для обработки в самом скрипте ("" -> null, если файл крупнее инлайн-лимита:
+## тащить десятки мегабайт в VM с её memory budget нельзя — для таких файлов есть publish).
+func _file_bytes(file_id: int):
+	if not _allow_call() or not _files.has(file_id):
+		return null
+	var bytes: PackedByteArray = (_files[file_id] as Dictionary)["bytes"]
+	return bytes if bytes.size() <= MAX_PICK_INLINE_BYTES else null
 
 
 ## Отложенный вход в VM с результатом выбора файла.
