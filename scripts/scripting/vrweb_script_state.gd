@@ -110,6 +110,11 @@ func revision(local_object: String, local_schema: String) -> int:
 			str(record.object), str(record.schema))
 
 
+## Внутренний адрес для доменных capability-адаптеров того же page realm.
+func wire_record(local_object: String, local_schema: String) -> Dictionary:
+	return (_objects.get(_key(local_object, local_schema), {}) as Dictionary).duplicate(true)
+
+
 func command(local_object: String, local_schema: String, version: int, command_name: String,
 		args: Dictionary = {}) -> int:
 	if _staging:
@@ -316,6 +321,7 @@ func _connect_authority() -> void:
 
 func _wrap_definition(definition: Dictionary) -> Dictionary:
 	var wrapped := definition.duplicate(true)
+	var transaction_validator: Callable = wrapped.get("_transaction_validator", Callable())
 	if wrapped.get("fields") is Array and (wrapped.fields as Array).is_empty():
 		wrapped["fields"] = {}
 	if wrapped.get("commands") is Array and (wrapped.commands as Array).is_empty():
@@ -324,7 +330,12 @@ func _wrap_definition(definition: Dictionary) -> Dictionary:
 	for command_name in commands:
 		var spec: Dictionary = commands[command_name]
 		var reducer: Callable = spec.get("reducer", Callable())
-		if reducer.is_valid():
+		if reducer.is_valid() and bool(spec.get("_host_reducer", false)):
+			spec["reducer"] = func(state: Dictionary, args: Dictionary, context: Dictionary):
+				var result = reducer.call(state.duplicate(true), args.duplicate(true), context.duplicate(true))
+				return transaction_validator.call(state, context.get("bindings", {}), result, context) \
+						if transaction_validator.is_valid() else result
+		elif reducer.is_valid():
 			spec["reducer"] = func(state: Dictionary, args: Dictionary, context: Dictionary):
 				if not _invoke.is_valid():
 					return state
@@ -335,9 +346,13 @@ func _wrap_definition(definition: Dictionary) -> Dictionary:
 						if result.has(patch_name) and result[patch_name] is Array \
 								and (result[patch_name] as Array).is_empty():
 							result[patch_name] = {}
+				if transaction_validator.is_valid():
+					return transaction_validator.call(state, context.get("bindings", {}), result, context)
 				return result if result is Dictionary else state
+		spec.erase("_host_reducer")
 		commands[command_name] = spec
 	wrapped["commands"] = commands
+	wrapped.erase("_transaction_validator")
 	return wrapped
 
 

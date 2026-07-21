@@ -135,7 +135,28 @@ func validate_sample(object_id: String, schema_id: String, version: int, sample:
 	for field in sample:
 		if not specs.has(field) or not _valid_value(sample[field], specs[field]):
 			return false
+	var validator: Callable = (_schemas[schema_id] as Dictionary).get("sample_validator", Callable())
+	if validator.is_valid() and not bool(validator.call(sample.duplicate(true))):
+		return false
 	return true
+
+
+## SAMPLE не меняет record, но право его публиковать вычисляется по тем же transport-bound
+## facts, что и COMMAND. Схема без sample_write_rule сохраняет старую семантику authority-only.
+func authorize_sample(object_id: String, schema_id: String, version: int,
+		context: Dictionary) -> bool:
+	var key := _key(object_id, schema_id)
+	if not _objects.has(key) or not _schemas.has(schema_id):
+		return false
+	var schema: Dictionary = _schemas[schema_id]
+	var record: Dictionary = _objects[key]
+	if version != int(schema.get("version", 0)) or version != int(record.get("version", 0)):
+		return false
+	var access_context := context.duplicate()
+	access_context["actor_user_id"] = str(context.get("actor_user_id", ""))
+	access_context["bindings"] = (record.get("bindings", {}) as Dictionary).duplicate(true)
+	return PolicyEvaluatorImpl.evaluate(schema.get("sample_write_rule", "authority"),
+			access_context)
 
 
 func begin_authority() -> void:

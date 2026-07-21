@@ -34,12 +34,32 @@ static func definition() -> Dictionary:
 			# true — adjustable (естественный хват + подстройка держателем). Тоже фиксируется
 			# при регистрации: reducer обязан валидировать adjust, даже если узел ещё не построен.
 			"adjustable": {"type": "bool", "default": false},
+			"pose": _physics_array_spec(7, RigidbodyStateSchema.POSE_IDENTITY),
+			"linear_velocity": _physics_array_spec(3, RigidbodyStateSchema.VECTOR_ZERO),
+			"angular_velocity": _physics_array_spec(3, RigidbodyStateSchema.VECTOR_ZERO),
+			"sleeping": {"type": "bool", "default": false},
+			"simulation_epoch": {"type": "int", "default": 0},
+			"tick": {"type": "int", "default": 0},
 		},
+		"sample_fields": {
+			"pose": _physics_array_spec(7, RigidbodyStateSchema.POSE_IDENTITY),
+			"linear_velocity": _physics_array_spec(3, RigidbodyStateSchema.VECTOR_ZERO),
+			"angular_velocity": _physics_array_spec(3, RigidbodyStateSchema.VECTOR_ZERO),
+			"sleeping": {"type": "bool", "default": false},
+			"simulation_epoch": {"type": "int", "default": 0},
+			"tick": {"type": "int", "default": 0},
+			"revision": {"type": "int", "default": 0},
+		},
+		"sample_write_rule": {"assigned": "simulator"},
+		"sample_validator": RigidbodyStateSchema.valid_sample,
 		"default_write_rule": {"any_of": ["authority", "anyone"]},
 		"commands": {
 			"grab": {"reducer": GrabStateSchema.reduce_grab},
 			"release": {"reducer": GrabStateSchema.reduce_release},
 			"adjust": {"reducer": GrabStateSchema.reduce_adjust},
+			"claim_simulation": {"reducer": GrabStateSchema.reduce_claim_simulation},
+			"commit_keyframe": {"write_rule": {"assigned": "simulator"},
+				"reducer": GrabStateSchema.reduce_keyframe},
 		},
 	}
 
@@ -55,12 +75,17 @@ static func reduce_grab(state: Dictionary, args: Dictionary, context: Dictionary
 		return {}
 	if not valid_pose(args.get("grip")):
 		return {}
-	var bindings: Dictionary = context.get("bindings", {})
-	var holder := str(bindings.get("holder", ""))
+	var current_bindings: Dictionary = context.get("bindings", {})
+	var holder := str(current_bindings.get("holder", ""))
 	if holder != "" and holder != user_id and not bool(state.get("takeover_allowed", true)):
 		return {}
-	return {"bindings": {"holder": user_id},
-		"state": {"hand": hand, "grip": normalized_pose(args["grip"])}}
+	var bindings := {"holder": user_id}
+	var state_patch := {"hand": hand, "grip": normalized_pose(args["grip"])}
+	var physics = args.get("physics", {})
+	if physics is Dictionary and RigidbodyStateSchema.valid_snapshot(physics):
+		bindings["simulator"] = user_id
+		_apply_physics_handoff(state_patch, state, physics)
+	return {"bindings": bindings, "state": state_patch}
 
 
 ## adjust(grip): держатель подстраивает хват (дистанция/поворот в слоте). Разрешено только
@@ -87,8 +112,21 @@ static func reduce_release(state: Dictionary, args: Dictionary, context: Diction
 		return {}
 	if not valid_pose(args.get("rest")):
 		return {}
-	return {"bindings": {"holder": ""},
-		"state": {"hand": "", "rest": normalized_pose(args["rest"])}}
+	var state_patch := {"hand": "", "rest": normalized_pose(args["rest"])}
+	var physics = args.get("physics", {})
+	if physics is Dictionary and RigidbodyStateSchema.valid_snapshot(physics):
+		_apply_physics_snapshot(state_patch, physics)
+	return {"bindings": {"holder": ""}, "state": state_patch}
+
+
+static func reduce_claim_simulation(state: Dictionary, args: Dictionary,
+		context: Dictionary) -> Dictionary:
+	return RigidbodyStateSchema.reduce_claim(state, args, context)
+
+
+static func reduce_keyframe(state: Dictionary, args: Dictionary,
+		context: Dictionary) -> Dictionary:
+	return RigidbodyStateSchema.reduce_keyframe(state, args, context)
 
 
 ## Поза валидна: ровно 7 конечных чисел в разумных пределах, кватернион не вырожден.
@@ -120,3 +158,22 @@ static func unpack_transform(pose) -> Transform3D:
 		return Transform3D.IDENTITY
 	var q := Quaternion(float(pose[3]), float(pose[4]), float(pose[5]), float(pose[6])).normalized()
 	return Transform3D(Basis(q), Vector3(float(pose[0]), float(pose[1]), float(pose[2])))
+
+
+static func _apply_physics_handoff(patch: Dictionary, state: Dictionary,
+		physics: Dictionary) -> void:
+	_apply_physics_snapshot(patch, physics)
+	patch["simulation_epoch"] = int(state.get("simulation_epoch", 0)) + 1
+
+
+static func _apply_physics_snapshot(patch: Dictionary, physics: Dictionary) -> void:
+	patch["pose"] = RigidbodyStateSchema.canonical_pose(physics.pose)
+	patch["linear_velocity"] = RigidbodyStateSchema.canonical_vector(physics.linear_velocity)
+	patch["angular_velocity"] = RigidbodyStateSchema.canonical_vector(physics.angular_velocity)
+	patch["sleeping"] = bool(physics.get("sleeping", false))
+	patch["tick"] = int(physics.tick)
+
+
+static func _physics_array_spec(items: int, default_value: Array) -> Dictionary:
+	return {"type": "array", "default": default_value.duplicate(), "max_items": items,
+		"items": {"type": "float", "default": 0.0}}

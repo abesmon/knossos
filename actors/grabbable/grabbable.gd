@@ -3,9 +3,9 @@ extends StaticBody3D
 
 ## Обёртка <VRWebGrabbable>: делает произвольное VRWML-содержимое предметом, который можно
 ## взять в руку (см. docs/space/grabbable.md — норматив; docs/client/grabbable.md — клиент).
-## Сама ничего не знает про сеть и физику содержимого: hold-состояние ведёт GrabManager через
-## Replicated State, а физику содержимого обёртка лишь приостанавливает на время удержания
-## (freeze RigidBody3D) и возвращает как было.
+## Hold-состояние ведёт GrabManager через Replicated State. Если ровно один прямой ребёнок —
+## RigidBody3D, он становится физическим корнем того же subject: в свободном режиме обёртка
+## следует за ним, а во время удержания сетевой adapter приостанавливается и позу выводит рука.
 ##
 ## Тело — StaticBody3D на слое 2 (как пузырь/панели): его ловит только клик-луч игрока,
 ## тело игрока проходит сквозь. Без явного CollisionShape3D-ребёнка коллайдер строится
@@ -41,6 +41,9 @@ var _auto_shape: CollisionShape3D = null
 var _shape_dirty := false
 var _frozen_bodies: Dictionary = {}   # RigidBody3D -> прежний freeze
 var _initial_child_poses: Dictionary = {}  # Node3D (прямой ребёнок) -> Transform3D
+var _network_body: RigidBody3D = null
+var _network_body_top_level := false
+var _held_presentation := false
 
 
 func _init() -> void:
@@ -51,6 +54,7 @@ func _init() -> void:
 func _ready() -> void:
 	add_to_group(GROUP)
 	_capture_child_poses()
+	_configure_network_body()
 	_request_shape_rebuild()
 	# Дети эфемерных grabbable монтируются позже отдельными объектами (build_element детей
 	# не строит) — коллайдер и исходные позы догоняют их появление.
@@ -129,6 +133,12 @@ func held_hand() -> String:
 	return _manager.held_hand_of(self)
 
 
+func simulator() -> String:
+	if _manager == null or not _manager.has_method("simulator_of"):
+		return ""
+	return _manager.simulator_of(self)
+
+
 func set_enabled(on: bool) -> bool:
 	enabled = on
 	return true
@@ -145,13 +155,21 @@ func is_enabled() -> bool:
 ## возвращаются в авторскую позу — чтобы предмет лежал в руке одинаково у всех клиентов,
 ## сколько бы его содержимое ни укатилось до захвата.
 func set_held(held: bool) -> void:
+	_held_presentation = held
 	if held:
+		_follow_network_body()
 		_frozen_bodies.clear()
 		for body in find_children("*", "RigidBody3D", true, false):
 			_frozen_bodies[body] = (body as RigidBody3D).freeze
+			if body == _network_body:
+				(body as RigidBody3D).top_level = false
 			(body as RigidBody3D).freeze = true
 		_restore_child_poses()
 	else:
+		if _network_body != null and is_instance_valid(_network_body):
+			var local_pose: Transform3D = _initial_child_poses.get(_network_body, Transform3D.IDENTITY)
+			_network_body.global_transform = global_transform * local_pose
+			_network_body.top_level = _network_body_top_level
 		for body in _frozen_bodies:
 			if is_instance_valid(body):
 				(body as RigidBody3D).freeze = bool(_frozen_bodies[body])
@@ -178,6 +196,7 @@ func rest_pose_from_world(world_target: Transform3D) -> Array:
 
 func _on_child_changed(_node: Node) -> void:
 	_capture_child_poses()
+	_configure_network_body.call_deferred()
 	_request_shape_rebuild()
 
 
@@ -190,7 +209,56 @@ func _capture_child_poses() -> void:
 func _restore_child_poses() -> void:
 	for child in _initial_child_poses:
 		if is_instance_valid(child):
-			(child as Node3D).transform = _initial_child_poses[child]
+			if child == _network_body and (_network_body as RigidBody3D).top_level:
+				(_network_body as RigidBody3D).global_transform = global_transform \
+						* (_initial_child_poses[child] as Transform3D)
+			else:
+				(child as Node3D).transform = _initial_child_poses[child]
+
+
+## Единственный direct RigidBody3D может быть физическим корнем grabbable. В свободном режиме
+## он top-level, а обёртка следует за ним: aim collider остаётся на реально летящем предмете.
+func _configure_network_body() -> void:
+	if _network_body != null and is_instance_valid(_network_body):
+		return
+	var candidates := []
+	for child in get_children():
+		if child is RigidBody3D:
+			candidates.append(child)
+	if candidates.size() != 1:
+		return
+	_network_body = candidates[0]
+	_network_body_top_level = true
+	if not _held_presentation:
+		var world := _network_body.global_transform
+		_network_body.top_level = true
+		_network_body.global_transform = world
+
+
+func _physics_process(_delta: float) -> void:
+	if not _held_presentation:
+		_follow_network_body()
+
+
+func _follow_network_body() -> void:
+	if _network_body == null or not is_instance_valid(_network_body) or not _network_body.top_level:
+		return
+	var local_pose: Transform3D = _initial_child_poses.get(_network_body, Transform3D.IDENTITY)
+	global_transform = _network_body.global_transform * local_pose.affine_inverse()
+
+
+func network_body() -> RigidBody3D:
+	return _network_body if _network_body != null and is_instance_valid(_network_body) else null
+
+
+func network_snapshot(epoch: int, tick: int, velocity_override = null) -> Dictionary:
+	var body := network_body()
+	if body == null:
+		return {}
+	var result := RigidbodyStateSchema.snapshot(body, epoch, tick)
+	if typeof(velocity_override) == TYPE_VECTOR3:
+		result["linear_velocity"] = RigidbodyStateSchema.pack_vector(velocity_override)
+	return result
 
 
 func _request_shape_rebuild() -> void:

@@ -10,6 +10,7 @@ var _failed := false
 
 func _initialize() -> void:
 	_test_access_rules()
+	_test_sample_binding_rule()
 	_test_command_delta_and_snapshot()
 	_test_atomic_binding_transaction()
 	_test_snapshot_before_schema()
@@ -129,6 +130,43 @@ func _test_access_rules() -> void:
 			"unknown predicate remains deny under not")
 	_eq(PolicyEvaluatorImpl.evaluate({"rank": {"op": "lte", "value": "10"}}, base), false,
 			"malformed rank fails closed")
+
+
+func _test_sample_binding_rule() -> void:
+	var store := ReplicatedStateStore.new()
+	var schema := {
+		"version": 1,
+		"fields": {"epoch": {"type": "int", "default": 1}},
+		"sample_fields": {"tick": {"type": "int", "default": 0}},
+		"sample_write_rule": {"assigned": "simulator"},
+		"commands": {},
+	}
+	_eq(store.register_schema("physics", schema), true, "sample schema registered")
+	_eq(store.ensure_object("ball", "physics", {}, {"simulator": "alice"}), true,
+			"sample object registered")
+	_eq(store.validate_sample("ball", "physics", 1, {"tick": 7}), true,
+			"sample shape accepted")
+	_eq(store.authorize_sample("ball", "physics", 1,
+			{"actor_user_id": "alice", "is_authority": false}), true,
+			"assigned simulator may publish sample")
+	_eq(store.authorize_sample("ball", "physics", 1,
+			{"actor_user_id": "bob", "is_authority": true}), false,
+			"authority does not bypass assigned sample rule")
+	_eq(store.authorize_sample("ball", "physics", 1,
+			{"actor_user_id": "", "is_authority": false}), false,
+			"anonymous sample denied")
+
+	var legacy := ReplicatedStateStore.new()
+	var legacy_schema := schema.duplicate(true)
+	legacy_schema.erase("sample_write_rule")
+	legacy.register_schema("legacy", legacy_schema)
+	legacy.ensure_object("video", "legacy")
+	_eq(legacy.authorize_sample("video", "legacy", 1,
+			{"actor_user_id": "alice", "is_authority": false}), false,
+			"legacy sample remains authority-only")
+	_eq(legacy.authorize_sample("video", "legacy", 1,
+			{"actor_user_id": "host", "is_authority": true}), true,
+			"legacy authority sample accepted")
 
 
 func _test_command_delta_and_snapshot() -> void:

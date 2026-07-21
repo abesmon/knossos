@@ -179,6 +179,24 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Построить локальный inventory поверх неизменяемого slot `player` и сериализуемого item
   descriptor; home server оставить опциональной синхронизацией между клиентами.
 
+### P2 — Сетевые Rigidbody-объекты
+
+Базовый профиль реализован поверх Subject Bindings и общего `SAMPLE`. Текущий контракт и
+оставшаяся interoperability-матрица — [network/rigidbody-networking.md](network/rigidbody-networking.md).
+
+- [x] Добавить binding-aware `SAMPLE` от назначенного simulator; частота принадлежит автору,
+  локальная фильтрация и diagnostics — policy клиента, не ограничение стандарта.
+- [x] Реализовать общий interpolation/extrapolation proxy для не-simulator клиентов.
+- [x] Определить reliable keyframe: pose, linear/angular velocity, sleep, epoch и tick.
+- [x] Сделать атомарный simulator handoff и recovery после disconnect grace.
+- [x] Связать обычный VRWML `<RigidBody3D>` с сетевым subject через `document.physics` для
+  bind/claim/handoff/local impulse, не вводя заменяющий физический тег.
+- [x] Интегрировать единственный прямой физический корень `VRWebGrabbable`: grab передаёт
+  simulator, release оставляет его бросившему.
+- [x] Добавить публичную внешнюю демку и двухклиентский WebRTC E2E передачи simulator.
+- [ ] Покрыть loss/latency, late join, handoff, authority change, sleep/wake и несколько тел E2E.
+- [ ] Добавить capability negotiation physics-профиля между разными реализациями клиента.
+
 ### P1 — Federation и instance contract
 
 - [ ] Реализовать server-to-server federation signaling, чтобы пользователи разных signaling

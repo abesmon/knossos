@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — networked RigidBody3D</title>
+  <script type="application/vrweb+luau" id="demo.networked-rigidbody">
+local default_ball = document.query("#default-ball")
+local custom_ball = document.query("#custom-ball")
+local default_status = document.query("#default-status")
+local custom_status = document.query("#custom-status")
+local throw_ball = document.query("#throw-ball")
+local throw_status = document.query("#throw-status")
+
+if not default_ball or not custom_ball or not default_status or not custom_status
+    or not throw_ball or not throw_status then
+  error("networked rigidbody demo ids are missing")
+end
+
+assert(document.features.require("vrweb/physics/1"))
+
+-- Обычный RigidBody3D получает стандартное поведение: первый authority становится simulator,
+-- activate локально-оптимистично передаёт simulator на нажавшего пользователя.
+assert(document.physics.bind(default_ball, "default_ball", {
+  sample_hz = 20,
+  keyframe_interval = 1.0,
+  interpolation_delay = 0.10,
+  auto_claim = true,
+}))
+
+-- Второй RigidBody3D показывает, что решение о handoff остаётся в обычном reducer мира.
+-- Здесь захват запрещён, пока предыдущая передача моложе двух authority-секунд.
+assert(document.physics.bind(custom_ball, "custom_ball", {
+  sample_hz = 12,
+  auto_claim = false,
+  commands = {
+    take_control = {
+      write_rule = "anyone",
+      reducer = function(event)
+        local now = event.context.authority_msec or 0
+        local available = event.state.claim_after_msec or 0
+        if now < available then return {} end
+        return {
+          bindings = { simulator = event.context.actor_user_id },
+          state = {
+            pose = event.args.pose,
+            linear_velocity = event.args.linear_velocity,
+            angular_velocity = event.args.angular_velocity,
+            sleeping = event.args.sleeping,
+            simulation_epoch = event.state.simulation_epoch + 1,
+            tick = event.args.tick,
+            claim_after_msec = now + 2000,
+          },
+        }
+      end,
+    },
+  },
+  fields = {
+    claim_after_msec = { type = "int", default = 0 },
+  },
+}))
+
+local impulse = document.values.vector3(0, 4.5, -7.5)
+
+default_ball.on("activate", function(_event)
+  if not document.physics.is_local_simulator("default_ball") then
+    document.physics.claim("default_ball")
+  end
+  document.physics.apply_impulse("default_ball", impulse)
+end, "Взять симуляцию и бросить")
+
+custom_ball.on("activate", function(_event)
+  if not document.physics.is_local_simulator("custom_ball") then
+    document.physics.handoff("custom_ball", "take_control")
+  end
+  document.physics.apply_impulse("custom_ball", impulse)
+end, "Запросить симуляцию по reducer и бросить")
+
+local function render()
+  local a = document.physics.simulator("default_ball")
+  local b = document.physics.simulator("custom_ball")
+  local a_state = document.state.read("default_ball", "physics_default_ball")
+  local b_state = document.state.read("custom_ball", "physics_custom_ball")
+  default_status.set("text", "STANDARD · 20 samples/s\nsimulator: " ..
+    (a ~= "" and a or "vacant") .. "\nepoch: " .. tostring(a_state.simulation_epoch or 0) ..
+    " · sleeping: " .. ((a_state.sleeping and "yes") or "no"))
+  custom_status.set("text", "CUSTOM REDUCER + 2s COOLDOWN\nsimulator: " ..
+    (b ~= "" and b or "vacant") .. "\nepoch: " .. tostring(b_state.simulation_epoch or 0) ..
+    " · 12 samples/s")
+  local holder = throw_ball.call("holder", {}) or ""
+  local simulator = throw_ball.call("simulator", {}) or ""
+  throw_status.set("text", "GRAB → THROW → HANDOFF\nholder: " ..
+    (holder ~= "" and holder or "free") .. "\nsimulator: " ..
+    (simulator ~= "" and simulator or "vacant"))
+end
+
+document.physics.on_simulator("default_ball", render)
+document.physics.on_simulator("custom_ball", render)
+throw_ball.on("grab", render)
+throw_ball.on("drop", render)
+render()
+
+local status_accum = 0
+document.on_update(function(frame)
+  status_accum = status_accum + frame.delta
+  if status_accum >= 0.25 then
+    status_accum = 0
+    render()
+  end
+end)
+  </script>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <WorldEnvironment environment="SubResource:::Environment"/>
+    <DirectionalLight3D rotation_degrees="Vector3(-55,-30,0)" light_energy="1.1"
+                        shadow_enabled="true"/>
+
+    <StaticBody3D id="floor" position="Vector3(0,-0.25,-6)">
+      <MeshInstance3D mesh="SubResource:::FloorMesh"
+                      material_override="SubResource:::FloorMaterial"/>
+      <CollisionShape3D shape="SubResource:::FloorShape"/>
+    </StaticBody3D>
+
+    <!-- Обычные Godot-теги: сетевое поведение подключает document.physics.bind. -->
+    <RigidBody3D id="default-ball" position="Vector3(-2.2,2.2,-6)"
+                 mass="1" continuous_cd="true">
+      <MeshInstance3D mesh="SubResource:::BallMesh"
+                      material_override="SubResource:::BlueMaterial"/>
+      <CollisionShape3D shape="SubResource:::BallShape"/>
+    </RigidBody3D>
+    <Label3D id="default-status" position="Vector3(-2.2,4.1,-6)"
+             text="STANDARD\nsimulator: starting" font_size="32" outline_size="10"
+             pixel_size="0.005" modulate="Color(0.35,0.7,1,1)"/>
+
+    <RigidBody3D id="custom-ball" position="Vector3(2.2,2.2,-6)"
+                 mass="1" continuous_cd="true">
+      <MeshInstance3D mesh="SubResource:::BallMesh"
+                      material_override="SubResource:::OrangeMaterial"/>
+      <CollisionShape3D shape="SubResource:::BallShape"/>
+    </RigidBody3D>
+    <Label3D id="custom-status" position="Vector3(2.2,4.1,-6)"
+             text="CUSTOM REDUCER\nsimulator: vacant" font_size="32" outline_size="10"
+             pixel_size="0.005" modulate="Color(1,0.65,0.25,1)"/>
+
+    <!-- Существующий VRWebGrabbable композируется с обычным RigidBody3D. Grab и simulator
+         меняются атомарно в одном built-in subject; после release simulator остаётся бросившему. -->
+    <VRWebGrabbable id="throw-ball" position="Vector3(0,2.2,-8.4)" theft="allow">
+      <RigidBody3D id="throw-ball-body" mass="1" continuous_cd="true">
+        <MeshInstance3D mesh="SubResource:::BallMesh"
+                        material_override="SubResource:::GreenMaterial"/>
+        <CollisionShape3D shape="SubResource:::BallShape"/>
+      </RigidBody3D>
+    </VRWebGrabbable>
+    <Label3D id="throw-status" position="Vector3(0,4.1,-8.4)"
+             text="GRAB → THROW → HANDOFF\nstarting" font_size="30" outline_size="10"
+             pixel_size="0.0045" modulate="Color(0.3,1,0.55,1)"/>
+
+    <Label3D position="Vector3(0,5.2,-6)" text="NETWORKED RigidBody3D"
+             font_size="52" outline_size="12" pixel_size="0.006"/>
+    <Label3D position="Vector3(0,4.65,-6)"
+             text="Activate a ball: simulator moves to your client, then local impulse is applied"
+             font_size="25" outline_size="8" pixel_size="0.004"/>
+
+    <VRWebSpawner mode="first">
+      <SpawnerPoint transform="Transform3D(1,0,0,0,1,0,0,0,1,0,0,0)"/>
+    </VRWebSpawner>
+
+    <Resource id="BallMesh" type="SphereMesh" radius="0.55" height="1.1"/>
+    <Resource id="BallShape" type="SphereShape3D" radius="0.55"/>
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(14,0.5,14)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(14,0.5,14)"/>
+    <Resource id="BlueMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.08,0.32,0.95,1)" metallic="0.2" roughness="0.28"/>
+    <Resource id="OrangeMaterial" type="StandardMaterial3D"
+              albedo_color="Color(1,0.32,0.06,1)" metallic="0.15" roughness="0.3"/>
+    <Resource id="GreenMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.08,0.9,0.36,1)" metallic="0.12" roughness="0.3"/>
+    <Resource id="FloorMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.08,0.1,0.15,1)" roughness="0.8"/>
+    <Resource id="Environment" type="Environment" background_mode="2"
+              background_color="Color(0.018,0.025,0.05,1)" ambient_light_source="3"
+              ambient_light_color="Color(0.22,0.27,0.4,1)" ambient_light_energy="0.65"/>
+  </vrwml>
+</body>
+</html>

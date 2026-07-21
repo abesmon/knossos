@@ -4,9 +4,10 @@ extends Node
 ## Клиентская половина grabbable-системы (docs/client/grabbable.md). Держит реестр
 ## Grabbable-узлов мира, ведёт их hold-состояние через общий Replicated State
 ## (schema GrabStateSchema — норматив в docs/space/grabbable.md) и реализует
-## attachment-модель: по сети идёт только (holder, hand, grip, rest), а мировую позу
-## держимого предмета каждый клиент выводит сам из якоря руки локально
-## интерполированного аватара — ноль трафика во время удержания.
+## attachment-модель: мировую позу держимого предмета каждый клиент выводит сам из якоря
+## руки локально интерполированного аватара — ноль трафика движения во время удержания.
+## Для одного прямого RigidBody3D тот же record также содержит physics keyframe и simulator;
+## в свободном режиме RigidbodySync ведёт SAMPLE-поток, не создавая отдельной ownership-модели.
 ##
 ## Живёт в мире (сносится при навигации). Grabbable-узлы регистрируются сами через
 ## группу "grab_manager" — сканов/ресканов при стриминге страницы не нужно.
@@ -38,6 +39,7 @@ const ADJUST_COMMIT_INTERVAL := 0.12
 var _player: Node3D = null
 var _remote_view: Node = null
 var _grabbables: Dictionary = {}   # object_id -> Grabbable
+var _physics_adapters: Dictionary = {} # object_id -> RigidbodySync
 var _held: Dictionary = {}         # object_id -> {holder: String, hand: String, grip: Transform3D}
 var _local_held: Dictionary = {}   # hand -> object_id
 var _sweep_accum := 0.0
@@ -101,6 +103,7 @@ func register_grabbable(g: Grabbable) -> void:
 			_set_player_aim_exception(previous as Grabbable, false)
 	_grabbables[oid] = g
 	_register_state_object(oid, g)
+	_register_physics_adapter(oid, g)
 	# Snapshot комнаты мог прийти раньше материализации узла — догоняем текущее состояние.
 	if NetworkManager.replicated_revision(oid, SCHEMA_ID) > 0:
 		var state := NetworkManager.replicated_state(oid, SCHEMA_ID)
@@ -131,17 +134,38 @@ func unregister_grabbable(g: Grabbable) -> void:
 		return
 	if _held.has(oid):
 		_detach(oid, g)
+	var adapter: Node = _physics_adapters.get(oid)
+	if adapter != null and is_instance_valid(adapter):
+		if adapter.has_method("shutdown"):
+			adapter.shutdown()
+		adapter.queue_free()
+	_physics_adapters.erase(oid)
 	_grabbables.erase(oid)
 
 
 func _register_state_object(oid: String, g: Grabbable) -> void:
 	# Начальный rest — декларированная поза узла (детерминирована страницей, одинакова у всех
 	# клиентов). Канон начинает действовать с первого snapshot/delta авторитета.
-	NetworkManager.register_replicated_object(oid, SCHEMA_ID, {
+	var initial := {
 		"rest": GrabStateSchema.pack_transform(g.transform),
 		"takeover_allowed": g.theft_allowed,
 		"adjustable": g.adjustable,
-	})
+	}
+	var body := g.network_body()
+	if body != null:
+		initial.merge(RigidbodyStateSchema.initial_state(body), true)
+	NetworkManager.register_replicated_object(oid, SCHEMA_ID, initial)
+
+
+func _register_physics_adapter(oid: String, g: Grabbable) -> void:
+	var body := g.network_body()
+	if body == null or _physics_adapters.has(oid):
+		return
+	var adapter := RigidbodySync.new()
+	adapter.name = "VRWebGrabbableRigidbodySync"
+	adapter.setup(body, oid, SCHEMA_ID, {"auto_claim": true})
+	g.add_child(adapter)
+	_physics_adapters[oid] = adapter
 
 
 func _on_authority_changed(_authority: int, _is_me: bool) -> void:
@@ -172,9 +196,11 @@ func _apply_state(object_id: String, state: Dictionary, changed: Dictionary) -> 
 		var was_held := not prev.is_empty()
 		if was_held:
 			_detach(object_id, g)
+		_set_physics_suspended(object_id, false)
 		if was_held or changed.has("rest"):
 			g.apply_rest(state.get("rest"))
 		return
+	_set_physics_suspended(object_id, true)
 	if not prev.is_empty() and str(prev["holder"]) == holder and str(prev["hand"]) == hand:
 		_held[object_id]["grip"] = GrabStateSchema.unpack_transform(state.get("grip"))
 		# Тот же канон мог применяться уже к ПРЕДЫДУЩЕМУ экземпляру узла. После scene_reset
@@ -197,6 +223,12 @@ func _apply_state(object_id: String, state: Dictionary, changed: Dictionary) -> 
 		_set_player_aim_exception(g, true)
 		_set_player_holding(hand, true)
 	g.grab.emit(holder, hand)
+
+
+func _set_physics_suspended(object_id: String, suspended: bool) -> void:
+	var adapter = _physics_adapters.get(object_id)
+	if adapter is RigidbodySync and is_instance_valid(adapter):
+		(adapter as RigidbodySync).set_suspended(suspended)
 
 
 func _detach(object_id: String, g: Grabbable) -> void:
@@ -253,8 +285,14 @@ func request_grab(g: Grabbable) -> void:
 			# Хват берётся КАК ЕСТЬ, без клампа: предмет не должен дёрнуться в момент захвата.
 			# Дальность и так ограничена лучом взаимодействия, а подстройка клампится отдельно.
 			grip = (anchor as Transform3D).affine_inverse() * g.global_transform
-	NetworkManager.request_replicated_command(OBJECT_PREFIX + g.grab_id, SCHEMA_ID, SCHEMA_VERSION,
-			"grab", {"hand": HAND_RIGHT, "grip": GrabStateSchema.pack_transform(grip)})
+	var oid := OBJECT_PREFIX + g.grab_id
+	var args := {"hand": HAND_RIGHT, "grip": GrabStateSchema.pack_transform(grip)}
+	var physics := NetworkManager.replicated_state(oid, SCHEMA_ID)
+	var snapshot := g.network_snapshot(int(physics.get("simulation_epoch", 0)),
+			int(physics.get("tick", 0)))
+	if not snapshot.is_empty():
+		args["physics"] = snapshot
+	NetworkManager.request_replicated_command(oid, SCHEMA_ID, SCHEMA_VERSION, "grab", args)
 
 
 func local_held() -> Grabbable:
@@ -299,6 +337,11 @@ func held_hand_of(g: Grabbable) -> String:
 	return str((_held.get(OBJECT_PREFIX + g.grab_id, {}) as Dictionary).get("hand", ""))
 
 
+func simulator_of(g: Grabbable) -> String:
+	return str(NetworkManager.replicated_bindings(OBJECT_PREFIX + g.grab_id,
+			SCHEMA_ID).get("simulator", ""))
+
+
 ## Положить держимый предмет РОВНО ТАМ, где он сейчас в руке: канон — его текущая мировая
 ## поза. Никакого переноса в точку прицела: предмет не должен «телепортироваться» из руки
 ## (так же ведёт себя drop в VRChat — дальше содержимое живёт своей физикой).
@@ -307,8 +350,17 @@ func release_held() -> void:
 	if g == null:
 		return
 	_commit_adjust(true)
-	NetworkManager.request_replicated_command(OBJECT_PREFIX + g.grab_id, SCHEMA_ID, SCHEMA_VERSION,
-			"release", {"rest": g.rest_pose_from_world(g.global_transform)})
+	var oid := OBJECT_PREFIX + g.grab_id
+	var args := {"rest": g.rest_pose_from_world(g.global_transform)}
+	var state := NetworkManager.replicated_state(oid, SCHEMA_ID)
+	var throw_velocity := Vector3.ZERO
+	if _player is CharacterBody3D:
+		throw_velocity = (_player as CharacterBody3D).velocity
+	var snapshot := g.network_snapshot(int(state.get("simulation_epoch", 0)),
+			int(state.get("tick", 0)), throw_velocity)
+	if not snapshot.is_empty():
+		args["physics"] = snapshot
+	NetworkManager.request_replicated_command(oid, SCHEMA_ID, SCHEMA_VERSION, "release", args)
 
 
 # --- Подстройка хвата держателем (только adjustable) ---

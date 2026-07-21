@@ -64,13 +64,14 @@ const CAPABILITIES := {
 	"vrweb/aim/1": true,
 	"vrweb/files/1": true,
 	"vrweb/grabbable/1": true,
+	"vrweb/physics/1": true,
 }
 
 ## Методы grabbable-предмета (capability vrweb/grabbable/1) на handle <VRWebGrabbable>:
 ## имя -> ожидаемые типы аргументов. «drop» схемы называется release — имя `drop` занято
 ## одноимённым сигналом узла.
 const GRABBABLE_METHODS := {
-	"release": [], "holder": [], "held_hand": [],
+	"release": [], "holder": [], "held_hand": [], "simulator": [],
 	"set_enabled": [TYPE_BOOL], "is_enabled": [],
 }
 
@@ -111,6 +112,7 @@ var _timers: Dictionary = {}
 var _updates: Array[Callable] = []
 var _next_timer := 1
 var _state := VrwebScriptState.new()
+var _physics := VrwebScriptPhysics.new()
 var _remote := VrwebScriptRemote.new()
 var _players := VrwebScriptPlayers.new()
 var _scene := VrwebScriptScene.new()
@@ -142,6 +144,7 @@ func setup(id: String, content_hash: String, page_root: Node, targets: Dictionar
 	_policy = policy
 	_clock_snapshot = clock_snapshot
 	_state.setup(script_id, _invoke)
+	_physics.setup(script_id, _state, _page_root, _invoke)
 	_remote.setup(script_id, _invoke)
 	_players.setup(_invoke)
 	_scene.setup(script_id, _invoke)
@@ -150,6 +153,8 @@ func setup(id: String, content_hash: String, page_root: Node, targets: Dictionar
 
 
 func api() -> Dictionary:
+	var physics_api := _physics.api()
+	physics_api["bind"] = physics_bind
 	return {
 		"query": query,
 		"query_all": query_all,
@@ -158,6 +163,7 @@ func api() -> Dictionary:
 		"session_set": func(key: String, value): return _session_set(key, value),
 		"session": session,
 		"state": _state.api(),
+		"physics": physics_api,
 		"remote": _remote.api(),
 		"players": _players.api(),
 		"scene": _scene.api(),
@@ -181,6 +187,8 @@ func commit() -> bool:
 	if not _valid or not is_instance_valid(_page_root):
 		return false
 	if not _state.commit():
+		return false
+	if not _physics.commit():
 		return false
 	if not _remote.commit() or not _players.commit() or not _assets.commit():
 		return false
@@ -234,6 +242,7 @@ func close(preserve_replicated_state := false) -> void:
 	_handles.clear()
 	_reverse_handles.clear()
 	_on_bindings.clear()
+	_physics.close()
 	_state.close(not preserve_replicated_state)
 	_remote.close()
 	_players.close()
@@ -260,6 +269,7 @@ func snapshot_replicated_state() -> void:
 func retire_for_replacement(replacement: VrwebDocumentHost) -> void:
 	if _valid and replacement != null:
 		_state.retire_except(replacement._state.registrations())
+		_physics.close(replacement._physics)
 	close(true)
 
 
@@ -273,6 +283,21 @@ func query(selector: String):
 func query_all(selector: String) -> Array:
 	var one = query(selector)
 	return [] if one == null else [one]
+
+
+func physics_bind(target, object_id: String, options = {}) -> bool:
+	if not _allow_call() or typeof(target) != TYPE_DICTIONARY:
+		return false
+	var handle: Dictionary = target
+	var object := _object(int(handle.get("id", 0)))
+	if not (object is RigidBody3D):
+		return false
+	var option_dict := {}
+	if options is Dictionary:
+		option_dict = (options as Dictionary).duplicate(true)
+	elif not (options is Array and (options as Array).is_empty()):
+		return false
+	return _physics.bind(object as RigidBody3D, object_id, option_dict)
 
 
 func create(type_name: String, properties: Dictionary = {}):

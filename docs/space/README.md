@@ -48,6 +48,8 @@ Public page scripting API и capability contract — в [scripting-api.md](scrip
 
 - [grabbable.md](grabbable.md) — нормативный контракт предметов, которые участник берёт в
   руку: тег, hold-состояние, точки крепления, события.
+- [networked-rigidbody.md](networked-rigidbody.md) — руководство автора по сетевому
+  `<RigidBody3D>`, передаче `bindings.simulator` и custom reducers.
 - [portable-tools.md](portable-tools.md) — архитектура переносимых инструментов: почему
   инструмент это предмет со скриптом, что уже есть и куда расти.
 - [tool-authoring.md](tool-authoring.md) — руководство автора: как собрать свой

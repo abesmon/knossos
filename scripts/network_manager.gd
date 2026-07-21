@@ -559,6 +559,19 @@ func reset_replicated_metrics() -> void:
 	_replicated_metrics_started_ms = Time.get_ticks_msec()
 
 
+## Единый trusted context для COMMAND и SAMPLE. Actor/rank/verified никогда не берутся из
+## payload: только из локальной transport-карточки соответствующего peer.
+func _replicated_context_for_peer(peer_id: int) -> Dictionary:
+	return {
+		"peer_id": peer_id,
+		"actor_user_id": Settings.user_id if peer_id == _my_id else str(_user_ids.get(peer_id, "")),
+		"rank": my_rank() if peer_id == _my_id else rank_of_peer(peer_id),
+		"verified": HomeServer.is_logged_in() if peer_id == _my_id else _verified.has(peer_id),
+		"is_authority": peer_id == authority_id(),
+		"authority_msec": Time.get_ticks_msec(),
+	}
+
+
 func request_replicated_command(object_id: String, schema_id: String, version: int,
 		command: String, args: Dictionary) -> int:
 	_replicated_request_seq += 1
@@ -587,8 +600,10 @@ func request_replicated_command(object_id: String, schema_id: String, version: i
 
 func send_replicated_sample(object_id: String, schema_id: String, version: int, sample: Dictionary) -> void:
 	var bytes := var_to_bytes(sample).size()
-	if not has_authority() or bytes > MAX_REPLICATED_SAMPLE_BYTES \
-			or not _replicated.validate_sample(object_id, schema_id, version, sample):
+	if bytes > MAX_REPLICATED_SAMPLE_BYTES \
+			or not _replicated.validate_sample(object_id, schema_id, version, sample) \
+			or not _replicated.authorize_sample(object_id, schema_id, version,
+					_replicated_context_for_peer(_my_id)):
 		_metric("sample_rejected_count")
 		return
 	_metric("sample_sent_count")
@@ -613,14 +628,10 @@ func _commit_replicated_command(request_id: int, object_id: String, schema_id: S
 	if not _allow_replicated_command(sender):
 		_finish_replicated_command(sender, seen_key, request_id, false, "rate_limited", -1)
 		return
-	var context := {
-		"peer_id": sender,
-		"actor_user_id": Settings.user_id if sender == _my_id else str(_user_ids.get(sender, "")),
-		"rank": 0 if standalone else (my_rank() if sender == _my_id else rank_of_peer(sender)),
-		"verified": HomeServer.is_logged_in() if sender == _my_id else _verified.has(sender),
-		"is_authority": standalone or sender == authority_id(),
-		"authority_msec": Time.get_ticks_msec(),
-	}
+	var context := _replicated_context_for_peer(sender)
+	if standalone:
+		context["rank"] = 0
+		context["is_authority"] = true
 	var result := _replicated.commit_command(object_id, schema_id, version, command, args, context)
 	if not bool(result.get("ok", false)):
 		_finish_replicated_command(sender, seen_key, request_id, false,
@@ -1964,14 +1975,17 @@ func _replicated_sha256(bytes: PackedByteArray) -> PackedByteArray:
 @rpc("any_peer", "unreliable_ordered", "call_remote")
 func _recv_replicated_sample(object_id: String, schema_id: String, version: int, sample: Dictionary) -> void:
 	var bytes := var_to_bytes(sample).size()
-	if not sender_is_authority() or bytes > MAX_REPLICATED_SAMPLE_BYTES \
-			or not _replicated.validate_sample(object_id, schema_id, version, sample):
+	var sender := multiplayer.get_remote_sender_id()
+	if bytes > MAX_REPLICATED_SAMPLE_BYTES \
+			or not _replicated.validate_sample(object_id, schema_id, version, sample) \
+			or not _replicated.authorize_sample(object_id, schema_id, version,
+					_replicated_context_for_peer(sender)):
 		_metric("sample_rejected_count")
 		return
 	_metric("sample_received_count")
 	_metric("sample_received_bytes", bytes)
 	_metric_max("sample_max_bytes", bytes)
-	replicated_sample_received.emit(multiplayer.get_remote_sender_id(), object_id, schema_id, sample)
+	replicated_sample_received.emit(sender, object_id, schema_id, sample)
 
 
 ## Голосовой кадр от пира. Канал 1 — отдельный от состояния/чата (см. send_voice).
