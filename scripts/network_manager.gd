@@ -42,6 +42,8 @@ signal identity_verified(id: int, address: String)
 ## <VRWebVideoPlayer>, action — "play"/"pause"/"seek"/"sync", position — позиция в секундах.
 ## Транспорт и heartbeat-таймкод идут одним сигналом; различаются по action.
 signal replicated_state_received(object_id: String, schema_id: String, state: Dictionary, changed: Dictionary, revision: int)
+signal replicated_bindings_received(object_id: String, schema_id: String, bindings: Dictionary,
+		changed: Dictionary, revision: int)
 signal replicated_sample_received(sender_id: int, object_id: String, schema_id: String, sample: Dictionary)
 ## Итог команды для инициатора. ACK не несёт состояние: canonical результат приходит DELTA.
 signal replicated_command_result(request_id: int, accepted: bool, code: String, revision: int)
@@ -72,7 +74,7 @@ signal script_remote_call_received(sender_id: int, script_id: String, endpoint: 
 		version: int, args: Array)
 ## Эфемерные изменения сцены (action/event-протокол, см. docs/ephemeral-changes.md). Авторитет —
 ## единственная точка коммита: валидирует действия и рассылает события. Сигналы несут плоский
-## объект состояния { id, kind, parent, author, ts, ttl, props } — консьюмер (EphemeralView)
+## объект состояния { id, kind, parent, bindings, ts, ttl, props } — консьюмер (EphemeralView)
 ## материализует его по kind, не зная транспорта.
 signal scene_object_added(id: String, object: Dictionary)
 signal scene_object_updated(id: String, object: Dictionary)
@@ -259,6 +261,8 @@ func _ready() -> void:
 	HomeServer.certificate_changed.connect(broadcast_certificate)
 	_replicated.state_changed.connect(func(object_id, schema_id, state, changed, revision):
 		replicated_state_received.emit(object_id, schema_id, state, changed, revision))
+	_replicated.bindings_changed.connect(func(object_id, schema_id, bindings, changed, revision):
+		replicated_bindings_received.emit(object_id, schema_id, bindings, changed, revision))
 
 
 func is_online() -> bool:
@@ -423,7 +427,8 @@ func send_state(position: Vector3, look_yaw: float, params: Dictionary) -> void:
 ## Разослать свою карточку (user_id + ник + лицо + аватар) всем — например, после смены в настройках.
 func broadcast_identity() -> void:
 	if _can_rpc():
-		rpc("_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
+		rpc("_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(),
+				Settings.avatar_uri)
 
 
 ## Разослать наш сертификат идентичности всем в комнате (после логина/обновления).
@@ -442,7 +447,8 @@ func _on_mp_peer_connected(id: int) -> void:
 	_refresh_authority()
 	# Отдаём новому пиру свою карточку: user_id, ник, лицо (PNG-байты) и идентификатор аватара.
 	if _can_rpc():
-		rpc_id(id, "_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(), Settings.avatar_uri)
+		rpc_id(id, "_recv_identity", Settings.user_id, Settings.nick, Settings.face_png(),
+				Settings.avatar_uri)
 		# И сертификат идентичности, если он у нас есть, — пир проверит и пришлёт челлендж.
 		var payload: Array = HomeServer.certificate_payload()
 		if not payload.is_empty():
@@ -510,8 +516,8 @@ func unregister_replicated_schema(schema_id: String) -> void:
 
 
 func register_replicated_object(object_id: String, schema_id: String, initial: Dictionary = {},
-		owner_user_id: String = "") -> bool:
-	var ok := _replicated.ensure_object(object_id, schema_id, initial, owner_user_id)
+		bindings: Dictionary = {}) -> bool:
+	var ok := _replicated.ensure_object(object_id, schema_id, initial, bindings)
 	if ok and not _replicated_resync and not has_authority() and authority_id() != 0 and _can_rpc():
 		_replicated_resync = true
 		_request_replicated_snapshot_from_authority()
@@ -525,6 +531,10 @@ func unregister_replicated_object(object_id: String, schema_id: String) -> void:
 ## Read-only диагностика/адаптеры: локальная каноническая копия и её revision.
 func replicated_state(object_id: String, schema_id: String) -> Dictionary:
 	return _replicated.state_of(object_id, schema_id)
+
+
+func replicated_bindings(object_id: String, schema_id: String) -> Dictionary:
+	return _replicated.bindings_of(object_id, schema_id)
 
 
 func replicated_revision(object_id: String, schema_id: String) -> int:
@@ -605,7 +615,7 @@ func _commit_replicated_command(request_id: int, object_id: String, schema_id: S
 		return
 	var context := {
 		"peer_id": sender,
-		"user_id": Settings.user_id if sender == _my_id else str(_user_ids.get(sender, "")),
+		"actor_user_id": Settings.user_id if sender == _my_id else str(_user_ids.get(sender, "")),
 		"rank": 0 if standalone else (my_rank() if sender == _my_id else rank_of_peer(sender)),
 		"verified": HomeServer.is_logged_in() if sender == _my_id else _verified.has(sender),
 		"is_authority": standalone or sender == authority_id(),
@@ -970,7 +980,7 @@ func set_scene_reserved_ids(ids: Dictionary) -> void:
 
 ## Сгенерировать id для нового объекта (для op=add). Префикс из нашего user_id + счётчик —
 ## адрес, по которому МЫ потом сможем править/удалять свой объект. Уникальность гарантирует
-## префикс (владение проверяется по author, а не по префиксу). Чистый адрес, без доверия.
+## префикс (доступ проверяется по bindings.creator, а не по префиксу). Чистый адрес, без доверия.
 func new_object_id() -> String:
 	_obj_seq += 1
 	var uid := Settings.user_id
@@ -1739,7 +1749,8 @@ static func _proof_payload(prover_id: int, verifier_id: int, nonce: PackedByteAr
 
 
 @rpc("any_peer", "reliable", "call_remote")
-func _recv_identity(user_id: String, nick: String, face_png: PackedByteArray, avatar_uri: String) -> void:
+func _recv_identity(user_id: String, nick: String, face_png: PackedByteArray,
+		avatar_uri: String) -> void:
 	var id := multiplayer.get_remote_sender_id()
 	_nicks[id] = nick if nick != "" else "Guest-%d" % id
 	# Привязка peer_id -> user_id нужна, чтобы по эфемерному id пира найти его ранг в таблице.
@@ -1753,7 +1764,6 @@ func _recv_identity(user_id: String, nick: String, face_png: PackedByteArray, av
 			peer_reclaimed.emit(user_id, id)
 		ranks_changed.emit()  # ранг пира теперь резолвится — слушатели могут перечитать
 	identity_received.emit(id, _nicks[id], _decode_face(face_png), avatar_uri)
-
 
 ## Полная таблица рангов от авторитета. ДОВЕРИЕ: принимаем только если отправитель — авторитет
 ## по нашему собственному расчёту (sender_is_authority). Иначе игнорируем — подсунуть чужую

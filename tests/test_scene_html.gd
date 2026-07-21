@@ -64,11 +64,11 @@ func _test_scene_index_ids() -> void:
 func _test_scene_merge_and_flush() -> void:
 	var index := _page_index()
 	var objects := {
-		"vpatch:box": {"id": "vpatch:box", "kind": "vrweb-patch", "parent": "", "author": "a",
+		"vpatch:box": {"id": "vpatch:box", "kind": "vrweb-patch", "parent": "", "bindings": {"creator": "a"},
 			"ts": 1.0, "ttl": 0.0, "props": {"set": {"visible": "false"}}},
-		"u1.7": {"id": "u1.7", "kind": "bubble", "parent": "", "author": "a", "ts": 2.0,
+		"u1.7": {"id": "u1.7", "kind": "bubble", "parent": "", "bindings": {"creator": "a"}, "ts": 2.0,
 			"ttl": 30.0, "props": {"url": "u"}},
-		"u1.8": {"id": "u1.8", "kind": "vrweb-node", "parent": "", "author": "a", "ts": 3.0,
+		"u1.8": {"id": "u1.8", "kind": "vrweb-node", "parent": "", "bindings": {"creator": "a"}, "ts": 3.0,
 			"ttl": 0.0, "props": {"tag": "VRWebStroke", "attrs": {
 				"points": "[0,0,0,1,0,0]", "width": "0.02"}}},
 	}
@@ -90,9 +90,9 @@ func _test_scene_merge_and_flush() -> void:
 func _test_scene_roundtrip_no_changes() -> void:
 	var index := _page_index()
 	var objects := {
-		"u1.8": {"id": "u1.8", "kind": "vrweb-node", "parent": "page:box", "author": "a",
+		"u1.8": {"id": "u1.8", "kind": "vrweb-node", "parent": "page:box", "bindings": {"creator": "a"},
 			"ts": 1.0, "ttl": 0.0, "props": {"tag": "OmniLight3D", "attrs": {"light_energy": "2.0"}}},
-		"u1.9": {"id": "u1.9", "kind": "bubble", "parent": "", "author": "a", "ts": 2.0,
+		"u1.9": {"id": "u1.9", "kind": "bubble", "parent": "", "bindings": {"creator": "a"}, "ts": 2.0,
 			"ttl": 30.0, "props": {"url": "u", "position": [1.0, 2.0, 3.0]}},
 	}
 	var merged := SceneHtml.serialize_scene(index, objects)
@@ -122,7 +122,7 @@ func _test_scene_patch_page_attr() -> void:
 func _test_scene_patch_back_to_base() -> void:
 	var index := _page_index()
 	var objects := {
-		"vpatch:M1": {"id": "vpatch:M1", "kind": "vrweb-patch", "parent": "", "author": "a",
+		"vpatch:M1": {"id": "vpatch:M1", "kind": "vrweb-patch", "parent": "", "bindings": {"creator": "a"},
 			"ts": 1.0, "ttl": 0.0, "props": {"set": {"size": "Vector3(9,1,3)"}}},
 	}
 	# Правим слитый вид обратно к базовому значению.
@@ -235,9 +235,9 @@ func _test_scene_guards() -> void:
 ## Снимок состояния для большинства тестов: пузырь + VRWebStroke-узел в корне.
 func _objects() -> Dictionary:
 	return {
-		"u1.1": {"id": "u1.1", "kind": "bubble", "parent": "", "author": "alice", "ts": 100.0,
+		"u1.1": {"id": "u1.1", "kind": "bubble", "parent": "", "bindings": {"creator": "alice"}, "ts": 100.0,
 			"ttl": 30.0, "props": {"url": "https://a.example/x", "position": [1.0, 1.6, 5.0], "label": "Вася"}},
-		"u1.2": {"id": "u1.2", "kind": "vrweb-node", "parent": "", "author": "alice", "ts": 101.0,
+		"u1.2": {"id": "u1.2", "kind": "vrweb-node", "parent": "", "bindings": {"creator": "alice"}, "ts": 101.0,
 			"ttl": 0.0, "props": {"tag": "VRWebStroke", "attrs": {
 				"points": "[0, 1, 0, 0.5, 1.2, 0.1]", "color": "Color(1, 0, 0, 1)", "width": "0.02"}}},
 	}
@@ -258,7 +258,7 @@ func _test_roundtrip_no_changes() -> void:
 ## Вложенность элементов = parent-дерево объектов, и обратно.
 func _test_nesting_roundtrip() -> void:
 	var objects := _objects()
-	objects["u1.3"] = {"id": "u1.3", "kind": "bubble", "parent": "u1.1", "author": "alice",
+	objects["u1.3"] = {"id": "u1.3", "kind": "bubble", "parent": "u1.1", "bindings": {"creator": "alice"},
 		"ts": 102.0, "ttl": 20.0, "props": {"url": "u", "label": "child"}}
 	var html := SceneHtml.serialize(objects)
 	_ok(html.find("</bubble>") != -1, "родитель с ребёнком сериализуется парным тегом")
@@ -304,7 +304,7 @@ func _test_update_props_patch() -> void:
 ## Удалённый элемент → remove; потомок удалённого НЕ шлёт свой remove (каскад авторитета).
 func _test_remove_with_cascade() -> void:
 	var objects := _objects()
-	objects["u1.3"] = {"id": "u1.3", "kind": "bubble", "parent": "u1.1", "author": "alice",
+	objects["u1.3"] = {"id": "u1.3", "kind": "bubble", "parent": "u1.1", "bindings": {"creator": "alice"},
 		"ts": 102.0, "ttl": 20.0, "props": {"url": "u"}}
 	# В правке остался только штрих: пузырь u1.1 и его ребёнок u1.3 удалены.
 	var edited := "<ephemeral>%s</ephemeral>" % _element_of(objects, "u1.2")
@@ -343,7 +343,7 @@ func _test_kind_and_ttl_guards() -> void:
 ## Спецсимволы в строковых props переживают round-trip (экранирование атрибутов).
 func _test_escaping_roundtrip() -> void:
 	var objects := {
-		"u1.9": {"id": "u1.9", "kind": "bubble", "parent": "", "author": "a", "ts": 1.0,
+		"u1.9": {"id": "u1.9", "kind": "bubble", "parent": "", "bindings": {"creator": "a"}, "ts": 1.0,
 			"ttl": 10.0, "props": {"url": "https://e.example/?a=1&b=\"q\"", "label": "<ёж> & точка"}},
 	}
 	var parsed := SceneHtml.parse_block(HtmlParser.parse(SceneHtml.serialize(objects)))
@@ -355,7 +355,7 @@ func _test_escaping_roundtrip() -> void:
 ## Якорь parent="page:…" не выражается вложенностью — атрибутом, и переживает round-trip.
 func _test_page_anchor_attr() -> void:
 	var objects := {
-		"u1.5": {"id": "u1.5", "kind": "bubble", "parent": "page:h2-3", "author": "a", "ts": 1.0,
+		"u1.5": {"id": "u1.5", "kind": "bubble", "parent": "page:h2-3", "bindings": {"creator": "a"}, "ts": 1.0,
 			"ttl": 10.0, "props": {"url": "u"}},
 	}
 	var html := SceneHtml.serialize(objects)

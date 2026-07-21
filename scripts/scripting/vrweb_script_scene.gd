@@ -4,7 +4,7 @@ extends RefCounted
 ## Capability vrweb/scene-objects/1: доступ page script к эфемерному слою сцены
 ## (docs/network/ephemeral-changes.md). Скрипт действует ОТ ИМЕНИ локального пользователя:
 ## действия идут обычным путём request_scene_action_tracked, авторитет валидирует их против
-## своих прав (владение по author, ранги) — мост не добавляет собственной модели прав.
+## своих прав (bindings + ranks) — мост не добавляет собственной модели прав.
 ## Kind не ограничивается allowlist'ом: авторитет и content policy — единственные судьи
 ## (модель браузера, docs/space/portable-tools.md).
 

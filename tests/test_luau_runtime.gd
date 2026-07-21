@@ -51,7 +51,7 @@ assert(document.state.define("lamp_state", {
     fields = { enabled = { type = "bool", default = false } },
     commands = {},
 }))
-assert(document.state.ensure("lamp", "lamp_state", { enabled = false }, ""))
+assert(document.state.ensure("lamp", "lamp_state", { enabled = false }, {}))
 -- Regression: handle.on must accept the documented two-argument form; the optional hint
 -- is supplied by the trusted runtime wrapper before crossing the host boundary.
 lamp.on("activate", function(_event)

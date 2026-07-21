@@ -126,7 +126,8 @@ func _run() -> void:
 	manager.request_grab(ball)
 	await get_tree().process_frame
 	var state := NetworkManager.replicated_state(oid, GrabStateSchema.ID)
-	_check(str(state.get("holder_user_id")) == Settings.user_id, "holder = локальный игрок")
+	_check(str(NetworkManager.replicated_bindings(oid, GrabStateSchema.ID).get("holder", "")) \
+			== Settings.user_id, "holder = локальный игрок")
 	_check(str(state.get("hand")) == "right", "hand = right (десктоп)")
 	_check(manager.local_held() == ball, "manager видит предмет в руке")
 	_check(_events.size() == 1 and _events[0][0] == "grab", "событие grab эмитировано")
@@ -147,8 +148,8 @@ func _run() -> void:
 	# Пока правая рука занята — второй предмет не берётся.
 	manager.request_grab(statue)
 	await get_tree().process_frame
-	_check(str(NetworkManager.replicated_state("grab:statue", GrabStateSchema.ID) \
-			.get("holder_user_id")) == "", "второй предмет в занятую руку не берётся")
+	_check(str(NetworkManager.replicated_bindings("grab:statue", GrabStateSchema.ID) \
+			.get("holder", "")) == "", "второй предмет в занятую руку не берётся")
 
 	# --- Use (transient, только у держателя) ---
 	manager.use_held()
@@ -159,7 +160,8 @@ func _run() -> void:
 	manager.release_held()
 	await get_tree().process_frame
 	state = NetworkManager.replicated_state(oid, GrabStateSchema.ID)
-	_check(str(state.get("holder_user_id")) == "", "release: предмет свободен")
+	_check(str(NetworkManager.replicated_bindings(oid, GrabStateSchema.ID).get("holder", "")) \
+			== "", "release: предмет свободен")
 	_check(manager.local_held() == null, "рука пуста")
 	_check(_events.size() == 3 and _events[2][0] == "drop", "событие drop эмитировано")
 	var rest := GrabStateSchema.unpack_transform(state.get("rest"))
@@ -228,7 +230,8 @@ func _test_adjustable(manager: GrabManager, crate: Grabbable, player: Player) ->
 	manager.release_held()
 	await get_tree().process_frame
 	var state := NetworkManager.replicated_state(oid, GrabStateSchema.ID)
-	_check(str(state.get("holder_user_id")) == "", "adjustable: предмет отпущен")
+	_check(str(NetworkManager.replicated_bindings(oid, GrabStateSchema.ID).get("holder", "")) \
+			== "", "adjustable: предмет отпущен")
 	# Подстройка доехала до канона: release форсит отложенный commit хвата.
 	var canonical_grip := GrabStateSchema.unpack_transform(state.get("grip"))
 	_check(not canonical_grip.is_equal_approx(Transform3D.IDENTITY),

@@ -159,7 +159,8 @@ func _run() -> void:
 		var attrs: Dictionary = props.get("attrs", {})
 		_check(str(attrs.get("points", "")).split(" ", false).size() >= 6,
 				"штрих содержит точки")
-		_check(str(strokes[0].get("author", "")) == Settings.user_id, "автор штриха — мы")
+		_check(str((strokes[0].get("bindings", {}) as Dictionary).get("creator", "")) \
+				== Settings.user_id, "creator штриха — мы")
 	var stroke_actors := get_tree().get_nodes_in_group(StrokeActor.GROUP)
 	_check(stroke_actors.size() >= 1, "штрих материализован StrokeActor")
 	# Превью-точки сняты при финализации.

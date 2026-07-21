@@ -7,7 +7,7 @@ extends Node3D
 ## _activate_transition, что у порталов).
 ##
 ## Реагирует на ГРАНУЛЯРНЫЕ сигналы транспорта (add/update/remove/reset) — не пересобирает всё на
-## каждое изменение. Объекты — плоские данные { id, kind, parent, author, ts, ttl, props };
+## каждое изменение. Объекты — плоские данные { id, kind, parent, bindings, ts, ttl, props };
 ## вьюха материализует их по kind, не зная транспорта. Вложенность: объект с parent=<id> другого
 ## объекта монтируется как ребёнок его узла (наследует трансформ); parent="page:<node_id>" —
 ## как ребёнок РЕАЛЬНОГО узла vrweb-слоя страницы (реестр targets из main).
@@ -97,7 +97,7 @@ func _live_operation_allowed(id: String, object: Dictionary) -> bool:
 	return VrwebContentPolicy.allowed(_content_policy.evaluate_operation(
 			str(object.get("kind", "")), object,
 			{"source": VrwebContentPolicy.SOURCE_LIVE_PEER, "object_id": id,
-			"author": str(object.get("author", ""))}))
+			"creator": _binding(object, "creator")}))
 
 
 func _on_removed(id: String) -> void:
@@ -205,7 +205,7 @@ func _apply(node: Node, object: Dictionary) -> void:
 		for k in attrs:
 			var decision := _content_policy.evaluate_property(node.get_class(), str(k), str(attrs[k]),
 					{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
-					"object_id": str(object.get("id", "")), "author": str(object.get("author", ""))})
+					"object_id": str(object.get("id", "")), "creator": _binding(object, "creator")})
 			if not VrwebContentPolicy.allowed(decision):
 				continue
 			node.set(str(k), VrwebBuilder.resolve_attr_value(str(attrs[k]), _resources))
@@ -231,7 +231,7 @@ func _make_node(object: Dictionary) -> Node:
 			return VrwebBuilder.build_element(str(props.get("tag", "")),
 				props.get("attrs", {}), _resources, _base_url, _content_policy,
 				{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
-				"object_id": str(object.get("id", "")), "author": str(object.get("author", ""))})
+				"object_id": str(object.get("id", "")), "creator": _binding(object, "creator")})
 		"vrweb-item":
 			# Переносимый предмет: item-документ по props.src, собственный script realm
 			# (см. VrwebItemHost и docs/space/portable-tools.md). Данные (src) придут через
@@ -278,7 +278,7 @@ func _apply_patch(id: String, object: Dictionary) -> void:
 		var prop := str(k)
 		var decision := _content_policy.evaluate_property(target.get_class(), prop, str(set_map[k]),
 				{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
-				"object_id": str(object.get("id", id)), "author": str(object.get("author", ""))})
+				"object_id": str(object.get("id", id)), "creator": _binding(object, "creator")})
 		if not VrwebContentPolicy.allowed(decision):
 			continue
 		if not originals.has(prop):
@@ -315,6 +315,11 @@ func _revert_patch(id: String) -> void:
 				(target as Node).process_mode = Node.PROCESS_MODE_INHERIT
 		else:
 			target.set(prop, originals[prop])
+
+
+static func _binding(object: Dictionary, name: String) -> String:
+	var bindings = object.get("bindings", {})
+	return str((bindings as Dictionary).get(name, "")) if typeof(bindings) == TYPE_DICTIONARY else ""
 
 
 ## [x,y,z] -> Vector3 (объекты хранят позиции как массивы ради JSON-сериализуемости).

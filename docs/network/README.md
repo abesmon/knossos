@@ -16,6 +16,8 @@
   совместимости вариантов.
 - [authority.md](authority.md) — авторитет комнаты: кто из пиров считается источником правды
   для общего состояния сцены.
+- [subject-bindings.md](subject-bindings.md) — общий механизм именованных назначений
+  (`creator`, `holder`, `presenter`) и policies без отдельной сущности ownership.
 - [replicated-state.md](replicated-state.md) — исследование VRChat Udon Synced Variables и
   решение о типизированном общем состоянии компонентов; пилот — видео-плеер.
 - [ranks.md](ranks.md) — ранги: таблица прав в комнате (кто что может менять).

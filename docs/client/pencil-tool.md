@@ -59,7 +59,7 @@
 
 Пока ЛКМ зажата, скрипт раз в ~0.12 с берёт `document.scene.objects("vrweb-node")`, оставляет
 только объекты с `props.tag="VRWebStroke"`, фильтрует по
-`author == свой user_id` (чужие всё равно отклонил бы авторитет) и проверяет дистанцию точки
+`bindings.creator == свой user_id` (чужие всё равно отклонил бы authority) и проверяет дистанцию точки
 прицела до полилинии (та же математика, что `StrokePath.distance_to_polyline`, на Luau);
 попадание → `document.scene.remove(id)`.
 
@@ -76,6 +76,6 @@
 - **Частичное стирание**: разрезать штрих на два (remove + 2×add) — отложено.
 - **Граффити-права**: стирать чужие штрихи — политика по тегу внутри `vrweb-node`
   (capabilities), как предусмотрено в
-  [ephemeral-changes.md](../network/ephemeral-changes.md#права-владение--фундамент-под-систему-прав).
+  [ephemeral-changes.md](../network/ephemeral-changes.md#права).
 - **Персистенция**: `ttl=0` делает штрихи кандидатами на выгрузку — как прочие эфемерные
   объекты.

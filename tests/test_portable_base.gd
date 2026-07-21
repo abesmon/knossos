@@ -313,8 +313,8 @@ func _test_late_join_attach(world: Node3D, player: Player, manager: GrabManager)
 			GrabStateSchema.VERSION, "grab",
 			{"hand": "right", "grip": GrabStateSchema.POSE_IDENTITY.duplicate()})
 	Settings.user_id = previous_user
-	_check(str(NetworkManager.replicated_state(hold_id, GrabStateSchema.ID) \
-			.get("holder_user_id", "")) == remote_user,
+	_check(str(NetworkManager.replicated_bindings(hold_id, GrabStateSchema.ID) \
+			.get("holder", "")) == remote_user,
 			"предусловие: предмет уже держит другой участник")
 
 	# Предмет материализуется, ПОКА МЕНЕДЖЕРА НЕТ: бандловый item (локальный документ +

@@ -172,6 +172,13 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Провести длительный двухклиентский soak: simultaneous seek, late join, authority change и
   reconnect.
 
+### P2 — Subject Bindings объектов и артефактов
+
+- [x] Ввести общие bindings и PolicyEvaluator; перевести SceneChanges,
+  Replicated State и grabbable ([контракт](network/subject-bindings.md)).
+- [ ] Построить локальный inventory поверх неизменяемого slot `player` и сериализуемого item
+  descriptor; home server оставить опциональной синхронизацией между клиентами.
+
 ### P1 — Federation и instance contract
 
 - [ ] Реализовать server-to-server federation signaling, чтобы пользователи разных signaling
@@ -224,7 +231,8 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 
 - [ ] 3D-позиционное аудио видеоповерхности.
 - [ ] HLS/DASH поверх существующей прогрессивной докачки.
-- [ ] Передача роли контроллера и owner-presenter mode.
+- [ ] Передача роли presenter через общий subject binding
+  ([контракт](network/subject-bindings.md)), без video-specific owner state.
 - [ ] Интерактивный seek по progress bar и регулятор громкости.
 - [ ] Адаптивный voice bitrate/DTX по transport pressure.
 - [ ] При росте комнат оценить SFU вместо квадратичного mesh uplink.
@@ -236,8 +244,6 @@ exporter и sandboxed page scripting vertical slice. Активная работ
 - [ ] Реальный замер высоты RichPanel вместо эвристики текста.
 - [ ] Согласованный reflow геометрии после загрузки медиа без HTML-размеров.
 - [ ] Зарегистрировать deeplink-схему в packaged builds через installer/first-run integration.
-- [ ] Определить inventory/ownership и материализацию сериализуемых `tool-*` объектов, прежде
-  чем отправлять `PlayerTool.descriptor()` в ephemeral layer.
 - [ ] Добавить визуальный avatar picker и валидировать расширяющийся набор avatar parameters.
 - [ ] Зафиксировать правила spawn/teleport points для custom VRWeb scenes.
 

@@ -7,7 +7,7 @@ page realm:
 1. `document.query("#id")` получает opaque handles обычных VRWML-объектов;
 2. `handle.on("activate", ...)` превращает обычный `StaticBody3D` с collision shape в кнопку;
 3. `document.state` определяет схему, создаёт общий объект, отправляет команду и подписывает
-   представление на canonical distributed state;
+   представление на canonical distributed state и Subject Bindings;
 4. `document.on_update(...)` двигает два шара по синусу: левый от локального времени сцены,
    правый от времени authority;
 5. handles декларативных `StandardMaterial3D` меняют цвет шаров каждый кадр, показывая, что
@@ -43,9 +43,10 @@ opaque handles. Скрипт создаёт переносимые `Color`/`Vect
 превращаются клиентом в `demo.light-switch/light` и `demo.light-switch/switch`, поэтому разные
 скрипты страницы не могут случайно занять state друг друга.
 
-Скрипт объявляет bool-поле `enabled` и команду `toggle`, вызывает `document.state.ensure`,
-рисует результат `document.state.read`, подписывается через `document.state.on` и по `activate`
-вызывает `document.state.command` вместо локального изменения ламп.
+Скрипт объявляет bool-поле `enabled` и команду `toggle`. Reducer одним commit переключает
+state и назначает `bindings.operator` из `context.actor_user_id`. Страница читает state,
+подписывается через `document.state.on` и `on_bindings`, а по `activate` вызывает команду вместо
+локального изменения ламп.
 
 Top-level скрипты запускаются на общей границе `scene-ready`. Клик проходит полный публичный
 маршрут `RayCast -> VrwebScriptInputBridge -> Luau callback -> document.state.command -> DELTA`,
@@ -66,5 +67,5 @@ Top-level скрипты запускаются на общей границе `
 `tests/test_state_switch.tscn` строит реальный документ, активирует оба Luau script в общем realm, проверяет
 обычный collision target, один update frame и изменение ресурса, имитирует room reset и authority
 transition, запускает page-defined reducer через generic Store и подтверждает, что distributed
-delta возвращается в Luau subscription и меняет сцену. Низкоуровневые инварианты Store отдельно
+delta и custom binding возвращаются в Luau subscriptions и меняют сцену. Низкоуровневые инварианты Store отдельно
 покрывает `tests/test_replicated_state.gd`.

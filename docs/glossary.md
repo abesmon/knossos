@@ -10,6 +10,11 @@
 «админ» и не сервер — просто роль, переходящая по правилу «первому id».
 → [network/authority.md](network/authority.md)
 
+**Subject Binding / Control Slot** — именованная связь subject с назначенным principal:
+`creator`, `holder`, `presenter`, `driver` и т. п. Это одна широкая инфраструктурная концепция,
+а различия задают имя slot и policy. Binding не является authority комнаты, рангом или правом
+сохранить изменение на сайте. → [network/subject-bindings.md](network/subject-bindings.md)
+
 **Аппликатор** — узел аватара, который читает шину параметров и «применяет» её к чему-то
 (копирует в `AnimationTree`, крутит кость, масштабирует рот). Модель VRChat: корень аватара
 логики не имеет, всё делают аппликаторы. → [client/avatars.md](client/avatars.md)

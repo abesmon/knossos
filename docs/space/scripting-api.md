@@ -63,10 +63,14 @@ script tags. Она
 `document.state` — единственная page-facing надстройка над generic replicated-state subsystem:
 
 - `define(schema_id, definition)`;
-- `ensure(object_id, schema_id, initial, owner_user_id)`;
-- `read(object_id, schema_id)` и `revision(...)`;
+- `ensure(object_id, schema_id, initial, bindings)`;
+- `read(object_id, schema_id)`, `bindings(...)`, `binding(..., name)` и `revision(...)`;
 - `command(object_id, schema_id, version, command, args)`;
-- `on(object_id, schema_id, callback)`.
+- `on(object_id, schema_id, callback)` и `on_bindings(object_id, schema_id, callback)`.
+
+Bindings — общий механизм named roles (`creator`, `holder`, `presenter`), а не отдельное
+ownership API. Полный контракт: [Subject Bindings](../network/subject-bindings.md). Практические
+рецепты для сторонних авторов: [руководство по Subject Bindings](subject-bindings-guide.md).
 
 Wire ids namespaced identity page realm (в v1 это `id` первого валидного script tag). Регистрация
 и top-level commands staged до успешного запуска страницы.
@@ -76,8 +80,10 @@ Wire ids namespaced identity page realm (в v1 это `id` первого вал
 authority; пользовательский скрипт не должен повторно вызывать `define`/`ensure` из-за reconnect.
 
 Reducer в `definition.commands[name].reducer` получает один event:
-`{ state, args, context }` и возвращает patch-таблицу. Callback `on` получает
-`{ state, changed, revision }`. Представление остаётся обычной сценой: subscription вызывает
+`{ state, args, context }` и возвращает атомарную транзакцию
+`{state = field_patch, bindings = binding_patch}`. `context.actor_user_id` и
+`context.bindings` выданы authority, а не взяты из args. Callback `on` получает
+`{state, changed, revision}`, `on_bindings` — `{bindings, changed, revision}`. Представление остаётся обычной сценой: subscription вызывает
 `handle.set(...)`, а интеракция — `handle.on("activate", ...)` и затем `state.command(...)`.
 Полный копируемый пример: [демо общего света](../client/state-switch-demo.md) и его
 [inline Luau](../../test_pages/state_switch.html).
@@ -90,7 +96,7 @@ canonical snapshot по обычным правилам; специальной 
 
 `document.scene` — доступ к [слою эфемерных изменений](../network/ephemeral-changes.md).
 Скрипт действует **от имени локального пользователя**: действия идут обычным протоколом
-action/event, авторитет валидирует их против своих прав (владение по `author`, ранги) —
+action/event, авторитет валидирует их против своих прав (`bindings.creator`, ранги) —
 capability не добавляет собственной модели прав. Kind не ограничивается: авторитет и
 content policy — единственные судьи.
 

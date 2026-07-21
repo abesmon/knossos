@@ -1,15 +1,22 @@
 class_name ReplicatedStateStore
 extends RefCounted
 
+const PolicyEvaluatorImpl = preload("res://scripts/network/policy_evaluator.gd")
+
 ## Чистая машина реплицируемого состояния. Не вызывает RPC и не знает домены: схема
 ## описывает wire-типы, команды и reducer, а NetworkManager подставляет sender context.
 
 signal state_changed(object_id: String, schema_id: String, state: Dictionary, changed: Dictionary, revision: int)
+signal bindings_changed(object_id: String, schema_id: String, bindings: Dictionary,
+		changed: Dictionary, revision: int)
 
 const MAX_STRING_BYTES := 4096
 const MAX_ARRAY_ITEMS := 256
 const MAX_BYTES := 16384
 const MAX_FIELDS := 64
+const MAX_BINDINGS := 16
+const MAX_BINDING_NAME_CHARS := 64
+const MAX_PRINCIPAL_BYTES := 128
 const MAX_OBJECTS := 256
 const MAX_OBJECT_BYTES := 16 * 1024
 const MAX_DELTA_BYTES := 16 * 1024
@@ -66,8 +73,11 @@ func reset_session() -> void:
 	_applied_seq = 0
 
 
-func ensure_object(object_id: String, schema_id: String, initial: Dictionary = {}, owner_user_id: String = "") -> bool:
+func ensure_object(object_id: String, schema_id: String, initial: Dictionary = {},
+		initial_bindings: Dictionary = {}) -> bool:
 	if object_id.is_empty() or not _schemas.has(schema_id):
+		return false
+	if not _valid_bindings(initial_bindings):
 		return false
 	var key := _key(object_id, schema_id)
 	if _deferred_objects.has(key):
@@ -88,7 +98,7 @@ func ensure_object(object_id: String, schema_id: String, initial: Dictionary = {
 		"schema_id": schema_id,
 		"version": int((_schemas[schema_id] as Dictionary)["version"]),
 		"revision": 0,
-		"owner_user_id": owner_user_id,
+		"bindings": initial_bindings.duplicate(true),
 		"state": state,
 	}
 	if var_to_bytes(record).size() > MAX_OBJECT_BYTES:
@@ -104,6 +114,11 @@ func remove_object(object_id: String, schema_id: String) -> void:
 func state_of(object_id: String, schema_id: String) -> Dictionary:
 	var record: Dictionary = _objects.get(_key(object_id, schema_id), {})
 	return (record.get("state", {}) as Dictionary).duplicate(true)
+
+
+func bindings_of(object_id: String, schema_id: String) -> Dictionary:
+	var record: Dictionary = _objects.get(_key(object_id, schema_id), {})
+	return (record.get("bindings", {}) as Dictionary).duplicate(true)
 
 
 func revision_of(object_id: String, schema_id: String) -> int:
@@ -130,7 +145,8 @@ func begin_authority() -> void:
 	_applied_seq = 0
 
 
-## Возвращает {ok, delta?, error?}. context: is_authority, rank, verified, user_id.
+## Возвращает {ok, delta?, error?}. Reducer result is an atomic transaction:
+## {state: field_patch, bindings: binding_patch}. Context actor is transport-bound.
 func commit_command(object_id: String, schema_id: String, version: int, command: String,
 		args: Dictionary, context: Dictionary) -> Dictionary:
 	var key := _key(object_id, schema_id)
@@ -148,36 +164,59 @@ func commit_command(object_id: String, schema_id: String, version: int, command:
 	var command_spec: Dictionary = commands[command]
 	var rule = command_spec.get("write_rule", schema.get("default_write_rule", "authority"))
 	var access_context := context.duplicate()
-	access_context["owner_user_id"] = record.get("owner_user_id", "")
-	if not evaluate_rule(rule, access_context):
+	access_context["actor_user_id"] = str(context.get("actor_user_id", ""))
+	access_context["bindings"] = (record.get("bindings", {}) as Dictionary).duplicate(true)
+	if not PolicyEvaluatorImpl.evaluate(rule, access_context):
 		return _error("access_denied")
 	var reducer: Callable = command_spec["reducer"]
-	var patch = reducer.call((record["state"] as Dictionary).duplicate(true), args.duplicate(true), context.duplicate())
-	if typeof(patch) != TYPE_DICTIONARY or (patch as Dictionary).is_empty():
+	var reducer_context := context.duplicate()
+	reducer_context["actor_user_id"] = access_context["actor_user_id"]
+	reducer_context["bindings"] = access_context["bindings"]
+	var transaction = reducer.call((record["state"] as Dictionary).duplicate(true),
+			args.duplicate(true), reducer_context)
+	if typeof(transaction) != TYPE_DICTIONARY:
 		return _error("rejected")
-	for field in patch:
-		if not _validate_field(schema_id, str(field), patch[field]):
+	var state_patch = (transaction as Dictionary).get("state", {})
+	var binding_patch = (transaction as Dictionary).get("bindings", {})
+	if typeof(state_patch) != TYPE_DICTIONARY or typeof(binding_patch) != TYPE_DICTIONARY \
+			or ((state_patch as Dictionary).is_empty() and (binding_patch as Dictionary).is_empty()):
+		return _error("rejected")
+	for field in state_patch:
+		if not _validate_field(schema_id, str(field), state_patch[field]):
 			return _error("invalid_patch")
+	if not _valid_binding_patch(record.get("bindings", {}), binding_patch):
+		return _error("invalid_patch")
 	var next_state: Dictionary = (record["state"] as Dictionary).duplicate(true)
-	for field in patch:
-		next_state[field] = patch[field]
+	for field in state_patch:
+		next_state[field] = state_patch[field]
+	var next_bindings: Dictionary = (record.get("bindings", {}) as Dictionary).duplicate(true)
+	_apply_binding_patch(next_bindings, binding_patch)
 	var next_revision := int(record["revision"]) + 1
 	var next_seq := _seq + 1
 	var delta := {
 		"epoch": _epoch, "seq": next_seq, "object_id": object_id, "schema_id": schema_id,
-		"version": version, "revision": next_revision, "changed": (patch as Dictionary).duplicate(true),
+		"version": version, "revision": next_revision,
+		"changed": (state_patch as Dictionary).duplicate(true),
+		"binding_changes": (binding_patch as Dictionary).duplicate(true),
 	}
 	var prospective := record.duplicate(true)
 	prospective["state"] = next_state
+	prospective["bindings"] = next_bindings
 	prospective["revision"] = next_revision
 	if var_to_bytes(prospective).size() > MAX_OBJECT_BYTES or var_to_bytes(delta).size() > MAX_DELTA_BYTES:
 		return _error("too_large")
 	record["state"] = next_state
+	record["bindings"] = next_bindings
 	record["revision"] = next_revision
 	_seq = next_seq
 	_applied_epoch = _epoch
 	_applied_seq = _seq
-	state_changed.emit(object_id, schema_id, next_state.duplicate(true), (patch as Dictionary).duplicate(true), next_revision)
+	if not (state_patch as Dictionary).is_empty():
+		state_changed.emit(object_id, schema_id, next_state.duplicate(true),
+				(state_patch as Dictionary).duplicate(true), next_revision)
+	if not (binding_patch as Dictionary).is_empty():
+		bindings_changed.emit(object_id, schema_id, next_bindings.duplicate(true),
+				(binding_patch as Dictionary).duplicate(true), next_revision)
 	return {"ok": true, "delta": delta}
 
 
@@ -204,17 +243,28 @@ func apply_delta(delta: Dictionary) -> String:
 	if revision != int(record["revision"]) + 1:
 		return "gap"
 	var changed: Dictionary = delta["changed"]
+	var binding_changes = delta.get("binding_changes", {})
+	if typeof(binding_changes) != TYPE_DICTIONARY:
+		return "invalid"
 	for field in changed:
 		if not _validate_field(schema_id, str(field), changed[field]):
 			return "invalid"
 	var state: Dictionary = record["state"]
+	if not _valid_binding_patch(record.get("bindings", {}), binding_changes):
+		return "invalid"
 	for field in changed:
 		state[field] = changed[field]
+	var bindings: Dictionary = record.get("bindings", {})
+	_apply_binding_patch(bindings, binding_changes)
 	record["revision"] = revision
 	_applied_epoch = epoch
 	_applied_seq = seq
 	_epoch = maxi(_epoch, epoch)
-	state_changed.emit(object_id, schema_id, state.duplicate(true), changed.duplicate(true), revision)
+	if not changed.is_empty():
+		state_changed.emit(object_id, schema_id, state.duplicate(true), changed.duplicate(true), revision)
+	if not (binding_changes as Dictionary).is_empty():
+		bindings_changed.emit(object_id, schema_id, bindings.duplicate(true),
+				(binding_changes as Dictionary).duplicate(true), revision)
 	return "ok"
 
 
@@ -254,14 +304,19 @@ func apply_snapshot(data: Dictionary) -> bool:
 		for field in state:
 			if not _validate_field(schema_id, str(field), state[field]):
 				return false
+		var bindings = record.get("bindings", {})
+		if typeof(bindings) != TYPE_DICTIONARY or not _valid_bindings(bindings):
+			return false
 		var normalized := {
 			"object_id": object_id, "schema_id": schema_id, "version": int(record["version"]),
 			"revision": maxi(0, int(record.get("revision", 0))),
-			"owner_user_id": str(record.get("owner_user_id", "")), "state": (state as Dictionary).duplicate(true),
+			"bindings": (bindings as Dictionary).duplicate(true),
+			"state": (state as Dictionary).duplicate(true),
 		}
 		if var_to_bytes(normalized).size() > MAX_OBJECT_BYTES:
 			return false
 		incoming[_key(object_id, schema_id)] = normalized
+	var previous_objects := _objects
 	_objects = incoming
 	_deferred_objects = deferred
 	_applied_epoch = maxi(0, int(data.get("epoch", 0)))
@@ -271,6 +326,17 @@ func apply_snapshot(data: Dictionary) -> bool:
 		var r: Dictionary = record
 		state_changed.emit(r["object_id"], r["schema_id"], (r["state"] as Dictionary).duplicate(true),
 				(r["state"] as Dictionary).duplicate(true), int(r["revision"]))
+		var bindings: Dictionary = r.get("bindings", {})
+		var previous_record: Dictionary = previous_objects.get(
+				_key(str(r["object_id"]), str(r["schema_id"])), {})
+		var previous_bindings: Dictionary = previous_record.get("bindings", {})
+		var binding_changes := bindings.duplicate(true)
+		for name in previous_bindings:
+			if not bindings.has(name):
+				binding_changes[name] = ""
+		if not binding_changes.is_empty():
+			bindings_changed.emit(r["object_id"], r["schema_id"], bindings.duplicate(true),
+					binding_changes, int(r["revision"]))
 	return true
 
 
@@ -291,10 +357,13 @@ func _materialize_deferred_object(key: String) -> void:
 	for field in state:
 		if not _validate_field(schema_id, str(field), state[field]):
 			return
+	var bindings = record.get("bindings", {})
+	if typeof(bindings) != TYPE_DICTIONARY or not _valid_bindings(bindings):
+		return
 	var normalized := {
 		"object_id": str(record.get("object_id", "")), "schema_id": schema_id,
 		"version": int(record["version"]), "revision": maxi(0, int(record.get("revision", 0))),
-		"owner_user_id": str(record.get("owner_user_id", "")),
+		"bindings": (bindings as Dictionary).duplicate(true),
 		"state": (state as Dictionary).duplicate(true),
 	}
 	if normalized["object_id"].is_empty() or var_to_bytes(normalized).size() > MAX_OBJECT_BYTES:
@@ -303,49 +372,59 @@ func _materialize_deferred_object(key: String) -> void:
 	state_changed.emit(normalized["object_id"], schema_id,
 			(normalized["state"] as Dictionary).duplicate(true),
 			(normalized["state"] as Dictionary).duplicate(true), int(normalized["revision"]))
-
-
-static func evaluate_rule(rule, context: Dictionary) -> bool:
-	if typeof(rule) == TYPE_STRING:
-		match str(rule):
-			"authority": return bool(context.get("is_authority", false))
-			"object_owner": return str(context.get("user_id", "")) != "" \
-					and str(context.get("user_id", "")) == str(context.get("owner_user_id", ""))
-			"verified_identity": return bool(context.get("verified", false))
-			_: return false
-	if typeof(rule) != TYPE_DICTIONARY:
-		return false
-	var d: Dictionary = rule
-	if d.has("rank"):
-		var rank_rule = d["rank"]
-		if typeof(rank_rule) != TYPE_DICTIONARY:
-			return false
-		var rr: Dictionary = rank_rule
-		var actual := int(context.get("rank", 1 << 30))
-		var expected := int(rr.get("value", 0))
-		match str(rr.get("op", "")):
-			"lt": return actual < expected
-			"lte": return actual <= expected
-			"eq": return actual == expected
-			"gte": return actual >= expected
-			"gt": return actual > expected
-			_: return false
-	if d.has("any_of") and typeof(d["any_of"]) == TYPE_ARRAY:
-		for child in d["any_of"]:
-			if evaluate_rule(child, context): return true
-		return false
-	if d.has("all_of") and typeof(d["all_of"]) == TYPE_ARRAY:
-		if (d["all_of"] as Array).is_empty(): return false
-		for child in d["all_of"]:
-			if not evaluate_rule(child, context): return false
-		return true
-	return false
+	var normalized_bindings: Dictionary = normalized.get("bindings", {})
+	if not normalized_bindings.is_empty():
+		bindings_changed.emit(normalized["object_id"], schema_id,
+				normalized_bindings.duplicate(true), normalized_bindings.duplicate(true),
+				int(normalized["revision"]))
 
 
 func _valid_envelope(delta: Dictionary) -> bool:
 	return int(delta.get("epoch", 0)) > 0 and int(delta.get("seq", 0)) > 0 \
 			and int(delta.get("revision", 0)) > 0 and typeof(delta.get("changed")) == TYPE_DICTIONARY \
 			and not str(delta.get("object_id", "")).is_empty() and not str(delta.get("schema_id", "")).is_empty()
+
+
+func _valid_bindings(value: Dictionary) -> bool:
+	if value.size() > MAX_BINDINGS:
+		return false
+	for key in value:
+		if typeof(key) != TYPE_STRING or typeof(value[key]) != TYPE_STRING:
+			return false
+		var name: String = key
+		var principal: String = value[key]
+		if not _valid_binding_name(name) or principal.is_empty() \
+				or principal.to_utf8_buffer().size() > MAX_PRINCIPAL_BYTES:
+			return false
+	return true
+
+
+func _valid_binding_patch(current, patch) -> bool:
+	if typeof(current) != TYPE_DICTIONARY or typeof(patch) != TYPE_DICTIONARY:
+		return false
+	for key in patch:
+		if typeof(key) != TYPE_STRING or typeof((patch as Dictionary)[key]) != TYPE_STRING \
+				or not _valid_binding_name(key) \
+				or ((patch as Dictionary)[key] as String).to_utf8_buffer().size() > MAX_PRINCIPAL_BYTES:
+			return false
+	var prospective: Dictionary = (current as Dictionary).duplicate(true)
+	_apply_binding_patch(prospective, patch)
+	return _valid_bindings(prospective)
+
+
+func _apply_binding_patch(target: Dictionary, patch: Dictionary) -> void:
+	for key in patch:
+		var name := str(key)
+		var principal := str(patch[key])
+		if principal.is_empty():
+			target.erase(name)
+		else:
+			target[name] = principal
+
+
+func _valid_binding_name(name: String) -> bool:
+	return not name.is_empty() and name.length() <= MAX_BINDING_NAME_CHARS \
+			and name.is_valid_identifier()
 
 
 func _default_state(schema_id: String) -> Dictionary:

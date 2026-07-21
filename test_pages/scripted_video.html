@@ -40,7 +40,7 @@ local version = 1
 
 -- Валидация правомерности живёт в reducer'ах и исполняется у authority. Здесь правило
 -- открытое (обычный rank); «плеер по рангам» делается заменой default_write_rule или
--- проверками context.rank / context.user_id внутри reducer.
+-- проверками context.rank / context.actor_user_id внутри reducer.
 assert(document.state.define(schema, {
   version = version,
   fields = {
@@ -57,31 +57,31 @@ assert(document.state.define(schema, {
       reducer = function(event)
         local src = tostring(event.args.src or "")
         if src == "" or #src > 2048 then return {} end
-        return { src = src, playing = true, anchor_position = 0,
-          anchor_time = event.context.authority_msec / 1000.0 }
+        return { state = { src = src, playing = true, anchor_position = 0,
+          anchor_time = event.context.authority_msec / 1000.0 } }
       end,
     },
     set_playing = {
       reducer = function(event)
         local pos = tonumber(event.args.position) or 0
         if pos < 0 or pos > 86400 then return {} end
-        return { playing = event.args.playing == true, anchor_position = pos,
-          anchor_time = event.context.authority_msec / 1000.0 }
+        return { state = { playing = event.args.playing == true, anchor_position = pos,
+          anchor_time = event.context.authority_msec / 1000.0 } }
       end,
     },
     seek = {
       reducer = function(event)
         local pos = tonumber(event.args.position) or -1
         if pos < 0 or pos > 86400 then return {} end
-        return { playing = event.state.playing == true, anchor_position = pos,
-          anchor_time = event.context.authority_msec / 1000.0 }
+        return { state = { playing = event.state.playing == true, anchor_position = pos,
+          anchor_time = event.context.authority_msec / 1000.0 } }
       end,
     },
   },
 }))
 assert(document.state.ensure(object, schema, {
   src = "", playing = false, anchor_position = 0, anchor_time = 0,
-}, ""))
+}, {}))
 
 local canon = document.state.read(object, schema)
 

@@ -259,7 +259,7 @@ func snapshot_replicated_state() -> void:
 
 func retire_for_replacement(replacement: VrwebDocumentHost) -> void:
 	if _valid and replacement != null:
-		_state.retire_except(replacement._state.ownership())
+		_state.retire_except(replacement._state.registrations())
 	close(true)
 
 

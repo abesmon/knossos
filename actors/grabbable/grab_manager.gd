@@ -50,8 +50,7 @@ var _adjust_accum := 0.0
 
 func _ready() -> void:
 	add_to_group("grab_manager")
-	NetworkManager.register_replicated_schema(SCHEMA_ID,
-			GrabStateSchema.definition(NetworkManager.DEFAULT_RANK))
+	NetworkManager.register_replicated_schema(SCHEMA_ID, GrabStateSchema.definition())
 	NetworkManager.replicated_state_received.connect(_on_replicated_state)
 	NetworkManager.authority_changed.connect(_on_authority_changed)
 	adopt_existing()
@@ -140,7 +139,7 @@ func _register_state_object(oid: String, g: Grabbable) -> void:
 	# клиентов). Канон начинает действовать с первого snapshot/delta авторитета.
 	NetworkManager.register_replicated_object(oid, SCHEMA_ID, {
 		"rest": GrabStateSchema.pack_transform(g.transform),
-		"theft": g.theft_allowed,
+		"takeover_allowed": g.theft_allowed,
 		"adjustable": g.adjustable,
 	})
 
@@ -166,7 +165,7 @@ func _apply_state(object_id: String, state: Dictionary, changed: Dictionary) -> 
 	var g: Grabbable = _grabbables.get(object_id)
 	if g == null or not is_instance_valid(g):
 		return
-	var holder := str(state.get("holder_user_id", ""))
+	var holder := str(NetworkManager.replicated_bindings(object_id, SCHEMA_ID).get("holder", ""))
 	var hand := str(state.get("hand", ""))
 	var prev: Dictionary = _held.get(object_id, {})
 	if holder == "":

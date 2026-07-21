@@ -5,7 +5,7 @@
   <title>VRWeb item — ластик</title>
   <script type="application/vrweb+luau" id="eraser.behavior">
 -- Ластик как переносимый предмет: зажал ЛКМ (use) — стирает СВОИ штрихи под прицелом.
--- Штрихи — стандартные vrweb-node с tag="VRWebStroke"; чужие отфильтровываются по author
+-- Штрихи — стандартные vrweb-node с tag="VRWebStroke"; чужие фильтруются по creator binding
 -- заранее (авторитет всё равно отклонил бы remove чужого объекта).
 local eraser = document.query("#eraser-item")
 assert(eraser ~= nil, "eraser item scene id is missing")
@@ -66,7 +66,8 @@ document.on_update(function(frame)
   local strokes = document.scene.objects("vrweb-node")
   for i = 1, #strokes do
     local stroke = strokes[i]
-    if stroke.props.tag == "VRWebStroke" and tostring(stroke.author) == tostring(me.user_id)
+    if stroke.props.tag == "VRWebStroke" and stroke.bindings ~= nil
+        and tostring(stroke.bindings.creator) == tostring(me.user_id)
         and stroke_hit(stroke.props, p) then
       document.scene.remove(stroke.id, nil)
     end

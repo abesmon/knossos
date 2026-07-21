@@ -4,7 +4,8 @@ extends Node
 ## item-инструмент и берёт его в руку; late заходит позже и обязан увидеть предмет В РУКЕ
 ## держателя, а не висящим в воздухе. Процессы запускает tests/run_net_grabbable_test.py.
 
-const ITEM_SRC := "vrwebresource://items/pencil.html"
+# Takeover path needs the default theft="allow" contract; pencil intentionally declares deny.
+const ITEM_SRC := "vrwebresource://items/color_cube.html"
 const ROOM := "grabbable-late-join-e2e"
 
 var _role := "holder"
@@ -127,13 +128,13 @@ func _run_late() -> void:
 
 	# Каноническое hold-состояние должно ДОЖИТЬ до этого момента: раньше пересборка вьюхи по
 	# снимку сцены снимала локальный узел и вместе с ним стирала объект в Store.
-	if not await _wait_for(func(): return str(NetworkManager.replicated_state(hold_id,
-			GrabStateSchema.ID).get("holder_user_id", "")) != "", 10.0):
+	if not await _wait_for(func(): return str(NetworkManager.replicated_bindings(hold_id,
+			GrabStateSchema.ID).get("holder", "")) != "", 10.0):
 		_finish(false, "late never received hold state (state=%s rev=%d)" % [
 			NetworkManager.replicated_state(hold_id, GrabStateSchema.ID),
 			NetworkManager.replicated_revision(hold_id, GrabStateSchema.ID)])
 		return
-	var holder := str(NetworkManager.replicated_state(hold_id, GrabStateSchema.ID)["holder_user_id"])
+	var holder := str(NetworkManager.replicated_bindings(hold_id, GrabStateSchema.ID).get("holder", ""))
 	_log("HOLD STATE holder=%s" % holder)
 
 	# И менеджер обязан отслеживать предмет как держимый ЧУЖИМ участником. Узел предмета

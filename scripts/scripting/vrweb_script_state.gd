@@ -8,6 +8,7 @@ var _schemas: Dictionary = {}
 var _definitions: Dictionary = {}
 var _objects: Dictionary = {}
 var _subscriptions: Dictionary = {}
+var _binding_subscriptions: Dictionary = {}
 var _invoke: Callable
 var _connected := false
 var _authority_connected := false
@@ -17,6 +18,7 @@ var _pending_schemas: Dictionary = {}
 var _pending_objects: Array[Dictionary] = []
 var _pending_commands: Array[Dictionary] = []
 var _pending_subscriptions: Array[Dictionary] = []
+var _pending_binding_subscriptions: Array[Dictionary] = []
 var _saved_states: Dictionary = {}
 
 
@@ -26,12 +28,19 @@ func setup(script_id: String, invoke: Callable) -> void:
 
 
 func api() -> Dictionary:
-	return {"define": register_schema, "ensure": ensure_object, "read": read,
-		"revision": revision,
+	return {"define": register_schema,
+		"ensure": func(object_id, schema_id, initial, initial_bindings):
+			var state_dict = _table_as_dictionary(initial)
+			var bindings_dict = _table_as_dictionary(initial_bindings)
+			if state_dict == null or bindings_dict == null:
+				return false
+			return ensure_object(str(object_id), str(schema_id), state_dict, bindings_dict),
+		"read": read,
+		"bindings": bindings, "binding": binding, "revision": revision,
 		"command": func(object_id, schema_id, version, command_name, args = {}):
 			return command(str(object_id), str(schema_id), int(version), str(command_name),
 					args if args is Dictionary else {}),
-		"on": subscribe}
+		"on": subscribe, "on_bindings": subscribe_bindings}
 
 
 func register_schema(local_schema: String, definition: Dictionary) -> bool:
@@ -50,23 +59,23 @@ func register_schema(local_schema: String, definition: Dictionary) -> bool:
 
 
 func ensure_object(local_object: String, local_schema: String, initial: Dictionary = {},
-		owner_user_id: String = "") -> bool:
+		bindings: Dictionary = {}) -> bool:
 	if _closed or not VrwebScriptDeclaration.valid_id(local_object):
 		return false
 	if _staging:
 		if not _pending_schemas.has(local_schema):
 			return false
 		_pending_objects.append({"object": local_object, "schema": local_schema,
-			"initial": initial.duplicate(true), "owner": owner_user_id})
+			"initial": initial.duplicate(true), "bindings": bindings.duplicate(true)})
 		return true
 	if not _schemas.has(local_schema):
 		return false
 	var wire_schema := str(_schemas[local_schema])
 	var wire_object := _wire(local_object)
-	if not NetworkManager.register_replicated_object(wire_object, wire_schema, initial, owner_user_id):
+	if not NetworkManager.register_replicated_object(wire_object, wire_schema, initial, bindings):
 		return false
 	_objects[_key(local_object, local_schema)] = {"schema": wire_schema, "object": wire_object,
-		"owner": owner_user_id, "initial": initial.duplicate(true)}
+		"bindings": bindings.duplicate(true), "initial": initial.duplicate(true)}
 	_connect_authority()
 	return true
 
@@ -79,6 +88,20 @@ func read(local_object: String, local_schema: String) -> Dictionary:
 	var record: Dictionary = _objects.get(_key(local_object, local_schema), {})
 	return {} if _closed or record.is_empty() else NetworkManager.replicated_state(
 			str(record.object), str(record.schema))
+
+
+func bindings(local_object: String, local_schema: String) -> Dictionary:
+	if _staging:
+		for pending in _pending_objects:
+			if pending.object == local_object and pending.schema == local_schema:
+				return (pending.bindings as Dictionary).duplicate(true)
+	var record: Dictionary = _objects.get(_key(local_object, local_schema), {})
+	return {} if _closed or record.is_empty() else NetworkManager.replicated_bindings(
+			str(record.object), str(record.schema))
+
+
+func binding(local_object: String, local_schema: String, name: String) -> String:
+	return str(bindings(local_object, local_schema).get(name, ""))
 
 
 func revision(local_object: String, local_schema: String) -> int:
@@ -117,6 +140,24 @@ func subscribe(local_object: String, local_schema: String, callback: Callable) -
 	return true
 
 
+func subscribe_bindings(local_object: String, local_schema: String, callback: Callable) -> bool:
+	if _closed or not callback.is_valid():
+		return false
+	if _staging:
+		_pending_binding_subscriptions.append({"object": local_object, "schema": local_schema,
+			"callback": callback})
+		return true
+	var key := _key(local_object, local_schema)
+	if not _objects.has(key):
+		return false
+	if not _binding_subscriptions.has(key):
+		_binding_subscriptions[key] = []
+	_binding_subscriptions[key].append(callback)
+	if not NetworkManager.replicated_bindings_received.is_connected(_on_bindings):
+		NetworkManager.replicated_bindings_received.connect(_on_bindings)
+	return true
+
+
 func commit() -> bool:
 	if _closed:
 		return false
@@ -126,16 +167,19 @@ func commit() -> bool:
 			return false
 	for pending in _pending_objects:
 		if not ensure_object(str(pending.object), str(pending.schema), pending.initial,
-				str(pending.owner)):
+				pending.bindings):
 			return false
 	for pending in _pending_subscriptions:
 		subscribe(str(pending.object), str(pending.schema), pending.callback)
+	for pending in _pending_binding_subscriptions:
+		subscribe_bindings(str(pending.object), str(pending.schema), pending.callback)
 	for pending in _pending_commands:
 		command(str(pending.object), str(pending.schema), int(pending.version),
 				str(pending.command), pending.args)
 	_pending_schemas.clear()
 	_pending_objects.clear()
 	_pending_subscriptions.clear()
+	_pending_binding_subscriptions.clear()
 	_pending_commands.clear()
 	return true
 
@@ -151,6 +195,9 @@ func close(unregister := true) -> void:
 		NetworkManager.authority_changed.disconnect(_on_authority_changed)
 	_authority_connected = false
 	_subscriptions.clear()
+	_binding_subscriptions.clear()
+	if NetworkManager.replicated_bindings_received.is_connected(_on_bindings):
+		NetworkManager.replicated_bindings_received.disconnect(_on_bindings)
 	if unregister and not _staging:
 		for record in _objects.values():
 			NetworkManager.unregister_replicated_object(str(record.object), str(record.schema))
@@ -162,6 +209,7 @@ func close(unregister := true) -> void:
 	_pending_schemas.clear()
 	_pending_objects.clear()
 	_pending_subscriptions.clear()
+	_pending_binding_subscriptions.clear()
 	_pending_commands.clear()
 	_saved_states.clear()
 	_invoke = Callable()
@@ -177,9 +225,10 @@ func restore_registrations() -> bool:
 			return false
 	for record in _objects.values():
 		var key := str(record.schema) + "\n" + str(record.object)
-		var current: Dictionary = _saved_states.get(key, {})
+		var saved: Dictionary = _saved_states.get(key, {})
 		if not NetworkManager.register_replicated_object(str(record.object), str(record.schema),
-				current, str(record.get("owner", ""))):
+				(saved.get("state", {}) as Dictionary).duplicate(true),
+				(saved.get("bindings", record.get("bindings", {})) as Dictionary).duplicate(true)):
 			return false
 	_saved_states.clear()
 	return true
@@ -189,11 +238,15 @@ func snapshot_registrations() -> void:
 	_saved_states.clear()
 	for record in _objects.values():
 		var key := str(record.schema) + "\n" + str(record.object)
-		_saved_states[key] = NetworkManager.replicated_state(
-				str(record.object), str(record.schema)).duplicate(true)
+		_saved_states[key] = {
+			"state": NetworkManager.replicated_state(
+					str(record.object), str(record.schema)).duplicate(true),
+			"bindings": NetworkManager.replicated_bindings(
+					str(record.object), str(record.schema)).duplicate(true),
+		}
 
 
-func ownership() -> Dictionary:
+func registrations() -> Dictionary:
 	var schemas := {}
 	var objects := {}
 	for wire in _schemas.values():
@@ -227,6 +280,18 @@ func _on_state(object_id: String, schema_id: String, state: Dictionary,
 					"changed": changed.duplicate(true), "revision": revision_value})
 
 
+func _on_bindings(object_id: String, schema_id: String, current: Dictionary,
+		changed: Dictionary, revision_value: int) -> void:
+	for local_key in _objects:
+		var record: Dictionary = _objects[local_key]
+		if str(record.object) != object_id or str(record.schema) != schema_id:
+			continue
+		for callback in _binding_subscriptions.get(local_key, []):
+			if callback.is_valid() and _invoke.is_valid():
+				_invoke.call(callback, {"bindings": current.duplicate(true),
+					"changed": changed.duplicate(true), "revision": revision_value})
+
+
 ## Room/mesh replacement clears replicated objects after page scripts may already have run.
 ## Schemas survive reset_session, but registering both parts again is idempotent and also makes
 ## this bridge robust if the network implementation later scopes schemas to a room as well.
@@ -239,7 +304,7 @@ func _on_authority_changed(_authority: int, _is_me: bool) -> void:
 	for record in _objects.values():
 		NetworkManager.register_replicated_object(str(record.object), str(record.schema),
 				(record.get("initial", {}) as Dictionary).duplicate(true),
-				str(record.get("owner", "")))
+				(record.get("bindings", {}) as Dictionary).duplicate(true))
 
 
 func _connect_authority() -> void:
@@ -265,6 +330,11 @@ func _wrap_definition(definition: Dictionary) -> Dictionary:
 					return state
 				var result = _invoke.call(reducer, {"state": state, "args": args,
 					"context": context}, true)
+				if result is Dictionary:
+					for patch_name in ["state", "bindings"]:
+						if result.has(patch_name) and result[patch_name] is Array \
+								and (result[patch_name] as Array).is_empty():
+							result[patch_name] = {}
 				return result if result is Dictionary else state
 		commands[command_name] = spec
 	wrapped["commands"] = commands
@@ -277,3 +347,11 @@ func _wire(local_id: String) -> String:
 
 static func _key(object_id: String, schema_id: String) -> String:
 	return schema_id + "\n" + object_id
+
+
+static func _table_as_dictionary(value):
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	if value is Array and (value as Array).is_empty():
+		return {}
+	return null

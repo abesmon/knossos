@@ -28,12 +28,15 @@ assert(document.state.define(schema, {
   commands = {
     toggle = {
       reducer = function(event)
-        return { enabled = not event.state.enabled }
+        return {
+          state = { enabled = not event.state.enabled },
+          bindings = { operator = event.context.actor_user_id },
+        }
       end,
     },
   },
 }))
-assert(document.state.ensure(object, schema, { enabled = false }, ""))
+assert(document.state.ensure(object, schema, { enabled = false }, {}))
 
 local function render(state)
   local enabled = state.enabled == true
@@ -46,6 +49,10 @@ end
 render(document.state.read(object, schema))
 document.state.on(object, schema, function(event)
   render(event.state)
+end)
+document.state.on_bindings(object, schema, function(event)
+  local operator = event.bindings.operator or ""
+  green_status.set("text", "ОПЕРАТОР: " .. operator)
 end)
 
 button.on("activate", function(_event)

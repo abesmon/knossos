@@ -53,84 +53,85 @@ seek) — обычный авторский код в `document.on_update`. Пе
 (`vrwebresource://scripted_video.html`), разбор — в
 [video-player.md](../client/video-player.md#архитектура-базовый-уровень-и-надстройки).
 
-## Рецепт: плейлист заявок с синхронизацией по владельцу
+## Рецепт: плейлист заявок с назначенным presenter
 
 Сценарий: любой участник добавляет заявку на видео; правила допуска задаёт автор; за каждым
-роликом закрепляется **владелец** (кто добавил), и транспортом текущего ролика управляет
+роликом закрепляется **presenter** (кто добавил), и транспортом текущего ролика управляет
 именно он — не authority и не ранг. Это полностью выражается текущим API: «поток
 синхронизации по владельцу» — просто авторизационное правило в reducer'е.
 
 ```lua
 fields = {
   queue_urls   = { type = "array", items = { type = "string" }, default = {} },
-  queue_owners = { type = "array", items = { type = "string" }, default = {} },
-  current      = { type = "int", default = -1 },
-  owner        = { type = "string", default = "" },  -- владелец ТЕКУЩЕГО ролика
+  queue_presenters = { type = "array", items = { type = "string" }, default = {} },
+	current      = { type = "int", default = -1 },
+	src = { type = "string", default = "" },
   playing = { type = "bool", default = false },
   anchor_position = { type = "float", default = 0 },
   anchor_time = { type = "float", default = 0 },
 },
 commands = {
   -- Кто может добавлять — политика автора: ранг, verified, лимит заявок на участника.
-  add_entry = {
-    reducer = function(e)
-      if #e.state.queue_urls >= 50 then return {} end
-      local urls = e.state.queue_urls
-      local owners = e.state.queue_owners
-      table.insert(urls, tostring(e.args.url))
-      -- Владелец фиксируется из context (собирает транспорт), НЕ из args: подделать нельзя.
-      table.insert(owners, e.context.user_id)
-      local patch = { queue_urls = urls, queue_owners = owners }
-      if e.state.current < 0 then  -- плейлист был пуст — сразу запускаем первую заявку
-        patch.current = #urls
-        patch.owner = e.context.user_id
-        patch.src = tostring(e.args.url)
-        patch.playing = true
-        patch.anchor_position = 0
-        patch.anchor_time = e.context.authority_msec / 1000.0
-      end
-      return patch
-    end,
-  },
-  -- Транспорт принимает ТОЛЬКО владелец текущего ролика (authority — как модератор).
-  set_playing = {
-    reducer = function(e)
-      if e.context.user_id ~= e.state.owner and not e.context.is_authority then
-        return {}  -- отказ: не твой ролик
-      end
-      return { playing = e.args.playing == true,
-        anchor_position = tonumber(e.args.position) or 0,
-        anchor_time = e.context.authority_msec / 1000.0 }
-    end,
-  },
-  -- Переход к следующей заявке: владелец текущего ролика или authority.
-  next_entry = {
-    reducer = function(e)
-      if e.context.user_id ~= e.state.owner and not e.context.is_authority then
-        return {}
-      end
-      local index = e.state.current + 1
-      if index > #e.state.queue_urls then
-        return { current = -1, owner = "", src = "", playing = false }
-      end
-      return { current = index, owner = e.state.queue_owners[index],
-        src = e.state.queue_urls[index], playing = true,
-        anchor_position = 0, anchor_time = e.context.authority_msec / 1000.0 }
-    end,
-  },
+	add_entry = {
+		write_rule = "anyone",
+		reducer = function(e)
+			if #e.state.queue_urls >= 50 then return {} end
+			local urls = e.state.queue_urls
+			local presenters = e.state.queue_presenters
+			table.insert(urls, tostring(e.args.url))
+			-- Actor выдан transport context, НЕ взят из args.
+			table.insert(presenters, e.context.actor_user_id)
+			local patch = { queue_urls = urls, queue_presenters = presenters }
+			local binding_patch = {}
+			if e.state.current < 0 then  -- плейлист был пуст — сразу запускаем первую заявку
+				patch.current = #urls
+				patch.src = tostring(e.args.url)
+				patch.playing = true
+				patch.anchor_position = 0
+				patch.anchor_time = e.context.authority_msec / 1000.0
+				binding_patch.presenter = e.context.actor_user_id
+			end
+			return { state = patch, bindings = binding_patch }
+		end,
+	},
+	-- Транспорт принимает только назначенный presenter (authority — recovery/moderation).
+	set_playing = {
+		write_rule = { any_of = { "authority", { assigned = "presenter" } } },
+		reducer = function(e)
+			return { state = { playing = e.args.playing == true,
+				anchor_position = tonumber(e.args.position) or 0,
+				anchor_time = e.context.authority_msec / 1000.0 } }
+		end,
+	},
+	-- Переход к следующей заявке меняет state и presenter одним commit.
+	next_entry = {
+		write_rule = { any_of = { "authority", { assigned = "presenter" } } },
+		reducer = function(e)
+			local index = e.state.current + 1
+			if index > #e.state.queue_urls then
+				return { state = { current = -1, src = "", playing = false },
+					bindings = { presenter = "" } }
+			end
+			return { state = { current = index, src = e.state.queue_urls[index],
+				playing = true, anchor_position = 0,
+				anchor_time = e.context.authority_msec / 1000.0 },
+				bindings = { presenter = e.state.queue_presenters[index] } }
+		end,
+	},
 }
 ```
 
 Клиентская часть — та же якорная модель: подписка применяет `src`/транспорт к базовому
 плееру (`sync="none"`), дрифт-коррекция локальна. Конец ролика ловится сигналом
 `finished` плеера (см. [vrweb/video/1](scripting-api.md#видео-плееры-vrwebvideo1)); команду
-`next_entry` шлёт владелец — у остальных reducer её просто отклонит, поэтому дубли безопасны.
-Если владельцу нужен режим «все ждут мою буферизацию», он редкими командами переякоривает
+`next_entry` шлёт presenter — у остальных PolicyEvaluator отклонит команду до reducer.
+Если presenter нужен режим «все ждут мою буферизацию», он редкими командами переякоривает
 канон позицией **своего** плеера из собственного `on_update`.
 
 Замечания к границам доверия:
 
-- `context.user_id` пока self-declared, пока участник не верифицирован через Home Server;
+- `context.actor_user_id` пока соответствует self-declared identity, пока участник не
+  верифицирован через Home Server;
   для владельческих прав в недоверенной комнате требуйте `e.context.verified` или стройте
   правила на рангах. `peer_id` транспортно-аутентичен, но меняется при reconnect.
 - Reducer исполняется на клиенте authority: модифицированный клиент authority может

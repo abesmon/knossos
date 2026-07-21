@@ -14,9 +14,11 @@ assert(document.state.define("cnt", {
   version = 1,
   fields = { n = { type = "int", default = 0 } },
   default_write_rule = { rank = { op = "lte", value = 1073741824 } },
-  commands = { bump = { reducer = function(event) return { n = event.state.n + 1 } end } },
+  commands = { bump = { reducer = function(event)
+    return { state = { n = event.state.n + 1 } }
+  end } },
 }))
-assert(document.state.ensure("box", "cnt", { n = 0 }, ""))
+assert(document.state.ensure("box", "cnt", { n = 0 }, {}))
 
 counter.on("use", function(_event)
   document.state.command("box", "cnt", 1, "bump", {})

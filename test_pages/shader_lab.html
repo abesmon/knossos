@@ -39,12 +39,12 @@ assert(document.state.define(schema, {
   commands = {
     publish = {
       reducer = function(event)
-        return {
+        return { state = {
           source = event.args.source,
           language = event.args.language,
           language_version = event.args.language_version,
           shader_type = event.args.shader_type,
-        }
+        } }
       end,
     },
   },
@@ -54,7 +54,7 @@ assert(document.state.ensure(object, schema, {
   language = "godot-shader",
   language_version = "4.6",
   shader_type = "spatial",
-}, ""))
+}, {}))
 
 local function compile_and_show(state)
   editor.set("text", state.source)

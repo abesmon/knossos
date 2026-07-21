@@ -79,6 +79,12 @@ func _ready() -> void:
 			"standalone distributed command is accepted (%s)" % str(command_result))
 	_eq(not red_lamp.visible and green_lamp.visible, true,
 			"activation commits distributed state and updates scene objects")
+	_eq(NetworkManager.replicated_bindings("demo.light-switch/switch",
+			"demo.light-switch/light").get("operator"), Settings.user_id,
+			"world reducer assigns a custom operator binding from transport actor")
+	var green_status := targets.get("green-status") as Label3D
+	_eq(green_status != null and green_status.text == "ОПЕРАТОР: " + Settings.user_id, true,
+			"on_bindings delivers the atomic binding change to Luau")
 
 	runtime.close()
 	runtime.queue_free()

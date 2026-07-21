@@ -2,7 +2,7 @@ class_name GrabStateSchema
 extends RefCounted
 
 ## Нормативная машина hold-состояния grabbable-предметов (schema "vrweb.grabbable.hold").
-## Канон: КТО держит объект (holder_user_id), КАКОЙ рукой (hand), с каким хватом (grip)
+## Канон: binding holder + КАКАЯ рука (hand), с каким хватом (grip)
 ## и где объект покоится, когда свободен (rest). Мировая поза держимого предмета — производная
 ## презентация (якорь руки × grip), в канон не входит и по сети не гоняется.
 ## Контракт и таблица переходов — docs/space/grabbable.md; клиентская часть — docs/client/grabbable.md.
@@ -18,11 +18,10 @@ const MAX_USER_BYTES := 128
 const MAX_POSE_ABS := 100000.0
 
 
-static func definition(default_rank: int) -> Dictionary:
+static func definition() -> Dictionary:
 	return {
 		"version": VERSION,
 		"fields": {
-			"holder_user_id": {"type": "string", "default": "", "max_bytes": MAX_USER_BYTES},
 			"hand": {"type": "string", "default": "", "max_bytes": MAX_HAND_BYTES},
 			"grip": {"type": "array", "default": POSE_IDENTITY.duplicate(),
 				"max_items": 7, "items": {"type": "float", "default": 0.0}},
@@ -30,16 +29,13 @@ static func definition(default_rank: int) -> Dictionary:
 				"max_items": 7, "items": {"type": "float", "default": 0.0}},
 			# Политика кражи фиксируется при регистрации объекта (из атрибута тега) и командами
 			# не меняется — у схемы намеренно нет команды-сеттера.
-			"theft": {"type": "bool", "default": true},
+			"takeover_allowed": {"type": "bool", "default": true},
 			# Режим удержания (атрибут mode): false — fixed (снап в авторский хват),
 			# true — adjustable (естественный хват + подстройка держателем). Тоже фиксируется
 			# при регистрации: reducer обязан валидировать adjust, даже если узел ещё не построен.
 			"adjustable": {"type": "bool", "default": false},
 		},
-		"default_write_rule": {"any_of": [
-			"authority",
-			{"rank": {"op": "lte", "value": default_rank}},
-		]},
+		"default_write_rule": {"any_of": ["authority", "anyone"]},
 		"commands": {
 			"grab": {"reducer": GrabStateSchema.reduce_grab},
 			"release": {"reducer": GrabStateSchema.reduce_release},
@@ -48,10 +44,10 @@ static func definition(default_rank: int) -> Dictionary:
 	}
 
 
-## grab(hand, grip): взять свободный предмет или перехватить чужой (если theft разрешён).
+## grab(hand, grip): взять свободный предмет или перехватить чужой, если takeover разрешён.
 ## Аноним (пустой user_id) держать не может: holder == "" означает «свободен».
 static func reduce_grab(state: Dictionary, args: Dictionary, context: Dictionary) -> Dictionary:
-	var user_id := str(context.get("user_id", ""))
+	var user_id := str(context.get("actor_user_id", ""))
 	if user_id == "" or user_id.to_utf8_buffer().size() > MAX_USER_BYTES:
 		return {}
 	var hand := str(args.get("hand", ""))
@@ -59,37 +55,40 @@ static func reduce_grab(state: Dictionary, args: Dictionary, context: Dictionary
 		return {}
 	if not valid_pose(args.get("grip")):
 		return {}
-	var holder := str(state.get("holder_user_id", ""))
-	if holder != "" and holder != user_id and not bool(state.get("theft", true)):
+	var bindings: Dictionary = context.get("bindings", {})
+	var holder := str(bindings.get("holder", ""))
+	if holder != "" and holder != user_id and not bool(state.get("takeover_allowed", true)):
 		return {}
-	return {"holder_user_id": user_id, "hand": hand, "grip": normalized_pose(args["grip"])}
+	return {"bindings": {"holder": user_id},
+		"state": {"hand": hand, "grip": normalized_pose(args["grip"])}}
 
 
 ## adjust(grip): держатель подстраивает хват (дистанция/поворот в слоте). Разрешено только
-## владельцу текущего удержания и только для adjustable-предметов — у fixed хват задан автором.
+## назначенному holder и только для adjustable-предметов — у fixed хват задан создателем.
 static func reduce_adjust(state: Dictionary, args: Dictionary, context: Dictionary) -> Dictionary:
 	if not bool(state.get("adjustable", false)):
 		return {}
-	var holder := str(state.get("holder_user_id", ""))
-	if holder == "" or holder != str(context.get("user_id", "")):
+	var holder := str((context.get("bindings", {}) as Dictionary).get("holder", ""))
+	if holder == "" or holder != str(context.get("actor_user_id", "")):
 		return {}
 	if not valid_pose(args.get("grip")):
 		return {}
-	return {"grip": normalized_pose(args["grip"])}
+	return {"state": {"grip": normalized_pose(args["grip"])}}
 
 
 ## release(rest): положить предмет. Разрешено держателю; авторитет может освобождать
 ## принудительно (авто-release ушедшего держателя, модерация).
 static func reduce_release(state: Dictionary, args: Dictionary, context: Dictionary) -> Dictionary:
-	var holder := str(state.get("holder_user_id", ""))
+	var holder := str((context.get("bindings", {}) as Dictionary).get("holder", ""))
 	if holder == "":
 		return {}
-	var user_id := str(context.get("user_id", ""))
+	var user_id := str(context.get("actor_user_id", ""))
 	if user_id != holder and not bool(context.get("is_authority", false)):
 		return {}
 	if not valid_pose(args.get("rest")):
 		return {}
-	return {"holder_user_id": "", "hand": "", "rest": normalized_pose(args["rest"])}
+	return {"bindings": {"holder": ""},
+		"state": {"hand": "", "rest": normalized_pose(args["rest"])}}
 
 
 ## Поза валидна: ровно 7 конечных чисел в разумных пределах, кватернион не вырожден.

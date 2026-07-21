@@ -22,10 +22,10 @@ func _initialize() -> void:
 
 func _store(theft: bool = true, adjustable: bool = false) -> ReplicatedStateStore:
 	var store := ReplicatedStateStore.new()
-	_eq(store.register_schema(SID, GrabStateSchema.definition(1 << 30)), true, "schema registered")
+	_eq(store.register_schema(SID, GrabStateSchema.definition()), true, "schema registered")
 	_eq(store.ensure_object(OID, SID, {
 		"rest": [1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0],
-		"theft": theft,
+		"takeover_allowed": theft,
 		"adjustable": adjustable,
 	}), true, "object ensured")
 	store.begin_authority()
@@ -33,7 +33,7 @@ func _store(theft: bool = true, adjustable: bool = false) -> ReplicatedStateStor
 
 
 func _ctx(user_id: String, is_authority := false) -> Dictionary:
-	return {"peer_id": 1, "user_id": user_id, "rank": 1 << 30,
+	return {"peer_id": 1, "actor_user_id": user_id, "rank": 1 << 30,
 		"verified": false, "is_authority": is_authority, "authority_msec": 0}
 
 
@@ -47,7 +47,7 @@ func _test_grab_and_theft() -> void:
 	var store := _store(true)
 	var r := _grab(store, "alice")
 	_eq(bool(r.get("ok")), true, "свободный предмет берётся")
-	_eq(str(store.state_of(OID, SID)["holder_user_id"]), "alice", "holder = alice")
+	_eq(str(store.bindings_of(OID, SID).get("holder", "")), "alice", "holder = alice")
 	_eq(str(store.state_of(OID, SID)["hand"]), "right", "hand = right")
 
 	r = _grab(store, "")
@@ -55,7 +55,7 @@ func _test_grab_and_theft() -> void:
 
 	r = _grab(store, "bob", "left")
 	_eq(bool(r.get("ok")), true, "theft=allow: перехват из чужой руки")
-	_eq(str(store.state_of(OID, SID)["holder_user_id"]), "bob", "holder = bob после кражи")
+	_eq(str(store.bindings_of(OID, SID).get("holder", "")), "bob", "holder = bob после кражи")
 
 	r = _grab(store, "bob", "right")
 	_eq(bool(r.get("ok")), true, "держатель может перехватить сам у себя (смена руки)")
@@ -64,7 +64,7 @@ func _test_grab_and_theft() -> void:
 	var protected := _store(false)
 	_eq(bool(_grab(protected, "alice").get("ok")), true, "theft=deny: свободный всё равно берётся")
 	_eq(bool(_grab(protected, "bob").get("ok")), false, "theft=deny: кража отклонена")
-	_eq(str(protected.state_of(OID, SID)["holder_user_id"]), "alice", "holder не изменился")
+	_eq(str(protected.bindings_of(OID, SID).get("holder", "")), "alice", "holder не изменился")
 
 
 func _test_release_rules() -> void:
@@ -80,7 +80,7 @@ func _test_release_rules() -> void:
 	r = store.commit_command(OID, SID, V, "release", {"rest": rest}, _ctx("alice"))
 	_eq(bool(r.get("ok")), true, "release держателем принят")
 	var state := store.state_of(OID, SID)
-	_eq(str(state["holder_user_id"]), "", "предмет свободен")
+	_eq(str(store.bindings_of(OID, SID).get("holder", "")), "", "предмет свободен")
 	_eq(str(state["hand"]), "", "рука очищена")
 	_eq(float((state["rest"] as Array)[0]), 5.0, "rest применён")
 
@@ -111,7 +111,7 @@ func _test_adjust_rules() -> void:
 	r = adj.commit_command(OID, SID, V, "adjust", {"grip": moved}, _ctx("alice"))
 	_eq(bool(r.get("ok")), true, "adjustable: держатель подстраивает хват")
 	_eq(float((adj.state_of(OID, SID)["grip"] as Array)[2]), -1.5, "grip обновлён")
-	_eq(str(adj.state_of(OID, SID)["holder_user_id"]), "alice", "держатель не изменился")
+	_eq(str(adj.bindings_of(OID, SID).get("holder", "")), "alice", "держатель не изменился")
 
 	r = adj.commit_command(OID, SID, V, "adjust", {"grip": [0.0, 0.0, 0.0]}, _ctx("alice"))
 	_eq(bool(r.get("ok")), false, "adjustable: кривая поза хвата отклонена")
