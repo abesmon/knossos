@@ -58,8 +58,9 @@ Player (хаб ввода: _unhandled_input, именованные действ
 - **UI (файловый диалог, статус-строка)** — у `main`: OS-пикер инжектируется в runtime как
   провайдер `document.files.pick`, подсказки тулбелта идут в статус-строку сигналом.
 - **Новый инструмент** = item-документ (VRWML c `<VRWebGrabbable>` + `<script
-  type="application/vrweb+luau">`) — клиент не меняется. Гайд для авторов —
-  [docs/space/portable-tools.md](../space/portable-tools.md).
+  type="application/vrweb+luau">`) — клиент не меняется. Руководство автора —
+  [docs/space/tool-authoring.md](../space/tool-authoring.md), архитектура —
+  [portable-tools.md](../space/portable-tools.md).
 - **Смоук-тесты**: [tests/test_item_tools.gd](../../tests/test_item_tools.gd)
   (`godot --headless tests/test_item_tools.tscn`) — тулбелт + все три item'а end-to-end;
   [tests/tool_system_test.gd](../../tests/tool_system_test.gd) — системный остаток

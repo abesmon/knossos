@@ -5,7 +5,8 @@
 
 > Это справочник по API. Практические рецепты авторских систем синхронизации (якорная
 > модель, плейлист с владельцами, выбор между state и remote) —
-> в [scripting-patterns.md](scripting-patterns.md).
+> в [scripting-patterns.md](scripting-patterns.md); как собрать свой инструмент-предмет —
+> в [tool-authoring.md](tool-authoring.md).
 
 Top-level код всегда входит в VM на lifecycle-границе `scene-ready`: декларативная сцена уже
 находится в дереве и прошла первый physics frame. Отдельного `DOMContentLoaded` callback в v1 нет,

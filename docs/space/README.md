@@ -39,6 +39,15 @@ Public page scripting API и capability contract — в [scripting-api.md](scrip
 - [vrwml-tags.md](vrwml-tags.md) — подробный реализованный каталог стандартных тегов VRWML,
   режимы композиции, загрузка внешних GLB-ресурсов и ограничения текущего Knossos runtime.
 
+## Предметы и инструменты
+
+- [grabbable.md](grabbable.md) — нормативный контракт предметов, которые участник берёт в
+  руку: тег, hold-состояние, точки крепления, события.
+- [portable-tools.md](portable-tools.md) — архитектура переносимых инструментов: почему
+  инструмент это предмет со скриптом, что уже есть и куда расти.
+- [tool-authoring.md](tool-authoring.md) — руководство автора: как собрать свой
+  инструмент-предмет, паттерны ввода, артефакты, лимиты и чек-лист.
+
 ## Исследования других платформ
 
 - [vrchat-developer-api.md](vrchat-developer-api.md) — карта SDK/Udon, Player API, persistence,

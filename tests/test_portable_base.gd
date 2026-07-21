@@ -263,5 +263,52 @@ func _run() -> void:
 	var cube_alive := cube != null and is_instance_valid(cube)
 	_check(not cube_alive, "grabbable предмета удалён вместе с item")
 
+	await _test_instance_isolation(manager)
 	_check(_script_errors.is_empty(), "callbacks без ошибок: %s" % str(_script_errors))
 	get_tree().quit(1 if _failed else 0)
+
+
+## Гарантия модовой модели (docs/space/tool-authoring.md): два экземпляра ОДНОГО предмета в
+## комнате независимы — namespace по id объекта слоя разводит и grabbable-адреса, и
+## wire-адреса document.state. Работа с одним экземпляром не трогает второй.
+func _test_instance_isolation(manager: GrabManager) -> void:
+	var ids: Array[String] = []
+	for i in 2:
+		var id := NetworkManager.new_object_id()
+		ids.append(id)
+		NetworkManager.request_scene_action({"op": SceneChanges.OP_ADD, "id": id,
+			"kind": "vrweb-item", "parent": "", "ttl": 0.0,
+			"props": {"src": "vrwebresource://items/counter.html",
+				"position": [float(i) * 2.0, 1.0, 4.0]}})
+	for i in 14:
+		await get_tree().process_frame
+
+	var instances: Array[Grabbable] = []
+	for id in ids:
+		for g in get_tree().get_nodes_in_group(Grabbable.GROUP):
+			if g is Grabbable and (g as Grabbable).grab_id.begins_with("item-%s." % id):
+				instances.append(g)
+	_check(instances.size() == 2, "два экземпляра одного item материализованы (%d)"
+			% instances.size())
+	if instances.size() != 2:
+		return
+
+	# Считаем ТОЛЬКО на первом экземпляре.
+	manager.request_grab(instances[0])
+	await get_tree().process_frame
+	for i in 3:
+		manager.use_held()
+		await get_tree().process_frame
+	manager.release_held()
+	await get_tree().process_frame
+
+	var first := NetworkManager.replicated_state("item-%s.counter/box" % ids[0],
+			"item-%s.counter/cnt" % ids[0])
+	var second := NetworkManager.replicated_state("item-%s.counter/box" % ids[1],
+			"item-%s.counter/cnt" % ids[1])
+	_check(int(first.get("n", -1)) == 3, "state первого экземпляра посчитан (%s)" % str(first))
+	_check(int(second.get("n", -1)) == 0, "state второго экземпляра не тронут (%s)" % str(second))
+
+	for id in ids:
+		NetworkManager.request_scene_action({"op": SceneChanges.OP_REMOVE, "id": id})
+	await get_tree().process_frame
