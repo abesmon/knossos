@@ -138,6 +138,8 @@ func _run() -> void:
 		await get_tree().process_frame
 	_check(_held_id(manager).ends_with(".pencil-item"), "слот 2: карандаш в руке (%s)"
 			% _held_id(manager))
+	_check(manager.local_held() != null and not manager.local_held().theft_allowed,
+			"карандаш нельзя отобрать из рук")
 
 	# --- Рисование: use → ведение поворотом камеры → use_end ---
 	manager.use_held()
@@ -170,6 +172,8 @@ func _run() -> void:
 		await get_tree().process_frame
 	_check(_held_id(manager).ends_with(".eraser-item"), "слот 2 ещё раз: ластик в руке (%s)"
 			% _held_id(manager))
+	_check(manager.local_held() != null and not manager.local_held().theft_allowed,
+			"ластик нельзя отобрать из рук")
 	manager.use_held()
 	for i in 30:
 		await get_tree().process_frame
@@ -194,6 +198,8 @@ func _run() -> void:
 		await get_tree().process_frame
 	_check(_held_id(manager).ends_with(".image-frame-item"), "слот 3: рамка в руке (%s)"
 			% _held_id(manager))
+	_check(manager.local_held() != null and not manager.local_held().theft_allowed,
+			"рамку нельзя отобрать из рук")
 
 	# Ошибки скрипта предмета молча закрывают его realm — ловим их явно.
 	var item_errors: Array = []

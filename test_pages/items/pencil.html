@@ -97,7 +97,7 @@ end, "")
   <vrwml>
     <Resource id="PencilBody" type="CylinderMesh" top_radius="0.004" bottom_radius="0.013" height="0.4"/>
     <Resource id="PencilMaterial" type="StandardMaterial3D" albedo_color="Color(0.95,0.75,0.2,1)"/>
-    <VRWebGrabbable id="pencil-item" grip="Transform3D(1,0,0, 0,0,-1, 0,1,0, 0,0,-0.2)">
+    <VRWebGrabbable id="pencil-item" theft="deny" grip="Transform3D(1,0,0, 0,0,-1, 0,1,0, 0,0,-0.2)">
       <MeshInstance3D mesh="SubResource:::PencilBody" surface_material_override/0="SubResource:::PencilMaterial"/>
     </VRWebGrabbable>
   </vrwml>

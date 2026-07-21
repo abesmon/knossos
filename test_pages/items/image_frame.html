@@ -95,7 +95,7 @@ end, "")
   <vrwml>
     <Resource id="FrameBody" type="BoxMesh" size="Vector3(0.3,0.22,0.015)"/>
     <Resource id="FrameMaterial" type="StandardMaterial3D" albedo_color="Color(0.35,0.55,0.9,1)"/>
-    <VRWebGrabbable id="image-frame-item">
+    <VRWebGrabbable id="image-frame-item" theft="deny">
       <MeshInstance3D mesh="SubResource:::FrameBody" surface_material_override/0="SubResource:::FrameMaterial"/>
     </VRWebGrabbable>
 

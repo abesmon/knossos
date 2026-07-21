@@ -12,8 +12,8 @@
 ## Модель в одном абзаце
 
 Инструмент — это **item-документ**: обычная маленькая страница с блоком `<vrwml>`, где лежит
-[`<VRWebGrabbable>`](grabbable.md) (физический носитель — его берут в руку, видно другим,
-можно отобрать) и `<script type="application/vrweb+luau">` (поведение). В мир предмет
+[`<VRWebGrabbable>`](grabbable.md) (физический носитель — его берут в руку и видно другим;
+возможность отобрать задаёт `theft`) и `<script type="application/vrweb+luau">` (поведение). В мир предмет
 приходит объектом [эфемерного слоя](../network/ephemeral-changes.md#переносимые-предметы-kindvrweb-item)
 `kind="vrweb-item"` с `props.src` — каждый клиент сам скачивает документ и исполняет его в
 **собственном realm** со **стандартным** capability pool. Никакой регистрации, магазина или
@@ -34,7 +34,7 @@
 <body>
   <vrwml>
     <Resource id="Body" type="BoxMesh" size="Vector3(0.2,0.2,0.2)"/>
-    <VRWebGrabbable id="my-tool" mode="adjustable" theft="allow">
+    <VRWebGrabbable id="my-tool" mode="adjustable" theft="deny">
       <MeshInstance3D mesh="SubResource:::Body"/>
     </VRWebGrabbable>
   </vrwml>
@@ -45,7 +45,8 @@
 - **`<VRWebGrabbable id=...>`** — носитель. Атрибуты: `mode="fixed"` (снап в авторский
   `grip` — инструменты с осмысленной позой в руке: карандаш, «пистолет») или
   `mode="adjustable"` (естественный хват + подстройка колесом/СКМ — реквизит);
-  `theft="allow|deny"`. Полный контракт — [grabbable.md](grabbable.md).
+  `theft="allow|deny"` (`deny` рекомендуется для инструментов, чтобы их нельзя было
+  отобрать во время действия). Полный контракт — [grabbable.md](grabbable.md).
 - **Скрипт** получает стандартный `document` и адресует свои узлы по `id`
   (`document.query("#my-tool")`). Скриптов может быть несколько — они делят realm предмета.
 - **Namespace автоматический**: id скриптов и grabbable-адреса каждого экземпляра предмета
