@@ -28,7 +28,7 @@ func _init() -> void:
 
 func _run() -> void:
 	Settings.online_enabled = false
-	var html := FileAccess.get_file_as_string("res://test_pages/grabbable.html")
+	var html := FileAccess.get_file_as_string("res://addons/vrweb_tools/examples/grabbable.html")
 	var doc := HtmlParser.parse(html)
 
 	var world := Node3D.new()
@@ -41,7 +41,7 @@ func _run() -> void:
 	world.add_child(manager)
 	manager.setup(null, null)
 
-	var built := VrwebBuilder.build(doc, "vrwebresource://grabbable.html")
+	var built := VrwebBuilder.build(doc, "vrwebresource://examples/grabbable.html")
 	world.add_child(built["root"])
 	await get_tree().process_frame
 
@@ -67,13 +67,13 @@ func _run() -> void:
 
 	# Активируем НАСТОЯЩИЙ скрипт страницы (как это делает главный runtime) — тест ловит
 	# регрессии в самом demo (напр. короткая форма handle.on должна активироваться).
-	var collected := VrwebScriptDeclaration.collect(doc, "vrwebresource://grabbable.html")
+	var collected := VrwebScriptDeclaration.collect(doc, "vrwebresource://examples/grabbable.html")
 	_check(collected.errors.is_empty() and collected.scripts.size() == 1,
 			"скрипт страницы объявлен корректно: %s" % str(collected.errors))
 
 	var runtime := VrwebLuauRuntime.new()
 	add_child(runtime)
-	runtime.setup(world, targets, "vrwebresource://grabbable.html", null,
+	runtime.setup(world, targets, "vrwebresource://examples/grabbable.html", null,
 			VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL))
 	var activated := runtime.activate(collected.scripts)
 	_check(activated.ok, "реальный скрипт страницы активирован без ошибок: %s"

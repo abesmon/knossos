@@ -165,7 +165,7 @@ HTML ──HtmlParser──> дерево HtmlNode
 шортхенды, цвета, токенизация минифицированного), StyleResolver (каскад, наследование,
 em/rem-цепочки, скрытие классами, комбинаторы с бэктрекингом, var()), интеграция с
 топологией (скрытая секция не даёт комнату; паспорт документа из каскада), e2e по
-`test_pages/css_demo.html` + `css_demo.css`, CssFetcher (локальные схемы, @import,
+`addons/vrweb_tools/examples/css_demo.html` + `css_demo.css`, CssFetcher (локальные схемы, @import,
 недоступный файл).
 
 ```bash
@@ -173,5 +173,5 @@ GODOT="/Applications/Godot 4.6.3.app/Contents/MacOS/Godot"
 "$GODOT" --headless --path . --script res://tests/test_css.gd
 ```
 
-Вручную: `vrwebresource://css_demo.html` — тёмное небо из `--page-bg`, teal-карточка,
+Вручную: `vrwebresource://examples/css_demo.html` — тёмное небо из `--page-bg`, teal-карточка,
 `.sr-only` и мобильное меню отсутствуют в мире.

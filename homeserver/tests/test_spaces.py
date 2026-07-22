@@ -160,8 +160,8 @@ def test_seed_key_port():
 def test_seed_key_keeps_non_web_scheme():
     # Не-веб схемы СОХРАНЯЮТСЯ в ключе (иначе локальная demo.html столкнулась бы с сайтом
     # demo.html), путь регистрозависим, регистр схемы нормализуется.
-    assert vrweb_scene.seed_key("vrwebresource://test_pages/Demo.html") \
-        == "vrwebresource://test_pages/Demo.html"
+    assert vrweb_scene.seed_key("vrwebresource://Demo.html") \
+        == "vrwebresource://Demo.html"
     assert vrweb_scene.seed_key("vrweblocal:///Users/alice/page.html/") \
         == "vrweblocal:///Users/alice/page.html"
     assert vrweb_scene.seed_key("VRWebLocal:///X/") == "vrweblocal:///X"

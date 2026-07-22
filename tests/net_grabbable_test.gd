@@ -5,7 +5,7 @@ extends Node
 ## держателя, а не висящим в воздухе. Процессы запускает tests/run_net_grabbable_test.py.
 
 # Takeover path needs the default theft="allow" contract; pencil intentionally declares deny.
-const ITEM_SRC := "vrwebresource://items/color_cube.html"
+const ITEM_SRC := "vrwebresource://examples/items/color_cube.html"
 const ROOM := "grabbable-late-join-e2e"
 
 var _role := "holder"

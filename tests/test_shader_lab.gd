@@ -8,15 +8,15 @@ var _failed := false
 
 func _ready() -> void:
 	NetworkManager._replicated.reset_session()
-	var html := FileAccess.get_file_as_string("res://test_pages/shader_lab.html")
+	var html := FileAccess.get_file_as_string("res://addons/vrweb_tools/examples/shader_lab.html")
 	var doc := HtmlParser.parse(html)
 	var declarations := VrwebScriptDeclaration.collect(doc,
-			"vrwebresource://shader_lab.html")
+			"vrwebresource://examples/shader_lab.html")
 	_eq(declarations.errors.is_empty(), true, "shader demo has a valid Luau declaration")
 	_eq(declarations.scripts.size(), 1, "shader demo owns one page script")
 
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
-	var built := VrwebBuilder.build(doc, "vrwebresource://shader_lab.html", policy)
+	var built := VrwebBuilder.build(doc, "vrwebresource://examples/shader_lab.html", policy)
 	var page_root := built.get("root") as Node
 	add_child(page_root)
 	var targets := _targets(doc, built)
@@ -66,7 +66,7 @@ func _ready() -> void:
 	var script_errors := []
 	runtime.script_failed.connect(func(script_id: String, phase: String, message: String):
 		script_errors.append({"script_id": script_id, "phase": phase, "message": message}))
-	runtime.setup(page_root, targets, "vrwebresource://shader_lab.html", null, policy)
+	runtime.setup(page_root, targets, "vrwebresource://examples/shader_lab.html", null, policy)
 	var activated := runtime.activate(declarations.scripts)
 	_eq(activated.ok, true, "shader demo Luau activates (%s)" % str(script_errors))
 	_eq(preview.material_override is ShaderMaterial, true,

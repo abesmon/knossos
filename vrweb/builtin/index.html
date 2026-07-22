@@ -17,23 +17,21 @@
 
   <nav>
     <a href="about.html">О проекте</a>
-    <a href="rooms/gallery.html">Галерея</a>
-    <a href="state_switch.html">Luau: update, clocks, resources и общий state</a>
-    <a href="remote_call.html">Luau: Remote Call, ranks и участники инстанса</a>
-    <a href="remote_data_demo.html">Luau: remote data, ресурсы и синхронизация</a>
-    <a href="inline_script.html">Inline Luau script</a>
-    <a href="external_script.html">Luau: скрипт из соседнего файла</a>
-    <a href="shader_lab.html">Luau: совместное редактирование Godot shader</a>
-    <a href="scripted_video.html">Luau: скриптовый видео-плеер (своя синхронизация)</a>
+    <a href="vrwebresource://examples/index.html">Примеры стандарта VRWeb (Maker Kit)</a>
     <a href="https://example.com">Внешний портал</a>
   </nav>
 
   <main>
     <h2>Зачем это</h2>
     <p>Эта страница лежит в бандле приложения и открывается через
-       <code>vrwebresource://index.html</code> — без сети и сервера.</p>
+       <code>vrwebresource://index.html</code> — без сети и сервера. Это встроенный контент
+       Knossos (дашборд/туториал), а не демонстрация стандарта.</p>
     <p>Относительная картинка <code>logo.svg</code> и ссылки резолвятся внутри той же
        схемы, поэтому переходы между локальными страницами работают как на обычном сайте.</p>
+    <p>Демонстрации того, что умеет стандарт VRWeb, поставляются с <em>Maker Kit</em>.
+       Схема <code>vrwebresource://</code> — общая для всех клиентов (у каждого свой контент
+       по этим путям), а Knossos дополнительно бандлит примеры под своим подпутём
+       <code>vrwebresource://examples/</code> — см. ссылку «Примеры стандарта VRWeb» выше.</p>
   </main>
 
   <aside>

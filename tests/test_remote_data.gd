@@ -44,7 +44,7 @@ end))
 """
 	runtime.setup(page, {"label": label, "material": material,
 			"loaded-material": loaded_material},
-			"vrwebresource://remote_data_demo.html", null,
+			"vrwebresource://examples/remote_data_demo.html", null,
 			VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL))
 	var errors := []
 	runtime.script_failed.connect(func(id, phase, message):
@@ -111,13 +111,13 @@ func _test_identity_headers() -> void:
 
 
 func _test_demo_activation() -> void:
-	var html := FileAccess.get_file_as_string("res://test_pages/remote_data_demo.html")
+	var html := FileAccess.get_file_as_string("res://addons/vrweb_tools/examples/remote_data_demo.html")
 	var doc := HtmlParser.parse(html)
 	var declarations := VrwebScriptDeclaration.collect(doc,
-			"vrwebresource://remote_data_demo.html")
+			"vrwebresource://examples/remote_data_demo.html")
 	_eq(declarations.errors.is_empty(), true, "remote-data demo declaration is valid")
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
-	var built := VrwebBuilder.build(doc, "vrwebresource://remote_data_demo.html", policy)
+	var built := VrwebBuilder.build(doc, "vrwebresource://examples/remote_data_demo.html", policy)
 	var page_root := built.get("root") as Node
 	add_child(page_root)
 	var targets := {}
@@ -131,7 +131,7 @@ func _test_demo_activation() -> void:
 		targets[resource_id] = built.resources[resource_id]
 	var runtime := VrwebLuauRuntime.new()
 	add_child(runtime)
-	runtime.setup(page_root, targets, "vrwebresource://remote_data_demo.html", null, policy)
+	runtime.setup(page_root, targets, "vrwebresource://examples/remote_data_demo.html", null, policy)
 	var activated := runtime.activate(declarations.scripts)
 	_eq(activated.ok, true, "remote-data demo Luau and scene ids activate")
 	runtime.close()

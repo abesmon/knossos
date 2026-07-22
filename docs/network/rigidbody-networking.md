@@ -3,7 +3,7 @@
 > **Статус на 2026-07-21:** профиль реализован в Knossos: binding-aware `SAMPLE`, стандартная
 > physics-схема, `document.physics`, dynamic/proxy adapter, атомарный handoff и интеграция с
 > `VRWebGrabbable`. Публичная внешняя демка находится в
-> [`test_pages/networked_rigidbody.html`](../../test_pages/networked_rigidbody.html), руководство
+> [`addons/vrweb_tools/examples/networked_rigidbody.html`](../../addons/vrweb_tools/examples/networked_rigidbody.html), руководство
 > автора — в [networked-rigidbody.md](../space/networked-rigidbody.md). Физический объект остаётся
 > обычным VRWML-тегом `<RigidBody3D>`; отдельный заменяющий тег не вводится.
 

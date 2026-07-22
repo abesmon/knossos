@@ -1,11 +1,11 @@
 # Демо remote data и runtime-ресурсов
 
-Страница [test_pages/remote_data_demo.html](../../test_pages/remote_data_demo.html) показывает
+Страница [addons/vrweb_tools/examples/remote_data_demo.html](../../addons/vrweb_tools/examples/remote_data_demo.html) показывает
 динамическую карусель из пяти элементов. Открыть её можно с локальной стартовой страницы или
 напрямую:
 
 ```text
-vrwebresource://remote_data_demo.html
+vrwebresource://examples/remote_data_demo.html
 ```
 
 Для каждого слайда Luau параллельно загружает JSON-текст и изображение. Первые четыре изображения

@@ -29,15 +29,15 @@ func _ready() -> void:
 	NetworkManager._peer_seqs = {1: 1}
 	NetworkManager._ranks[Settings.user_id] = 5
 
-	var html := FileAccess.get_file_as_string("res://test_pages/remote_call.html")
+	var html := FileAccess.get_file_as_string("res://addons/vrweb_tools/examples/remote_call.html")
 	var doc := HtmlParser.parse(html)
 	var declarations := VrwebScriptDeclaration.collect(doc,
-			"vrwebresource://remote_call.html")
+			"vrwebresource://examples/remote_call.html")
 	_eq(declarations.errors.is_empty(), true, "remote call demo has a valid declaration")
 	_eq(declarations.scripts.size(), 1, "remote call demo has one page script")
 
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
-	var built := VrwebBuilder.build(doc, "vrwebresource://remote_call.html", policy)
+	var built := VrwebBuilder.build(doc, "vrwebresource://examples/remote_call.html", policy)
 	var page_root := built.get("root") as Node
 	add_child(page_root)
 	var targets := _targets(doc, built)
@@ -59,7 +59,7 @@ func _ready() -> void:
 	var script_errors := []
 	runtime.script_failed.connect(func(script_id: String, phase: String, message: String):
 		script_errors.append({"script_id": script_id, "phase": phase, "message": message}))
-	runtime.setup(page_root, targets, "vrwebresource://remote_call.html", player, policy)
+	runtime.setup(page_root, targets, "vrwebresource://examples/remote_call.html", player, policy)
 	var activated := runtime.activate(declarations.scripts)
 	_eq(activated.ok, true, "remote call Luau script activates (%s)" % str(activated))
 	if not activated.ok:

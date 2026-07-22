@@ -751,7 +751,7 @@ bindings = { presenter = event.context.actor_user_id }
 
 ## Рабочие примеры в репозитории
 
-- [state_switch.html](../../test_pages/state_switch.html) — reducer одновременно меняет свет и
+- [state_switch.html](../../addons/vrweb_tools/examples/state_switch.html) — reducer одновременно меняет свет и
   назначает custom slot `operator`; `on_bindings` обновляет Label3D.
 - [state-switch-demo.md](../client/state-switch-demo.md) — разбор полного пути UI → command →
   authority → atomic delta → Luau subscription.

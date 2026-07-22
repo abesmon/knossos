@@ -1,11 +1,11 @@
 # Демо Remote Call, ranks и участников
 
-Страница [test_pages/remote_call.html](../../test_pages/remote_call.html) показывает адресованный
+Страница [addons/vrweb_tools/examples/remote_call.html](../../addons/vrweb_tools/examples/remote_call.html) показывает адресованный
 `document.remote.call` как доставку намерения, решение по которому принимает локальный Luau
 handler на клиенте адресата. Открыть её можно ссылкой с локальной стартовой страницы или напрямую:
 
 ```text
-vrwebresource://remote_call.html
+vrwebresource://examples/remote_call.html
 ```
 
 Три кнопки рассылают запрос всем из `document.players.all()` и ведут на три разные площадки:

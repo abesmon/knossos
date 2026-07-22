@@ -137,10 +137,11 @@ static func _error(declaration: Dictionary, code: String, message: String) -> Di
 static func _url_allowed(resolved_url: String, base_url: String) -> bool:
 	if resolved_url.begins_with("http://") or resolved_url.begins_with("https://"):
 		return true
-	# Local schemes are an explicit local-page capability. A remote page may not turn a
-	# linked script into a read/execute primitive over the user's filesystem or app bundle.
-	if resolved_url.begins_with(PageFetcher.LOCAL_SCHEME):
-		return base_url.begins_with(PageFetcher.LOCAL_SCHEME)
-	if resolved_url.begins_with(PageFetcher.RESOURCE_SCHEME):
-		return base_url.begins_with(PageFetcher.RESOURCE_SCHEME)
+	# Local/bundle schemes are an explicit local-page capability. A remote page may not turn a
+	# linked script into a read/execute primitive over the user's filesystem or app bundle:
+	# linked source must share the document's exact scheme (vrweblocal stays OS-local, vrwebresource
+	# stays inside the app bundle — including its examples/ mount).
+	var local_scheme := PageFetcher.local_scheme_of(resolved_url)
+	if local_scheme != "":
+		return base_url.begins_with(local_scheme)
 	return false

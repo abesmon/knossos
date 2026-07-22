@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb Maker Kit — примеры стандарта</title>
+  <style>
+    body { background-color: #1b2330; }
+    main { background-color: #243049; }
+    aside { background-color: #2e2440; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Примеры стандарта VRWeb</h1>
+  </header>
+
+  <nav>
+    <a href="css_demo.html">CSS: каскад, наследование и @import</a>
+    <a href="rooms/gallery.html">Изображения: галерея (img, относительные пути)</a>
+    <a href="grabbable.html">Grabbable: захват предметов</a>
+    <a href="networked_rigidbody.html">Сетевая физика: синхронизация rigidbody</a>
+    <a href="state_switch.html">Luau: update, clocks, resources и общий state</a>
+    <a href="remote_call.html">Luau: Remote Call, ranks и участники инстанса</a>
+    <a href="remote_data_demo.html">Luau: remote data, ресурсы и синхронизация</a>
+    <a href="inline_script.html">Inline Luau script</a>
+    <a href="external_script.html">Luau: скрипт из соседнего файла</a>
+    <a href="shader_lab.html">Luau: совместное редактирование Godot shader</a>
+    <a href="scripted_video.html">Luau: скриптовый видео-плеер (своя синхронизация)</a>
+    <a href="video.html">Видео-экран</a>
+    <a href="karcdn_video.html">Видео из внешнего CDN</a>
+    <a href="vrweb.html">Экспорт Godot-сцены в VRWML</a>
+  </nav>
+
+  <main>
+    <h2>Что это</h2>
+    <p>Это демонстрации возможностей стандарта <strong>VRWeb</strong>, а не конкретно Knossos.
+       Они поставляются вместе с <em>Maker Kit</em> и служат образцами разметки и Luau-скриптов
+       для авторов миров.</p>
+    <p>Внутри Knossos открываются под подпутём <code>vrwebresource://examples/</code> — это
+       просто выбор Knossos, что забандлить под своим (per-client) <code>vrwebresource://</code>,
+       а не отдельная схема стандарта. Обязательный встроенный контент клиента (дашборд, тулбар)
+       живёт в корне того же <code>vrwebresource://</code>.</p>
+  </main>
+
+  <footer>
+    <p>VRWeb Maker Kit · примеры</p>
+  </footer>
+</body>
+</html>

@@ -49,8 +49,8 @@ seek) — обычный авторский код в `document.on_update`. Пе
   якорь к ней непереводим. По `document.players.on_changed` тот, кому это положено по вашим
   правилам (новый authority, владелец ролика…), переякоривает канон своей текущей позицией.
 
-Полный работающий референс: [scripted video demo](../../test_pages/scripted_video.html)
-(`vrwebresource://scripted_video.html`), разбор — в
+Полный работающий референс: [scripted video demo](../../addons/vrweb_tools/examples/scripted_video.html)
+(`vrwebresource://examples/scripted_video.html`), разбор — в
 [video-player.md](../client/video-player.md#архитектура-базовый-уровень-и-надстройки).
 
 ## Рецепт: плейлист заявок с назначенным presenter

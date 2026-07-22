@@ -16,7 +16,7 @@
 | Материализация тега | [scripts/vrweb_builder.gd](../../scripts/vrweb_builder.gd) `_build_grabbable` | `<VRWebGrabbable>` → `Grabbable` (id/theft/grip — reserved-атрибуты) |
 | Якорь на аватаре | [actors/avatar/avatar_attachment_point.gd](../../actors/avatar/avatar_attachment_point.gd) `AvatarAttachmentPoint` | Узел-маркер точки крепления (`point = "hand.left" / "hand.right"`) |
 | Тесты | [tests/test_grab_state.gd](../../tests/test_grab_state.gd), [tests/test_grabbable.tscn](../../tests/test_grabbable.gd) | Чистый тест машины состояний; сценовый смоук полного офлайн-цикла |
-| Демо | [test_pages/grabbable.html](../../test_pages/grabbable.html) | `vrwebresource://grabbable.html`: мяч (use меняет цвет), статуя `theft="deny"`, ящик `mode="adjustable"` |
+| Демо | [addons/vrweb_tools/examples/grabbable.html](../../addons/vrweb_tools/examples/grabbable.html) | `vrwebresource://examples/grabbable.html`: мяч (use меняет цвет), статуя `theft="deny"`, ящик `mode="adjustable"` |
 
 ## Как ложится на существующие системы
 

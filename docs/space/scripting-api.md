@@ -132,7 +132,7 @@ Reducer в `definition.commands[name].reducer` получает один event:
 `{state, changed, revision}`, `on_bindings` — `{bindings, changed, revision}`. Представление остаётся обычной сценой: subscription вызывает
 `handle.set(...)`, а интеракция — `handle.on("activate", ...)` и затем `state.command(...)`.
 Полный копируемый пример: [демо общего света](../client/state-switch-demo.md) и его
-[inline Luau](../../test_pages/state_switch.html).
+[inline Luau](../../addons/vrweb_tools/examples/state_switch.html).
 
 В offline mode Knossos обрабатывает `command` тем же Store/reducer/delta путём локально, считая
 клиент временным standalone authority. При появлении комнаты это локальное состояние заменяется
@@ -194,7 +194,7 @@ simulator не могут стать новым каноном. `claim`/`handoff
 оптимистично; отказ authority возвращает тело к canonical proxy.
 
 Полное руководство и custom reducer: [networked-rigidbody.md](networked-rigidbody.md).
-Рабочая внешняя страница: [networked_rigidbody.html](../../test_pages/networked_rigidbody.html).
+Рабочая внешняя страница: [networked_rigidbody.html](../../addons/vrweb_tools/examples/networked_rigidbody.html).
 
 ## Эфемерный слой сцены (`vrweb/scene-objects/1`)
 
@@ -497,8 +497,8 @@ URL в `set_source` подчиняется тем же схемным огран
 решает late join; периодического трафика нет. `document.remote` остаётся для адресных
 transient-действий («пересинхронизируйся сейчас», действия ведущего над одним клиентом),
 которые не должны попадать в канон и доигрываться поздно вошедшим. Полный референс:
-[scripted video demo](../../test_pages/scripted_video.html)
-(`vrwebresource://scripted_video.html`).
+[scripted video demo](../../addons/vrweb_tools/examples/scripted_video.html)
+(`vrwebresource://examples/scripted_video.html`).
 
 ## Runtime shaders и материалы
 

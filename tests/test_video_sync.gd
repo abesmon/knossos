@@ -6,7 +6,7 @@ extends Node
 ## set_source меняет источник на лету.
 ## Запуск: HOME=/tmp/knossos-godot godot --headless --path . res://tests/test_video_sync.tscn
 
-const BASE := "vrwebresource://video.html"
+const BASE := "vrwebresource://examples/video.html"
 
 
 func _fail(msg: String) -> void:

@@ -1,6 +1,6 @@
 # Единое демо Luau: update, clocks, resources и Distributed State
 
-`vrwebresource://state_switch.html` — эталонный пример поведения страницы на
+`vrwebresource://examples/state_switch.html` — эталонный пример поведения страницы на
 `vrweb-luau/1`. Он показывает пересечение API в одном пространстве двумя script tags общего
 page realm:
 
@@ -16,7 +16,7 @@ page realm:
 В сцене нет специальных state/action/binding-тегов и невидимых behavior-узлов. Она содержит
 только обычные `StaticBody3D`, `MeshInstance3D`, `Label3D`, lights и resources. Вся предметная
 логика находится в двух inline Luau внутри
-[state_switch.html](../../test_pages/state_switch.html), поэтому тот же документ служит
+[state_switch.html](../../addons/vrweb_tools/examples/state_switch.html), поэтому тот же документ служит
 копируемым примером для создателей и не расширяет VRWML новой доменной конструкцией.
 
 ## Update и две шкалы времени

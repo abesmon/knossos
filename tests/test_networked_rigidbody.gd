@@ -8,15 +8,15 @@ var _failed := false
 
 func _ready() -> void:
 	Settings.online_enabled = false
-	var html := FileAccess.get_file_as_string("res://test_pages/networked_rigidbody.html")
+	var html := FileAccess.get_file_as_string("res://addons/vrweb_tools/examples/networked_rigidbody.html")
 	var doc := HtmlParser.parse(html)
 	var declarations := VrwebScriptDeclaration.collect(doc,
-			"vrwebresource://networked_rigidbody.html")
+			"vrwebresource://examples/networked_rigidbody.html")
 	_check(declarations.errors.is_empty() and declarations.scripts.size() == 1,
 			"demo declares one valid Luau script: %s" % str(declarations.errors))
 
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
-	var built := VrwebBuilder.build(doc, "vrwebresource://networked_rigidbody.html", policy)
+	var built := VrwebBuilder.build(doc, "vrwebresource://examples/networked_rigidbody.html", policy)
 	var page_root := built.root as Node
 	var grab_manager := GrabManager.new()
 	add_child(grab_manager)
@@ -37,7 +37,7 @@ func _ready() -> void:
 	var errors := []
 	runtime.script_failed.connect(func(id, phase, message):
 		errors.append({"id": id, "phase": phase, "message": message}))
-	runtime.setup(page_root, targets, "vrwebresource://networked_rigidbody.html", null, policy)
+	runtime.setup(page_root, targets, "vrwebresource://examples/networked_rigidbody.html", null, policy)
 	var activated := runtime.activate(declarations.scripts)
 	_check(activated.ok, "physics demo script activates: %s / %s" % [str(activated), str(errors)])
 

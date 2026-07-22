@@ -36,13 +36,13 @@ end
 identity остаётся `id` первого валидного script tag. Явный `realm` устойчив к переименованию
 или перестановке скриптов: сетевые адреса страницы не меняются от рефакторинга её тегов.
 
-Рабочий linked-пример можно открыть по адресу `vrwebresource://external_script.html`. В нём
-[external_script.html](../../test_pages/external_script.html) последовательно выполняет три
+Рабочий linked-пример можно открыть по адресу `vrwebresource://examples/external_script.html`. В нём
+[external_script.html](../../addons/vrweb_tools/examples/external_script.html) последовательно выполняет три
 скрипта в одном page realm:
 
-1. [external_model.luau](../../test_pages/external_model.luau) объявляет глобальный класс
+1. [external_model.luau](../../addons/vrweb_tools/examples/external_model.luau) объявляет глобальный класс
    `SpeedModel`;
-2. [external_tiny.luau](../../test_pages/external_tiny.luau) использует `SpeedModel` и объявляет
+2. [external_tiny.luau](../../addons/vrweb_tools/examples/external_tiny.luau) использует `SpeedModel` и объявляет
    класс `SpinnerView`;
 3. inline-контроллер создаёт экземпляры обоих классов и связывает их с кнопкой.
 

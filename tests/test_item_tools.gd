@@ -3,7 +3,7 @@ extends Node
 ## Headless-тест «модовых» инструментов (docs/space/portable-tools.md): ItemToolbelt спавнит
 ## переносимые предметы из бандла и берёт в руку; карандаш рисует штрих в эфемерный слой
 ## (use + aim + use_end), ластик стирает свои штрихи, рамка размещает картинку через
-## files.pick. Логика инструментов — целиком в item-документах (test_pages/items/*).
+## files.pick. Логика инструментов — целиком в item-документах (vrweb/builtin/items/*).
 ## Запуск: godot --headless tests/test_item_tools.tscn
 
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")

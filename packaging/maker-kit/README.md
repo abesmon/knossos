@@ -23,6 +23,15 @@ Godot 4.6 project/addon. Knossos не требуется для сборки HTM
 `compatibility.json` фиксирует совместимые версии Maker Kit, Knossos, Godot и
 локальной VRWML policy. Изменения и миграции перечисляются в общем `CHANGELOG.md` release train.
 
+## Примеры
+
+В `addons/vrweb_tools/examples/` лежат демонстрации возможностей стандарта VRWeb: CSS-каскад,
+grabbable, сетевая физика, remote call/remote data, shader lab, видео и экспорт Godot-сцены в
+VRWML. Это образцы разметки и Luau-скриптов — берите их за основу своих миров. Точка входа —
+`examples/index.html`. В референсном клиенте Knossos эти же примеры доступны под подпутём
+`vrwebresource://examples/index.html` — Knossos бандлит их из аддона под своим (per-client)
+`vrwebresource://`. Это не отдельная схема стандарта: другой клиент таких путей может не иметь.
+
 При открытии корня архива в VS Code файл `.vscode/settings.json` автоматически подключает
 `schemas/vrweb-html-data.json`: для ручного HTML появляются completion и hover descriptions
 тегов локальной strict policy, Godot properties и допустимых enum values.

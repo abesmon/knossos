@@ -30,10 +30,10 @@ func _ready() -> void:
 
 
 func _build_demo() -> bool:
-	var html := FileAccess.get_file_as_string("res://test_pages/networked_rigidbody.html")
+	var html := FileAccess.get_file_as_string("res://addons/vrweb_tools/examples/networked_rigidbody.html")
 	var doc := HtmlParser.parse(html)
 	var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
-	var built := VrwebBuilder.build(doc, "vrwebresource://networked_rigidbody.html", policy)
+	var built := VrwebBuilder.build(doc, "vrwebresource://examples/networked_rigidbody.html", policy)
 	_page_root = built.root
 	add_child(_page_root)
 	var targets := {}
@@ -47,10 +47,10 @@ func _build_demo() -> bool:
 		targets[resource_id] = built.resources[resource_id]
 	_ball = targets.get("default-ball")
 	var declarations := VrwebScriptDeclaration.collect(doc,
-			"vrwebresource://networked_rigidbody.html")
+			"vrwebresource://examples/networked_rigidbody.html")
 	_runtime = VrwebLuauRuntime.new()
 	add_child(_runtime)
-	_runtime.setup(_page_root, targets, "vrwebresource://networked_rigidbody.html", null, policy)
+	_runtime.setup(_page_root, targets, "vrwebresource://examples/networked_rigidbody.html", null, policy)
 	var activated := _runtime.activate(declarations.scripts)
 	_log("DEMO activated=%s" % str(activated))
 	return bool(activated.ok) and _ball != null

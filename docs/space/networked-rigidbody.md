@@ -115,4 +115,4 @@ custom reducer сменить simulator без полной handoff-транза
 долгой свободной симуляции; keyframes обеспечивают их сходимость.
 
 Полная демонстрация с обычным телом, custom reducer и grabbable-мячом:
-[networked_rigidbody.html](../../test_pages/networked_rigidbody.html).
+[networked_rigidbody.html](../../addons/vrweb_tools/examples/networked_rigidbody.html).

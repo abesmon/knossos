@@ -3,8 +3,8 @@
 > Штрихи — объекты [эфемерного слоя](../network/ephemeral-changes.md): универсальный
 > `kind="vrweb-node"` со специальным VRWML-тегом `<VRWebStroke>`.
 > Инструменты рисования с июля 2026 — **переносимые предметы**
-> ([pencil.html](../../test_pages/items/pencil.html) /
-> [eraser.html](../../test_pages/items/eraser.html), слот 2 тулбелта — см.
+> ([pencil.html](../../vrweb/builtin/items/pencil.html) /
+> [eraser.html](../../vrweb/builtin/items/eraser.html), слот 2 тулбелта — см.
 > [tools.md](tools.md) и [portable-tools.md](../space/portable-tools.md)); клиентский
 > `DrawingTool` удалён. Этот документ описывает штрих как предметную сущность: контракт
 > данных, материализацию и поведение item-инструментов.
@@ -27,7 +27,7 @@
 | **Данные/геометрия** (чистая, агностичная) | [scripts/ephemeral/stroke_path.gd](../../scripts/ephemeral/stroke_path.gd) `StrokePath` | flat↔точки, Douglas–Peucker, хит-тест полилинии — используется материализацией; item-скрипты делают эквивалент на Luau |
 | **Протокол** | `SceneChanges` / `NetworkManager` | `kind="vrweb-node"`, `props.tag="VRWebStroke"`, строковые `props.attrs`; обычные `add`/`remove` |
 | **Материализация** | [actors/stroke/stroke.gd](../../actors/stroke/stroke.gd) `StrokeActor` + [vrweb_builder.gd](../../scripts/vrweb_builder.gd) | специальный тег строится общим путём `vrweb-node`; один меш; группа `ephemeral_stroke` |
-| **Инструменты** | [items/pencil.html](../../test_pages/items/pencil.html), [items/eraser.html](../../test_pages/items/eraser.html) | Luau в realm предмета: `use`/`use_end` + `document.player.aim` → `document.scene` |
+| **Инструменты** | [items/pencil.html](../../vrweb/builtin/items/pencil.html), [items/eraser.html](../../vrweb/builtin/items/eraser.html) | Luau в realm предмета: `use`/`use_end` + `document.player.aim` → `document.scene` |
 | **Тесты** | [tests/test_stroke_path.gd](../../tests/test_stroke_path.gd), [tests/test_vrweb_stroke.gd](../../tests/test_vrweb_stroke.gd), [tests/test_item_tools.gd](../../tests/test_item_tools.gd) | чистая геометрия; документный тег VRWML; полный цикл рисования/стирания item-инструментами |
 
 ## Данные штриха

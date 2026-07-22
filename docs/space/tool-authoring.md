@@ -4,10 +4,10 @@
 > принципы) и [scripting-api.md](scripting-api.md) (справочник API): как автор собирает
 > **инструмент-предмет** — переносимый блок «VRWML + Luau», который добавляется в любой мир
 > без обновления клиента. Референсы, с которых стоит начинать копированием:
-> [pencil.html](../../test_pages/items/pencil.html) (непрерывное действие по прицелу),
-> [eraser.html](../../test_pages/items/eraser.html) (модификация чужих артефактов слоя),
-> [image_frame.html](../../test_pages/items/image_frame.html) (импорт файла пользователя),
-> [color_cube.html](../../test_pages/items/color_cube.html) (минимальный предмет).
+> [pencil.html](../../vrweb/builtin/items/pencil.html) (непрерывное действие по прицелу),
+> [eraser.html](../../vrweb/builtin/items/eraser.html) (модификация чужих артефактов слоя),
+> [image_frame.html](../../vrweb/builtin/items/image_frame.html) (импорт файла пользователя),
+> [color_cube.html](../../addons/vrweb_tools/examples/items/color_cube.html) (минимальный предмет).
 
 ## Модель в одном абзаце
 

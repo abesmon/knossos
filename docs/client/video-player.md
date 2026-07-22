@@ -61,7 +61,7 @@ VRWML), у которого источник задан разметкой и о
 UI/UX-поверхности для смены источника у синтезированного плеера нет. Смена `src` возможна
 только из авторского скрипта (`set_source`) — а раз автор уже пишет скрипт, он и владеет
 синхронизацией источника целиком (обычно `document.state`, как в
-[демо](../../test_pages/scripted_video.html)).
+[демо](../../addons/vrweb_tools/examples/scripted_video.html)).
 
 ---
 
@@ -383,8 +383,8 @@ URL**, синхронизируется только **состояние тра
 
 ## Демо
 
-**Скриптовый плеер:** `vrwebresource://scripted_video.html`
-([test_pages/scripted_video.html](../../test_pages/scripted_video.html)) — референс паттерна
+**Скриптовый плеер:** `vrwebresource://examples/scripted_video.html`
+([addons/vrweb_tools/examples/scripted_video.html](../../addons/vrweb_tools/examples/scripted_video.html)) — референс паттерна
 «автор мира сам синхронизирует»: базовый плеер с `sync="none"` и полностью авторская
 **якорная синхронизация** через `document.state`. Реплицируется только канон
 `{src, playing, anchor_position, anchor_time}` (меняется при действиях, не по таймеру);
@@ -394,7 +394,7 @@ URL**, синхронизируется только **состояние тра
 snapshot; при переходе роли новый authority переякоривает канон. Периодического сетевого
 трафика нет вообще.
 
-**Стандартный плеер:** открыть `vrwebresource://video.html` (см. [test_pages/video.html](../../test_pages/video.html)):
+**Стандартный плеер:** открыть `vrwebresource://examples/video.html` (см. [addons/vrweb_tools/examples/video.html](../../addons/vrweb_tools/examples/video.html)):
 пол, простой экран со своим плеером (мелкий 1 МБ-клип — стартует мгновенно) и один общий плеер
 на двух поверхностях — большой «Big Buck Bunny» 1080p (~30 МБ, faststart) для проверки
 прогрессивной загрузки: декод стартует, накопив ~2 МБ, а не после полной докачки. С аддоном

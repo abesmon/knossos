@@ -22,7 +22,7 @@ func _test_declarations() -> void:
 <script type="application/vrweb+luau" id="second" src="external_tiny.luau"></script>
 """
 	var result := VrwebScriptDeclaration.collect(HtmlParser.parse(html),
-			"vrwebresource://external_script.html")
+			"vrwebresource://examples/external_script.html")
 	_eq(result.errors.is_empty(), true, "valid inline and linked declarations collect")
 	_eq(result.scripts.size(), 2, "document order is retained")
 	if result.scripts.size() == 2:
@@ -165,9 +165,9 @@ func _test_export() -> void:
 func _test_fetch() -> void:
 	# Keep this helper asynchronous even when a bundled linked source completes synchronously.
 	await get_tree().process_frame
-	var doc := HtmlParser.parse(FileAccess.get_file_as_string("res://test_pages/external_script.html"))
+	var doc := HtmlParser.parse(FileAccess.get_file_as_string("res://addons/vrweb_tools/examples/external_script.html"))
 	var collected := VrwebScriptDeclaration.collect(doc,
-			"vrwebresource://external_script.html")
+			"vrwebresource://examples/external_script.html")
 	_eq(collected.errors.is_empty(), true, "modular demo declarations are valid")
 	_eq(collected.scripts.size(), 3, "two linked modules and one inline controller collect")
 	if collected.scripts.size() == 3:
@@ -193,7 +193,7 @@ func _test_fetch() -> void:
 		_eq(str(result.scripts[0].source).contains("SpeedModel"), true,
 				"fetcher returns source, never bytecode")
 		var policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
-		var built := VrwebBuilder.build(doc, "vrwebresource://external_script.html", policy)
+		var built := VrwebBuilder.build(doc, "vrwebresource://examples/external_script.html", policy)
 		var page_root := built.get("root") as Node
 		add_child(page_root)
 		var targets := {}
@@ -208,7 +208,7 @@ func _test_fetch() -> void:
 		var script_errors := []
 		runtime.script_failed.connect(func(id, phase, message):
 			script_errors.append({"id": id, "phase": phase, "message": message}))
-		runtime.setup(page_root, targets, "vrwebresource://external_script.html", null, policy)
+		runtime.setup(page_root, targets, "vrwebresource://examples/external_script.html", null, policy)
 		var activation := runtime.activate(result.scripts)
 		_eq(activation.ok, true,
 				"three modular declarations execute through the page runtime (%s)" % str(activation))

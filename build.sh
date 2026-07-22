@@ -117,6 +117,8 @@ next_build_number() {
   [[ -z "$n" ]] && n=0
   n=$((n + 1))
   mkdir -p "$BUILD"
+  # Godot иначе сканирует/импортирует артефакты сборки (2+ ГБ .app/zip) — прячем их от редактора.
+  [[ -f "$BUILD/.gdignore" ]] || : > "$BUILD/.gdignore"
   printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
   printf '%s' "$n"
 }

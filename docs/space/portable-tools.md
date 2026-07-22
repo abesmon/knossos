@@ -4,7 +4,7 @@
 > на item-модель** (июль 2026): `document.scene` (`vrweb/scene-objects/1`), прицел
 > (`vrweb/aim/1`) и фазы `use`/`use_end`, `document.files.pick` (`vrweb/files/1`),
 > поверхность grabbable (`vrweb/grabbable/1`), item-runtime (`kind="vrweb-item"`), а
-> карандаш/ластик/размещение картинок — item-документы (test_pages/items/*), клиентские
+> карандаш/ластик/размещение картинок — item-документы (vrweb/builtin/items/*), клиентские
 > `DrawingTool`/`ImagePlacementTool` удалены (тонкий ItemToolbelt —
 > [docs/client/tools.md](../client/tools.md)). Смоуки — tests/test_portable_base.tscn и
 > tests/test_item_tools.tscn. Следующий этап — руководство для авторов инструментов. Цель — уйти от инструментов,
@@ -128,7 +128,7 @@ PlayerData, где persistence существует только на серве
    item-документ = обычный HTML/VRWML со скриптами, никакого отдельного формата пакета —
    доставка контент-адресуемых бандлов (blob-паки) остаётся расширением.
 6. ~~Перенос карандаша/ластика/размещения картинок на item-модель~~ — готово: item-документы
-   в test_pages/items/, тонкий `ItemToolbelt` вместо `DrawingTool`/`ImagePlacementTool`
+   в vrweb/builtin/items/, тонкий `ItemToolbelt` вместо `DrawingTool`/`ImagePlacementTool`
    (живое требование ластика дало общее расширение `document.scene.objects(kind)`, а
    рисование в воздухе — `origin`/`direction` в `aim()`).
 7. ~~Руководство для авторов инструментов~~ — готово:

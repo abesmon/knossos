@@ -463,16 +463,16 @@ func _call_video_method(player: VrwebVideoPlayer, method: String, arguments: Arr
 
 
 ## Разрешённый URL медиа-источника для set_source (та же модель, что VrwebScriptAssets):
-## http(s) — всем; vrweblocal://vrwebresource:// — только документу той же локальной схемы.
+## http(s) — всем; локальные/бандл-схемы (vrweblocal/vrwebresource) — только документу той же
+## схемы.
 func _allowed_media_url(path: String) -> String:
 	if path.to_utf8_buffer().size() > 4096:
 		return ""
 	var url := PageFetcher.resolve_url(path, _base_url)
 	var allowed := url.begins_with("http://") or url.begins_with("https://")
-	if url.begins_with(PageFetcher.LOCAL_SCHEME):
-		allowed = _base_url.begins_with(PageFetcher.LOCAL_SCHEME)
-	elif url.begins_with(PageFetcher.RESOURCE_SCHEME):
-		allowed = _base_url.begins_with(PageFetcher.RESOURCE_SCHEME)
+	var local_scheme := PageFetcher.local_scheme_of(url)
+	if local_scheme != "":
+		allowed = _base_url.begins_with(local_scheme)
 	if not allowed:
 		return ""
 	if _policy != null and not VrwebContentPolicy.allowed(_policy.evaluate_operation(

@@ -227,7 +227,7 @@ func _run() -> void:
 	var item_id := NetworkManager.new_object_id()
 	NetworkManager.request_scene_action({"op": SceneChanges.OP_ADD, "id": item_id,
 		"kind": "vrweb-item", "parent": "", "ttl": 0.0,
-		"props": {"src": "vrwebresource://items/color_cube.html", "position": [3.0, 1.0, 0.0]}})
+		"props": {"src": "vrwebresource://examples/items/color_cube.html", "position": [3.0, 1.0, 0.0]}})
 	# Локальный fetch item-документа + два скриптовых кадра на активацию.
 	for i in 10:
 		await get_tree().process_frame
@@ -321,7 +321,7 @@ func _test_late_join_attach(world: Node3D, player: Player, manager: GrabManager)
 	# inline-скрипты) собирается синхронно, и его grabbable не находит менеджера в группе.
 	NetworkManager.request_scene_action({"op": SceneChanges.OP_ADD, "id": item_id,
 		"kind": "vrweb-item", "parent": "", "ttl": 0.0,
-		"props": {"src": "vrwebresource://items/color_cube.html",
+		"props": {"src": "vrwebresource://examples/items/color_cube.html",
 			"position": [0.0, 5.0, 0.0]}})
 	for i in 14:
 		await get_tree().process_frame
@@ -403,7 +403,7 @@ func _test_instance_isolation(manager: GrabManager) -> void:
 		ids.append(id)
 		NetworkManager.request_scene_action({"op": SceneChanges.OP_ADD, "id": id,
 			"kind": "vrweb-item", "parent": "", "ttl": 0.0,
-			"props": {"src": "vrwebresource://items/counter.html",
+			"props": {"src": "vrwebresource://examples/items/counter.html",
 				"position": [float(i) * 2.0, 1.0, 4.0]}})
 	for i in 14:
 		await get_tree().process_frame

@@ -236,9 +236,9 @@ func _topology_suite() -> void:
 
 func _demo_page_suite() -> void:
 	print("\n-- css_demo (e2e) --")
-	var html := _read("res://test_pages/css_demo.html")
-	var css := _read("res://test_pages/css_demo.css")
-	if not _check(html != "" and css != "", "test_pages/css_demo.{html,css} читаются"):
+	var html := _read("res://addons/vrweb_tools/examples/css_demo.html")
+	var css := _read("res://addons/vrweb_tools/examples/css_demo.css")
+	if not _check(html != "" and css != "", "examples/css_demo.{html,css} читаются"):
 		return
 	var doc := HtmlParser.parse(html)
 	var refs := StyleResolver.collect_sheet_refs(doc)
@@ -267,15 +267,15 @@ func _fetcher_suite() -> void:
 
 	# Лямбда захватывает по значению — наружу отдаём через мутацию общего словаря.
 	var got := {}
-	fetcher.fetch_all(["vrwebresource://css_demo.css"], 2.0,
+	fetcher.fetch_all(["vrwebresource://examples/css_demo.css"], 2.0,
 			func(res: Dictionary): got.merge(res))
-	var demo_text := String(got.get("vrwebresource://css_demo.css", ""))
+	var demo_text := String(got.get("vrwebresource://examples/css_demo.css", ""))
 	_check(demo_text.contains(".card"), "локальная таблица прочитана (vrwebresource)")
 
 	got.clear()
-	fetcher.fetch_all(["vrwebresource://css_import_a.css"], 2.0,
+	fetcher.fetch_all(["vrwebresource://examples/css_import_a.css"], 2.0,
 			func(res: Dictionary): got.merge(res))
-	var flat := String(got.get("vrwebresource://css_import_a.css", ""))
+	var flat := String(got.get("vrwebresource://examples/css_import_a.css", ""))
 	_check(flat.contains(".a") and flat.contains(".b"), "@import развёрнут в плоский текст")
 	_check(not flat.contains("@import"), "@import-стейтменты вырезаны")
 	_check(flat.count(".b") == 1, "print-@import заменён пустым, не текстом")
