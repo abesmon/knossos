@@ -1,5 +1,9 @@
 # VRWeb Maker Kit
 
+Пошаговый путь автора — от первой сцены и Luau до отладки, упаковки и запроса помощи — вынесен
+в [руководство разработчика мира](maker-workflow.md). Этот документ остаётся справочником по
+конкретным возможностям и release-контракту Maker Kit.
+
 Maker Kit — переносимый Godot 4.6 addon для создания VRWML-сцен в Godot и сборки standalone
 `.vrwml` либо HTML с embedded `<vrwml>`. Локальный `.tscn` является source of truth только для
 этого Godot-workflow. Addon не содержит клиент Knossos и не требует его autoload-ы; Knossos
@@ -35,7 +39,7 @@ godot --headless --path /path/to/project \
 ```
 
 Код возврата `0` означает, что output записан; ошибка валидации или записи возвращает ненулевой
-код. JSON report содержит `ok`, профиль и версию каталога, warnings/errors, packages, source,
+код. JSON report содержит `ok`, профиль и версию каталога, warnings/errors, scripts, source,
 output и SHA-256 записанного файла. HTML/VRWML payload в JSON не дублируется.
 
 ## Выбор формы поставки
@@ -44,8 +48,7 @@ output и SHA-256 записанного файла. HTML/VRWML payload в JSON 
   композиция объектов;
 - HTML `combine` — процедурное HTML-окружение плюс VRWML;
 - HTML `exclusive` — HTML служит оболочкой, визуализируется только VRWML;
-- `inline` — небольшой самодостаточный GDScript-компонент;
-- `.vrmod` — модуль с кодом, сценами, assets и manifest.
+- HTML page script — inline или linked Luau рядом с декларативной сценой.
 
 Все формы создают VRWML-сцену; разделения формата на «миры» и «аватары» нет. Точный словарь —
 в [каталоге тегов](space/vrwml-tags.md).
@@ -187,15 +190,15 @@ Hosting checklist:
 - относительная структура не переписывается CDN/deploy script;
 - redirects заканчиваются доступным `2xx`, а не login/error HTML;
 - cache для content-addressed assets может быть долгим/immutable, для HTML и manifest — коротким;
-- CORS нужен для cross-origin assets/modules; same-origin bundle его не требует;
+- CORS нужен для cross-origin assets/scripts; same-origin bundle его не требует;
 - перед релизом published verifier должен завершиться без errors, MIME warnings оцениваются
   отдельно по фактической способности целевого клиента декодировать байты.
 
 ## Preview, импорт и границы
 
 В addon входят общий HTML parser/DOM, portable declarative materializer, lossless HTML importer,
-exporter, URL/local resource metadata, content-addressed asset bundler, spawner, `.vrmod` package
-builder, editor UI, strict diagnostics и headless build. Зависимости направлены как
+exporter, URL/local resource metadata, content-addressed asset bundler, spawner, page-script
+declarations, editor UI, strict diagnostics и headless build. Зависимости направлены как
 **format/SDK → addon → Knossos**.
 
 При открытии `.html/.htm` portable importer находит `<vrwml>`, материализует максимум доступного
@@ -207,19 +210,18 @@ Knossos adapter добавляет procedural preview остального HTML 
 scene. Avatar import и runtime загрузка external resources также остаются в
 `integrations/knossos/vrweb_tools`; переносимый addon их не импортирует.
 
-## Trusted scripting modules
+## Page scripting
 
-У scripted node автор явно выбирает `inline`, `package` или отсутствие экспорта. Панель VRWeb
-показывает trust boundary и редактирует переносимые module metadata: `id`, SemVer `version`,
-декларативные `permissions`, обязательные `requires` и `optional` capabilities. Значения
-сохраняются в metadata узла; для `package` addon записывает их в `vrweb-module.json` и export
-report. Defaults соответствуют VRWeb Scripting API v1.
+Локальный Godot `Script` не публикуется. Для HTML export корень может хранить metadata
+`vrweb_page_scripts` с inline/linked Luau declarations, а узлы — стабильный `vrweb_id` для
+`document.query()`. Export report перечисляет scripts. Контракт и lifecycle — в
+[scripting.md](space/scripting.md).
 
-`permissions` нужны для review, но не ограничивают обычный GDScript: `trusted-gdscript`
-получает права процесса. Inline предназначен для одного самодостаточного файла; зависимости,
-сцены и assets требуют `.vrmod`. Модули являются частью VRWML, хотя текущий GDScript-механизм
-имеет provisional-статус. Полный контракт, trust model, lifecycle и multiplayer — только в
-[scripting-modules.md](space/scripting-modules.md).
+Эти metadata не нужно править через Advanced Inspector вручную: dock **VRWeb** содержит
+редактор списка inline/linked scripts и поле **Queryable id** для выбранного узла. Ввод
+проверяется теми же правилами, что export. Linked source v1 не комплектуется автоматически:
+его нужно положить в `dist` по указанному относительному `src`; inline source уже находится
+в HTML.
 
 Версионный archive, starter, policy metadata, changelog и clean-project smoke-test собираются
 общим `build.sh`. Технические детали и тестовая матрица находятся в

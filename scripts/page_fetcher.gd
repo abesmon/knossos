@@ -13,14 +13,23 @@ var _requested_url: String = ""
 const USER_AGENT := "VRWeb/0.1 (Godot; +knossos)"
 
 ## Локальные схемы для тестового/офлайн-запуска (см. docs/local-resources.md).
-## vrweblocal://<абсолютный путь ФС>  — файл из операционной системы.
-## vrwebresource://<относительный путь> — файл из бандла приложения (RESOURCE_ROOT).
-## Обе ведут себя как обычный origin: относительные ссылки/картинки резолвятся
-## внутри той же схемы, так что локальная страница со своими img/href работает целиком.
+## vrweblocal://<абсолютный путь ФС>    — файл из операционной системы.
+## vrwebresource://<относительный путь> — бандл-контент клиента. Это часть стандарта: СХЕМА
+##   общая, но КОНТЕНТ у каждого клиента свой — все клиенты знают о таких путях
+##   (напр. vrwebresource://index.html) и встречаются на них независимо от реализации.
+##   Обе ведут себя как обычный origin: относительные ссылки/картинки резолвятся внутри той же
+##   схемы, так что локальная страница со своими img/href работает целиком.
 const LOCAL_SCHEME := "vrweblocal://"
 const RESOURCE_SCHEME := "vrwebresource://"
-## Корень бандл-ресурсов, куда отображается vrwebresource://.
-const RESOURCE_ROOT := "res://test_pages/"
+## Корень бандл-ресурсов, куда отображается vrwebresource:// (обязательный встроенный контент
+## Knossos: дашборд/туториал, документы тулбара).
+const RESOURCE_ROOT := "res://vrweb/builtin/"
+## Knossos-специфичный МОНТ внутри vrwebresource://: подпуть examples/ ведёт в демо стандарта
+## из maker's kit (аддон всегда бандлится с Knossos). Это НЕ новая схема и НЕ часть стандарта —
+## просто выбор Knossos, что забандлить под своим vrwebresource://; другой клиент этих путей
+## может не иметь. Демо физически принадлежат аддону, а не клиенту (EXAMPLE_ROOT).
+const EXAMPLE_MOUNT := "examples/"
+const EXAMPLE_ROOT := "res://addons/vrweb_tools/examples/"
 
 
 func _ready() -> void:
@@ -141,7 +150,7 @@ static func resolve_url(url: String, base_url: String = "") -> String:
 
 ## true, если адрес относится к локальной схеме (файл ОС или бандл-ресурс).
 static func is_local(url: String) -> bool:
-	return url.begins_with(LOCAL_SCHEME) or url.begins_with(RESOURCE_SCHEME)
+	return url.begins_with(LOCAL_SCHEME) or is_bundle_resource(url)
 
 
 ## true, если адрес указывает на ресурс внутри бандла приложения (vrwebresource:// -> res://).
@@ -151,13 +160,25 @@ static func is_bundle_resource(url: String) -> bool:
 	return url.begins_with(RESOURCE_SCHEME)
 
 
+## Схема локального/бандл-адреса (vrweblocal/vrwebresource) или "" для остальных.
+## Две локальные страницы — «того же origin», только если их схемы совпадают.
+static func local_scheme_of(url: String) -> String:
+	if url.begins_with(LOCAL_SCHEME):
+		return LOCAL_SCHEME
+	if url.begins_with(RESOURCE_SCHEME):
+		return RESOURCE_SCHEME
+	return ""
+
+
 static func _scheme_of(url: String) -> String:
-	return LOCAL_SCHEME if url.begins_with(LOCAL_SCHEME) else RESOURCE_SCHEME
+	var scheme := local_scheme_of(url)
+	return scheme if scheme != "" else LOCAL_SCHEME
 
 
 ## Преобразует vrweb-адрес в путь для FileAccess. "" — если адрес не локальный.
 ## vrweblocal://  -> абсолютный путь ОС (с гарантированным ведущим "/").
-## vrwebresource:// -> RESOURCE_ROOT + относительный путь (внутри бандла).
+## vrwebresource:// -> RESOURCE_ROOT + относительный путь (внутри бандла); особый случай —
+##   подпуть EXAMPLE_MOUNT ("examples/") монтируется в EXAMPLE_ROOT (демо из аддона maker's kit).
 ## query (?...) и fragment (#...) к файлу не относятся — они уходят скриптам страницы.
 static func to_file_path(url: String) -> String:
 	if url.begins_with(LOCAL_SCHEME):
@@ -167,6 +188,8 @@ static func to_file_path(url: String) -> String:
 		var rel := _strip_query_fragment(url.substr(RESOURCE_SCHEME.length()))
 		if rel.begins_with("/"):
 			rel = rel.substr(1)
+		if rel.begins_with(EXAMPLE_MOUNT):
+			return EXAMPLE_ROOT + rel.substr(EXAMPLE_MOUNT.length())
 		return RESOURCE_ROOT + rel
 	return ""
 

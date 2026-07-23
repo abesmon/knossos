@@ -1,6 +1,8 @@
 class_name SceneChanges
 extends RefCounted
 
+const PolicyEvaluatorImpl = preload("res://scripts/network/policy_evaluator.gd")
+
 ## Движок-агностичный слой эфемерных изменений сцены: ЧИСТАЯ машина состояний + контракт
 ## протокола. Не знает про Godot-сцену, 3D, RPC, WebRTC — оперирует только плоскими данными
 ## (Dictionary/Array примитивов), чтобы тот же контракт могла реализовать не-Godot сторона.
@@ -16,7 +18,7 @@ extends RefCounted
 ##     авторитет проверяет своё состояние, а не заявленное инициатором.
 ##
 ## Объект состояния (плоский, JSON-сериализуемый):
-##   { id, kind, parent, author, ts, ttl, props }
+##   { id, kind, parent, bindings:{creator:user_id}, ts, ttl, props }
 ##   parent: "" — корень мира | "<id>" — другой объект | "page:<nodeId>" — узел дерева страницы.
 
 # --- Операции протокола ---
@@ -93,7 +95,7 @@ func authority_commit(action: Dictionary, sender_user_id: String, sender_is_admi
 	return []
 
 
-## Корневая конфигурация не имеет object id/author ownership: это единое состояние комнаты.
+## Корневая конфигурация не имеет object id/bindings: это единое состояние комнаты.
 ## Сейчас allowlist состоит только из mode; null снимает override и возвращает значение страницы.
 func _commit_update_config(action: Dictionary, sender_user_id: String, can_config: bool) -> Array:
 	if not can_config:
@@ -128,7 +130,7 @@ func expire(now: float) -> Array:
 	return events
 
 
-func _commit_add(action: Dictionary, author: String, _is_admin: bool, now: float) -> Array:
+func _commit_add(action: Dictionary, creator: String, _is_admin: bool, now: float) -> Array:
 	var id := str(action.get("id", ""))
 	if id == "" or _objects.has(id) or reserved_ids.has(id):
 		return []   # пустой id, занятый (анти-хайджек) или зарезервированный базой страницы
@@ -140,7 +142,7 @@ func _commit_add(action: Dictionary, author: String, _is_admin: bool, now: float
 	var parent := str(action.get("parent", PARENT_ROOT))
 	if not _parent_valid(parent):
 		return []
-	if not _can_add_into(parent, author, _is_admin):
+	if not _can_add_into(parent, creator, _is_admin):
 		return []
 	var props = action.get("props", {})
 	if typeof(props) != TYPE_DICTIONARY or not _props_ok(props):
@@ -148,19 +150,22 @@ func _commit_add(action: Dictionary, author: String, _is_admin: bool, now: float
 	var ttl := float(action.get("ttl", 0.0))
 	if ttl < 0.0 or ttl > MAX_TTL:
 		return []
+	var bindings := {"creator": creator} if not creator.is_empty() else {}
 	var obj := {
-		"id": id, "kind": kind, "parent": parent, "author": author,
+		"id": id, "kind": kind, "parent": parent, "bindings": bindings,
 		"ts": now, "ttl": ttl, "props": (props as Dictionary).duplicate(true),
 	}
 	_objects[id] = obj
-	return [_emit(OP_ADD, {"id": id, "kind": kind, "parent": parent, "author": author, "ts": now, "ttl": ttl, "props": obj["props"].duplicate(true)})]
+	return [_emit(OP_ADD, {"id": id, "kind": kind, "parent": parent,
+			"bindings": bindings.duplicate(true), "ts": now, "ttl": ttl,
+			"props": obj["props"].duplicate(true)})]
 
 
 func _commit_update(action: Dictionary, sender: String, is_admin: bool) -> Array:
 	var id := str(action.get("id", ""))
 	if not _objects.has(id):
 		return []
-	if not _owns(_objects[id], sender, is_admin):
+	if not _can_control(_objects[id], sender, is_admin):
 		return []
 	var patch = action.get("props", {})
 	if typeof(patch) != TYPE_DICTIONARY:
@@ -178,7 +183,7 @@ func _commit_remove(action: Dictionary, sender: String, is_admin: bool) -> Array
 	var id := str(action.get("id", ""))
 	if not _objects.has(id):
 		return []
-	if not _owns(_objects[id], sender, is_admin):
+	if not _can_control(_objects[id], sender, is_admin):
 		return []
 	return _do_remove_cascade(id)
 
@@ -187,7 +192,7 @@ func _commit_reparent(action: Dictionary, sender: String, is_admin: bool) -> Arr
 	var id := str(action.get("id", ""))
 	if not _objects.has(id):
 		return []
-	if not _owns(_objects[id], sender, is_admin):
+	if not _can_control(_objects[id], sender, is_admin):
 		return []
 	var new_parent := str(action.get("parent", PARENT_ROOT))
 	if not _parent_valid(new_parent):
@@ -263,7 +268,7 @@ func _apply_op(event: Dictionary) -> void:
 			_objects[id] = {
 				"id": id, "kind": str(event.get("kind", "")),
 				"parent": str(event.get("parent", PARENT_ROOT)),
-				"author": str(event.get("author", "")),
+				"bindings": (event.get("bindings", {}) as Dictionary).duplicate(true),
 				"ts": float(event.get("ts", 0.0)), "ttl": float(event.get("ttl", 0.0)),
 				"props": (event.get("props", {}) as Dictionary).duplicate(true),
 			}
@@ -333,16 +338,15 @@ func epoch() -> int:
 
 
 # ============================================================================
-#  Права (ФУНДАМЕНТ). Сейчас: владение по author + админ-обход. Сюда же ляжет будущая
-#  система прав (capabilities, политика по kind, пороги рангов). См. docs/ephemeral-changes.md.
+#  Права: общая policy проверяет binding creator либо явный moderator override транспорта.
 # ============================================================================
 
-## Владеет ли отправитель объектом (или он админ). Базово править/удалять можно только своё.
-func _owns(obj: Dictionary, sender_user_id: String, is_admin: bool) -> bool:
-	if is_admin:
-		return true
-	var author := str(obj.get("author", ""))
-	return author != "" and author == sender_user_id
+## Назначен ли actor creator объекта (или имеет moderator override).
+func _can_control(obj: Dictionary, sender_user_id: String, is_admin: bool) -> bool:
+	return PolicyEvaluatorImpl.evaluate({"any_of": [
+		{"assigned": "creator"}, {"rank": {"op": "lte", "value": 0}},
+	]}, {"actor_user_id": sender_user_id, "rank": 0 if is_admin else 1 << 30,
+		"bindings": obj.get("bindings", {})})
 
 
 ## Можно ли добавить ребёнка в данного родителя. Корень и узлы страницы — открыты; вложение в
@@ -352,7 +356,7 @@ func _can_add_into(parent: String, sender_user_id: String, is_admin: bool) -> bo
 		return true
 	if not _objects.has(parent):
 		return false
-	return _owns(_objects[parent], sender_user_id, is_admin)
+	return _can_control(_objects[parent], sender_user_id, is_admin)
 
 
 # --- Валидаторы структуры ---

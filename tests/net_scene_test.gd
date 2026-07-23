@@ -29,7 +29,8 @@ func _ready() -> void:
 		print("[%s] P2P %d" % [_nick, id]))
 	NetworkManager.scene_object_added.connect(func(id, obj):
 		_added[id] = obj
-		print("[%s] ADDED %s author=%s props=%s" % [_nick, id, obj.get("author", ""), obj.get("props", {})]))
+		print("[%s] ADDED %s creator=%s props=%s" % [_nick, id,
+				(obj.get("bindings", {}) as Dictionary).get("creator", ""), obj.get("props", {})]))
 	NetworkManager.scene_object_updated.connect(func(id, obj):
 		_updated[id] = obj
 		print("[%s] UPDATED %s props=%s" % [_nick, id, obj.get("props", {})]))
@@ -47,7 +48,7 @@ func _ready() -> void:
 	while not _got_p2p and waited < 8.0:
 		await get_tree().create_timer(0.1).timeout
 		waited += 0.1
-	# Даём картам идентичности (user_id) разойтись — иначе author не проставится и владение поедет.
+	# Даём identity cards разойтись — иначе creator binding не проставится.
 	await get_tree().create_timer(2.0).timeout
 
 	if NetworkManager.has_authority():
@@ -64,7 +65,7 @@ func _run_authority() -> void:
 	NetworkManager.request_scene_action({"op": SceneChanges.OP_UPDATE_CONFIG,
 		"set": {"mode": "exclusive"}})
 	# После проверки отказа обычному actor делегируем ему rank 0: тот должен получить право
-	# вернуть combine. Делегирование позднее объектной ownership-проверки, т.к. rank 0 также admin.
+	# вернуть combine. Делегирование позднее creator-policy проверки, т.к. rank 0 также admin.
 	await get_tree().create_timer(7.0).timeout
 	for pid in NetworkManager.peer_ids():
 		var uid := NetworkManager.user_id_of(pid)
@@ -104,7 +105,7 @@ func _run_actor() -> void:
 	NetworkManager.request_scene_action({"op": "remove", "id": "AOWN"})
 	await get_tree().create_timer(4.0).timeout            # BTTL должен истечь у авторитета
 	NetworkManager.request_scene_action({"op": "remove", "id": "BOWN"})  # своё — можно
-	# Authority выдаёт rank 0 после ownership-проверки; теперь config-action обязан пройти.
+	# Authority выдаёт rank 0 после creator-policy проверки; теперь config-action обязан пройти.
 	var rank_wait := 0.0
 	while NetworkManager.my_rank() != 0 and rank_wait < 5.0:
 		await get_tree().create_timer(0.1).timeout

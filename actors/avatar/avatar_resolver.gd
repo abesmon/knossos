@@ -102,7 +102,7 @@ func _resolve_remote(uri: String, on_ready: Callable) -> void:
 func _resolve_vrwml_text(text: String, base_url: String, on_ready: Callable) -> void:
 	var doc := HtmlParser.parse(text)
 	var policy := AvatarVrwmlPolicy.new()
-	var built := VrwebBuilder.build(doc, base_url, null, policy)
+	var built := VrwebBuilder.build(doc, base_url, policy)
 	var holder := built.get("root") as Node3D
 	if policy.has_errors():
 		Log.warn("avatar", "части VRWML-аватара пропущены policy (%s): %s" % \

@@ -13,8 +13,8 @@ const BOB := "bob"
 
 
 func _initialize() -> void:
-	_test_add_and_ownership()
-	_test_update_owner_only()
+	_test_add_and_creator_binding()
+	_test_update_creator_only()
 	_test_remove_cascade()
 	_test_reparent_and_cycle()
 	_test_nest_into_others_denied()
@@ -74,8 +74,8 @@ func _test_reserved_ids() -> void:
 		ALICE, false, 100.0).size(), 1, "свободный id проходит (в т.ч. с якорем на зарезервированный узел)")
 
 
-# --- add + владение по author ---
-func _test_add_and_ownership() -> void:
+# --- add + creator binding ---
+func _test_add_and_creator_binding() -> void:
 	var sc := SceneChanges.new()
 	sc.begin_authority()
 	var ev := sc.authority_commit(_add("a1", "bubble", "", {"url": "x"}), ALICE, false, 100.0)
@@ -83,14 +83,15 @@ func _test_add_and_ownership() -> void:
 	_eq(str(ev[0]["op"]), "add", "op=add")
 	_eq(int(ev[0]["seq"]), 1, "seq=1")
 	var obj := sc.get_object("a1")
-	_eq(str(obj.get("author", "")), ALICE, "author проставлен авторитетом")
+	_eq(str((obj.get("bindings", {}) as Dictionary).get("creator", "")), ALICE,
+			"creator binding проставлен авторитетом")
 	_eq(float(obj.get("ts", 0)), 100.0, "ts проставлен")
 	# Чужой не может занять существующий id (анти-хайджек).
 	_eq(sc.authority_commit(_add("a1", "bubble", "", {}), BOB, false, 101.0).size(), 0, "повтор id отклонён")
 
 
 # --- update только владельцем ---
-func _test_update_owner_only() -> void:
+func _test_update_creator_only() -> void:
 	var sc := SceneChanges.new()
 	sc.begin_authority()
 	sc.authority_commit(_add("a1", "bubble", "", {"label": "hi"}), ALICE, false, 100.0)

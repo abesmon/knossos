@@ -78,7 +78,7 @@ func _ensure_bulk() -> void:
 func _reduce_set(_state: Dictionary, args: Dictionary, _context: Dictionary) -> Dictionary:
 	if typeof(args.get("value")) != TYPE_INT:
 		return {}
-	return {"value": int(args["value"])}
+	return {"state": {"value": int(args["value"])}}
 
 
 func _on_state(object_id: String, schema_id: String, state: Dictionary,

@@ -80,9 +80,11 @@ Knossos и Maker Kit идут одним release train: platform target `mac`, `
 4. **Экспортирует** каждый пресет через `--headless --export-release`.
 5. **macOS**: подписывает `.app` ad-hoc подписью (`codesign -s -`), снимает
    карантин, проверяет подпись.
-6. **Linux**: экспортирует x86_64-бинарь без embedded `.pck`, проверяет наличие
+6. **Все платформы**: проверяет наличие нативной Luau-библиотеки; её отсутствие является
+   ошибкой сборки, потому что без неё page scripting недоступен.
+7. **Linux**: экспортирует x86_64-бинарь без embedded `.pck`, проверяет наличие
    `libgdffmpeg`, FFmpeg `.so`, WebRTC и TwoVoIP рядом с бинарём.
-7. **Пакует** в `.zip` (macOS — через `ditto`, чтобы сохранить структуру
+8. **Пакует** в `.zip` (macOS — через `ditto`, чтобы сохранить структуру
    бандла и фреймворки) и валидирует результат (наличие бинаря, ffmpeg-библиотек).
    В macOS ZIP дополнительно кладёт helper и инструкцию для снятия карантина.
 8. **Собирает Maker Kit** как отдельный standalone Godot project: addon, starter,
@@ -117,20 +119,9 @@ macOS, Windows и Linux и запускает `tests/run_maker_portability.py`. 
 
 | Пресет            | Платформа | Архитектура        | Особенности                          |
 |-------------------|-----------|--------------------|--------------------------------------|
-| `macOS`           | macOS     | universal (x86_64+arm64) | distribution_type=Testing, codesign=Disabled (подпись делает build.sh) |
+| `macOS`           | macOS     | universal container | фактически поддерживается Apple Silicon: встроенная Luau-библиотека arm64; distribution_type=Testing, codesign=Disabled (подпись делает build.sh) |
 | `Windows Desktop` | Windows   | x86_64             | embed_pck=false (exe + pck рядом)    |
 | `Linux`           | Linux     | x86_64             | embed_pck=false (бинарь + pck рядом) |
-
-### Maker Kit self-test экспортированной сборки
-
-Экспортированный Knossos намеренно не разрешает command-line scene path overrides. Для узкой
-CI-проверки scripting package штатный loading screen принимает user argument
-`--vrweb-maker-self-test` после `--` и переключается на embedded
-`tests/test_package_demo.tscn`. Тест читает заранее собранный Maker Kit `.vrmod`, проверяет
-integrity/unpack/assets, компилирует module и материализует компонент теми же runtime-классами,
-что обычная страница. Клиент намеренно не пересобирает package из remapped `.gdc` своего PCK:
-package build относится к addon, а exported Knossos — consumer готового артефакта.
-Аргумент ничего не делает без явного запуска и не открывает произвольный путь из CLI.
 
 ## Нативные зависимости (GDExtension)
 
@@ -143,12 +134,30 @@ package build относится к addon, а exported Knossos — consumer го
   `macos ...universal.framework` и `linux ...x86_64.so`.
 - **TwoVoIP** — голосовой кодек/захват. Есть `windows ...x86_64.dll`,
   `macos ...universal.framework` и `linux ...x86_64.so`.
+- **Luau GDExtension** ([addons/luau_gdextension/luau.gdextension](../../addons/luau_gdextension/luau.gdextension)) —
+  page scripting. В репозитории закреплены release/debug binaries для Windows x86_64,
+  Linux x86_64 и macOS arm64 вместе с upstream MIT license.
 
 `build.sh` проверяет, что `libgdffmpeg`, FFmpeg-зависимости и голосовые `.dll`/`.so`/`.dylib`
 реально попали в билд, и предупреждает, если нет (иначе видео или голос молча не заведутся).
+Для Luau проверка обязательная и останавливает сборку при отсутствии нужной библиотеки.
+
+Runtime tests запускаются сценами `tests/test_luau_runtime.tscn`,
+`tests/test_vrweb_scripting.tscn` и `tests/test_remote_data.tscn`.
+`tests/run_luau_http_test.py` поднимает локальный HTTP fixture
+и дополнительно проверяет настоящий redirect, SRI, загрузку source и исполнение linked script.
 
 ## Требования / known issues
 
+- **Luau 0.6.1 + Godot 4.6.3:** macOS arm64 binaries используют совместимый с Godot 4.6
+  `godot-cpp` и локальную минимальную правку ошибочной upstream-привязки `LuaState.to_string`;
+  для Windows/Linux тот же patch нужно применять при следующем обновлении binaries.
+  Происхождение и воспроизводимая правка описаны в
+  [README аддона](../../addons/luau_gdextension/README.md#knossos-build). Это реализационная
+  совместимость reference client, а не часть scripting wire contract.
+- **macOS x86_64:** preset использует официальный universal template Godot, но закреплённая
+  Luau GDExtension содержит только arm64 slice. Текущий macOS-клиент поэтому поддерживает Apple
+  Silicon; Intel Mac не входит в platform matrix scripting v1.
 - **macOS подпись**: сейчас ad-hoc (`-s -`). Билд запускается локально, но при
   скачивании «из интернета» его заблокирует Gatekeeper. Для настоящей раздачи
   нужно завести Apple Developer identity + нотаризацию: в пресете `macOS`

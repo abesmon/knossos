@@ -193,7 +193,7 @@ func _parse_avatar_vrwml(path: String) -> Dictionary:
 		return {"error": "Не удалось прочитать %s." % path}
 	var base_url := PageFetcher.LOCAL_SCHEME + ProjectSettings.globalize_path(path)
 	var policy := AvatarVrwmlPolicy.new()
-	var built := VrwebBuilder.build(HtmlParser.parse(text), base_url, null, policy)
+	var built := VrwebBuilder.build(HtmlParser.parse(text), base_url, policy)
 	var holder := built.get("root") as Node3D
 	if policy.has_errors():
 		push_warning("VRWML avatar skipped unsupported parts: %s" % policy.summary())

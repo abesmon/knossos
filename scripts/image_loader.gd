@@ -22,6 +22,7 @@ const USER_AGENT := "VRWeb/0.1 (Godot; +knossos)"
 # «залипание перед сменой скайбокса». 1 МБ упирает скачивание в скорость сети.
 # См. docs/performance-streaming.md.
 const DOWNLOAD_CHUNK_SIZE := 1 << 20
+const MAX_BYTES := 48 * 1024 * 1024
 
 var _cache: Dictionary = {}     # url -> Texture2D (null = не удалось)
 var _waiters: Dictionary = {}   # url -> Array[Callable], ждут текстуру
@@ -92,6 +93,7 @@ func _start(url: String) -> void:
 	http.use_threads = true
 	http.accept_gzip = true
 	http.download_chunk_size = DOWNLOAD_CHUNK_SIZE
+	http.body_size_limit = MAX_BYTES
 	add_child(http)
 	http.request_completed.connect(
 		func(result, code, headers, body): _on_done(url, http, result, code, headers, body)
@@ -143,7 +145,7 @@ func _finish(url: String, body: PackedByteArray, headers: PackedStringArray) -> 
 	if _is_gif(body):
 		_deliver_gif_async(url, body)
 		return
-	_deliver(url, _decode(url, body, headers))
+	_deliver(url, decode_image(body, url, headers))
 
 
 ## true, если байты начинаются с сигнатуры GIF ("GIF87a"/"GIF89a" -> первые три "GIF").
@@ -191,7 +193,8 @@ func _deliver(url: String, tex: Texture2D) -> void:
 ## Content-Type и расширению url. Перебор кодеков НЕ делаем — это лишь засыпало бы консоль
 ## ошибками декодера на каждой картинке; не распознали тип -> отдаём null, и картинка получит
 ## заглушку. SVG поддерживаем, если в сборке Godot есть кодек.
-func _decode(url: String, body: PackedByteArray, headers: PackedStringArray) -> Texture2D:
+static func decode_image(body: PackedByteArray, url: String = "",
+		headers: PackedStringArray = PackedStringArray()) -> Texture2D:
 	var hint := _signature_image_type(body)
 	if hint == "":
 		hint = _content_type(headers)
@@ -241,6 +244,12 @@ static func _signature_image_type(body: PackedByteArray) -> String:
 		return "png"
 	if body.size() >= 2 and body[0] == 0xFF and body[1] == 0xD8:
 		return "jpg"
+	# SVG is text rather than a binary container. Inspect only a small prefix; XML declarations
+	# and leading whitespace are common, while arbitrary remote text must not be parsed as SVG.
+	if not body.is_empty():
+		var prefix := body.slice(0, mini(body.size(), 1024)).get_string_from_utf8().strip_edges()
+		if prefix.begins_with("<svg") or (prefix.begins_with("<?xml") and prefix.contains("<svg")):
+			return "svg"
 	return ""
 
 
@@ -312,7 +321,7 @@ func _gif_build(prep: Array) -> Texture2D:
 	return anim
 
 
-func _content_type(headers: PackedStringArray) -> String:
+static func _content_type(headers: PackedStringArray) -> String:
 	for h in headers:
 		if h.to_lower().begins_with("content-type:"):
 			return h.substr(13).strip_edges().to_lower()
@@ -323,7 +332,7 @@ func _content_type(headers: PackedStringArray) -> String:
 ## одна компонента (grayscale) с фактором сэмплинга ≠ 1×1. Сканируем маркеры до SOF
 ## и смотрим число компонент и H/V первой. Сомневаемся (не нашли SOF, обрезано) — false:
 ## пусть декодер пробует сам.
-func _jpeg_unsupported(body: PackedByteArray) -> bool:
+static func _jpeg_unsupported(body: PackedByteArray) -> bool:
 	var n := body.size()
 	if n < 4 or body[0] != 0xFF or body[1] != 0xD8:
 		return false   # не JPEG — не наша забота

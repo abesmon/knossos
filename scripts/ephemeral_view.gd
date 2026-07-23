@@ -7,22 +7,29 @@ extends Node3D
 ## _activate_transition, что у порталов).
 ##
 ## Реагирует на ГРАНУЛЯРНЫЕ сигналы транспорта (add/update/remove/reset) — не пересобирает всё на
-## каждое изменение. Объекты — плоские данные { id, kind, parent, author, ts, ttl, props };
+## каждое изменение. Объекты — плоские данные { id, kind, parent, bindings, ts, ttl, props };
 ## вьюха материализует их по kind, не зная транспорта. Вложенность: объект с parent=<id> другого
 ## объекта монтируется как ребёнок его узла (наследует трансформ); parent="page:<node_id>" —
 ## как ребёнок РЕАЛЬНОГО узла vrweb-слоя страницы (реестр targets из main).
 ##
-## Kind'ы: "bubble" (портал-метка), "stroke" (штрих карандаша) и оверлей vrweb
+## Kind'ы: "bubble" (портал-метка) и оверлей vrweb
 ## (см. docs/space-console.md):
-##   "vrweb-node"  — добавленный узел сцены: строится VrwebBuilder.build_element;
+##   "vrweb-node"  — добавленный узел сцены: строится VrwebBuilder.build_element
+##                   (включая процедурный специальный тег <VRWebStroke>);
 ##   "vrweb-patch" — правка узла СТРАНИЦЫ (id "vpatch:<node_id>"): применяет props.set к живому
 ##                   узлу (с запоминанием оригиналов для отката), props.removed скрывает его.
 ## Подробно — в docs/ephemeral-changes.md.
 
 const BUBBLE := preload("res://actors/bubble/bubble.tscn")
-const STROKE := preload("res://actors/stroke/stroke.tscn")
+const ITEM_HOST := preload("res://scripts/vrweb_item_host.gd")
+
+## Ресурсный потолок клиента: сколько item-realm'ов (kind="vrweb-item") материализуется
+## одновременно. Это лимит песочницы (каждый item — своя Luau VM), а не политика контента.
+const MAX_ITEMS := 32
 
 var _activate_cb: Callable
+var _player: Node = null
+var _file_picker: Callable = Callable()
 var _nodes := {}           # id (String) -> Node (объектные kind'ы; патчи сюда не попадают)
 var _targets := {}         # node_id страницы -> Object (узлы/ресурсы vrweb; реестр из main)
 var _resources := {}       # id -> Resource (суб-ресурсы страницы для резолва ссылок)
@@ -39,6 +46,8 @@ func setup(activate_cb: Callable, vrweb: Dictionary = {}) -> void:
 	_targets = vrweb.get("targets", {})
 	_resources = vrweb.get("resources", {})
 	_base_url = str(vrweb.get("base_url", ""))
+	_player = vrweb.get("player") as Node
+	_file_picker = vrweb.get("file_picker", Callable())
 	_content_policy = vrweb.get("content_policy") as VrwebContentPolicy
 	if _content_policy == null:
 		_content_policy = VrwebContentPolicy.new()
@@ -88,7 +97,7 @@ func _live_operation_allowed(id: String, object: Dictionary) -> bool:
 	return VrwebContentPolicy.allowed(_content_policy.evaluate_operation(
 			str(object.get("kind", "")), object,
 			{"source": VrwebContentPolicy.SOURCE_LIVE_PEER, "object_id": id,
-			"author": str(object.get("author", ""))}))
+			"creator": _binding(object, "creator")}))
 
 
 func _on_removed(id: String) -> void:
@@ -196,7 +205,7 @@ func _apply(node: Node, object: Dictionary) -> void:
 		for k in attrs:
 			var decision := _content_policy.evaluate_property(node.get_class(), str(k), str(attrs[k]),
 					{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
-					"object_id": str(object.get("id", "")), "author": str(object.get("author", ""))})
+					"object_id": str(object.get("id", "")), "creator": _binding(object, "creator")})
 			if not VrwebContentPolicy.allowed(decision):
 				continue
 			node.set(str(k), VrwebBuilder.resolve_attr_value(str(attrs[k]), _resources))
@@ -214,10 +223,6 @@ func _make_node(object: Dictionary) -> Node:
 			if _activate_cb.is_valid():
 				bubble.activated.connect(_activate_cb)
 			return bubble
-		"stroke":
-			# Штрих карандаша: один меш-труба по точкам (см. StrokeActor). Не кликабелен —
-			# колбэк активации не нужен; данные ставит вьюха через setup_object в _apply.
-			return STROKE.instantiate()
 		SceneHtml.KIND_NODE:
 			# Добавленный узел vrweb-слоя: строится тем же путём, что узлы страницы
 			# (тот же принятый ClassDB-риск, см. docs/vrwml-tags.md). Дети приходят
@@ -226,8 +231,29 @@ func _make_node(object: Dictionary) -> Node:
 			return VrwebBuilder.build_element(str(props.get("tag", "")),
 				props.get("attrs", {}), _resources, _base_url, _content_policy,
 				{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
-				"object_id": str(object.get("id", "")), "author": str(object.get("author", ""))})
+				"object_id": str(object.get("id", "")), "creator": _binding(object, "creator")})
+		"vrweb-item":
+			# Переносимый предмет: item-документ по props.src, собственный script realm
+			# (см. VrwebItemHost и docs/space/portable-tools.md). Данные (src) придут через
+			# setup_object в _apply; удаление объекта снимает и сцену, и realm.
+			if _item_count() >= MAX_ITEMS:
+				Log.warn("ephemeral", "потолок item-realm'ов (%d) — vrweb-item пропущен" % MAX_ITEMS)
+				return null
+			var host := ITEM_HOST.new()
+			host.configure(str(object.get("id", "")), {
+				"base_url": _base_url, "content_policy": _content_policy,
+				"player": _player, "file_picker": _file_picker,
+			})
+			return host
 	return null
+
+
+func _item_count() -> int:
+	var count := 0
+	for node in _nodes.values():
+		if is_instance_valid(node) and node is VrwebItemHost:
+			count += 1
+	return count
 
 
 # --- Патчи узлов страницы (kind="vrweb-patch") ---
@@ -252,7 +278,7 @@ func _apply_patch(id: String, object: Dictionary) -> void:
 		var prop := str(k)
 		var decision := _content_policy.evaluate_property(target.get_class(), prop, str(set_map[k]),
 				{"source": VrwebContentPolicy.SOURCE_LIVE_PEER,
-				"object_id": str(object.get("id", id)), "author": str(object.get("author", ""))})
+				"object_id": str(object.get("id", id)), "creator": _binding(object, "creator")})
 		if not VrwebContentPolicy.allowed(decision):
 			continue
 		if not originals.has(prop):
@@ -289,6 +315,11 @@ func _revert_patch(id: String) -> void:
 				(target as Node).process_mode = Node.PROCESS_MODE_INHERIT
 		else:
 			target.set(prop, originals[prop])
+
+
+static func _binding(object: Dictionary, name: String) -> String:
+	var bindings = object.get("bindings", {})
+	return str((bindings as Dictionary).get(name, "")) if typeof(bindings) == TYPE_DICTIONARY else ""
 
 
 ## [x,y,z] -> Vector3 (объекты хранят позиции как массивы ради JSON-сериализуемости).

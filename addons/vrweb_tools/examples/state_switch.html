@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — Luau Distributed State lighting demo</title>
+  <script type="application/vrweb+luau" id="demo.light-switch">
+local button = document.query("#light-button")
+local red_lamp = document.query("#red-lamp")
+local green_lamp = document.query("#green-lamp")
+local red_status = document.query("#red-status")
+local green_status = document.query("#green-status")
+
+if not button or not red_lamp or not green_lamp or not red_status or not green_status then
+  error("lighting demo scene ids are missing")
+end
+
+local schema = "light"
+local object = "switch"
+local version = 1
+
+assert(document.state.define(schema, {
+  version = version,
+  fields = {
+    enabled = { type = "bool", default = false },
+  },
+  -- MVP пока оставляет user/instance permissions открытыми: команда доступна обычному rank.
+  default_write_rule = { rank = { op = "lte", value = 1073741824 } },
+  commands = {
+    toggle = {
+      reducer = function(event)
+        return {
+          state = { enabled = not event.state.enabled },
+          bindings = { operator = event.context.actor_user_id },
+        }
+      end,
+    },
+  },
+}))
+assert(document.state.ensure(object, schema, { enabled = false }, {}))
+
+local function render(state)
+  local enabled = state.enabled == true
+  red_lamp.set("visible", not enabled)
+  red_status.set("visible", not enabled)
+  green_lamp.set("visible", enabled)
+  green_status.set("visible", enabled)
+end
+
+render(document.state.read(object, schema))
+document.state.on(object, schema, function(event)
+  render(event.state)
+end)
+document.state.on_bindings(object, schema, function(event)
+  local operator = event.bindings.operator or ""
+  green_status.set("text", "ОПЕРАТОР: " .. operator)
+end)
+
+button.on("activate", function(_event)
+  document.state.command(object, schema, version, "toggle", {})
+end, "Переключить общий свет")
+  </script>
+  <script type="application/vrweb+luau" id="demo.update-clocks">
+local local_ball = document.query("#local-ball")
+local authority_ball = document.query("#authority-ball")
+local local_label = document.query("#local-clock-label")
+local authority_label = document.query("#authority-clock-label")
+local local_material = document.query("#LocalBallMaterial")
+local authority_material = document.query("#AuthorityBallMaterial")
+
+if not local_ball or not authority_ball or not local_label or not authority_label
+    or not local_material or not authority_material then
+  error("update demo scene ids or resources are missing")
+end
+
+local label_accumulator = 1.0
+assert(document.on_update(function(frame)
+  local local_t = frame.local_time
+  local authority_t = frame.authority_time
+
+  local_ball.set("position", document.values.vector3(
+    -3.0, 1.55 + math.sin(local_t * 1.7) * 0.65, -4.0))
+  authority_ball.set("position", document.values.vector3(
+    3.0, 1.55 + math.sin(authority_t * 1.7) * 0.65, -4.0))
+
+  local local_phase = (math.sin(local_t * 0.8) + 1.0) * 0.5
+  local authority_phase = (math.sin(authority_t * 0.8) + 1.0) * 0.5
+  local_material.set("albedo_color", document.values.color(
+    0.12 + local_phase * 0.75, 0.25, 0.95 - local_phase * 0.55, 1.0))
+  authority_material.set("albedo_color", document.values.color(
+    0.10, 0.35 + authority_phase * 0.60, 0.85 - authority_phase * 0.55, 1.0))
+
+  label_accumulator = label_accumulator + frame.delta
+  if label_accumulator >= 0.1 then
+    label_accumulator = 0.0
+    local_label.set("text", string.format("LOCAL SCENE TIME\n%.2f s", local_t))
+    local authority_mode = frame.authority_ready and "SYNCED TO AUTHORITY" or "LOCAL FALLBACK"
+    authority_label.set("text", string.format(
+      "AUTHORITY TIME (%s)\n%.2f s", authority_mode, authority_t))
+  end
+end))
+  </script>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <MeshInstance3D mesh="SubResource:::FloorMesh"
+                    transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0.05,0)">
+      <StaticBody3D>
+        <CollisionShape3D shape="SubResource:::FloorShape"/>
+      </StaticBody3D>
+    </MeshInstance3D>
+
+    <WorldEnvironment environment="SubResource:::Environment"/>
+    <DirectionalLight3D rotation_degrees="Vector3(-55,-25,0)" light_energy="0.7"/>
+
+    <!-- В сцене только обычные объекты. Поведение, distributed state и bindings находятся
+         в inline Luau выше и обращаются к объектам через стабильные id. -->
+    <Node3D name="LightSwitch"
+            transform="Transform3D(1,0,0, 0,1,0, 0,1.15,-6.2)">
+      <StaticBody3D id="light-button" name="Button">
+        <MeshInstance3D mesh="SubResource:::ButtonMesh"
+                        material_override="SubResource:::ButtonMaterial">
+          <Label3D position="Vector3(0,0,0.071)" text="ПЕРЕКЛЮЧИТЬ"
+                   font_size="48" outline_size="10" pixel_size="0.005"/>
+        </MeshInstance3D>
+        <CollisionShape3D name="Collision" shape="SubResource:::ButtonShape"/>
+      </StaticBody3D>
+
+      <MeshInstance3D id="red-lamp" name="RedLamp" position="Vector3(0,1.65,0)"
+                      mesh="SubResource:::LampMesh" material_override="SubResource:::RedMaterial">
+        <OmniLight3D light_color="Color(0.95,0.08,0.05,1)" omni_range="8"
+                     light_energy="4" shadow_enabled="true"/>
+      </MeshInstance3D>
+      <MeshInstance3D id="green-lamp" name="GreenLamp" position="Vector3(0,1.65,0)" visible="false"
+                      mesh="SubResource:::LampMesh" material_override="SubResource:::GreenMaterial">
+        <OmniLight3D light_color="Color(0.08,0.95,0.18,1)" omni_range="8"
+                     light_energy="4" shadow_enabled="true"/>
+      </MeshInstance3D>
+      <Label3D id="red-status" name="RedStatus" position="Vector3(0,0.72,0)" text="СВЕТ: КРАСНЫЙ"
+               modulate="Color(0.95,0.08,0.05,1)" font_size="44" outline_size="10" pixel_size="0.005"/>
+      <Label3D id="green-status" name="GreenStatus" position="Vector3(0,0.72,0)" text="СВЕТ: ЗЕЛЁНЫЙ"
+               modulate="Color(0.08,0.95,0.18,1)" visible="false"
+               font_size="44" outline_size="10" pixel_size="0.005"/>
+    </Node3D>
+
+    <Node3D name="UpdateClockDemo">
+      <MeshInstance3D id="local-ball" name="LocalBall" position="Vector3(-3,1.55,-4)"
+                      mesh="SubResource:::UpdateBallMesh"
+                      material_override="SubResource:::LocalBallMaterial"/>
+      <Label3D id="local-clock-label" name="LocalClockLabel" position="Vector3(-3,3,-4)"
+               text="LOCAL SCENE TIME\nstarting…" modulate="Color(0.45,0.7,1,1)"
+               font_size="34" outline_size="10" pixel_size="0.005"/>
+
+      <MeshInstance3D id="authority-ball" name="AuthorityBall" position="Vector3(3,1.55,-4)"
+                      mesh="SubResource:::UpdateBallMesh"
+                      material_override="SubResource:::AuthorityBallMaterial"/>
+      <Label3D id="authority-clock-label" name="AuthorityClockLabel" position="Vector3(3,3,-4)"
+               text="AUTHORITY TIME\nstarting…" modulate="Color(0.35,1,0.7,1)"
+               font_size="34" outline_size="10" pixel_size="0.005"/>
+    </Node3D>
+
+    <Label3D text="UPDATE: local timeline vs shared authority timeline"
+             position="Vector3(0,4,-4)" font_size="46" pixel_size="0.0055"/>
+    <Label3D text="REPlicated State: общий переключатель"
+             position="Vector3(0,3.7,-6.2)" font_size="44" pixel_size="0.0055"/>
+    <Label3D text="Нажмите кнопку в любом экземпляре — цвет сменится у всех"
+             position="Vector3(0,3.25,-6.2)" font_size="30" pixel_size="0.0045"/>
+
+    <VRWebSpawner mode="first">
+      <SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0,-1)"/>
+    </VRWebSpawner>
+
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(14,0.1,14)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(14,0.1,14)"/>
+    <Resource id="ButtonMesh" type="BoxMesh" size="Vector3(2.4,0.9,0.12)"/>
+    <Resource id="ButtonShape" type="BoxShape3D" size="Vector3(2.4,0.9,0.16)"/>
+    <Resource id="LampMesh" type="SphereMesh" radius="0.52" height="1.04"/>
+    <Resource id="UpdateBallMesh" type="SphereMesh" radius="0.42" height="0.84"/>
+    <Resource id="ButtonMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.12,0.16,0.24,1)" metallic="0.2" roughness="0.45"/>
+    <Resource id="RedMaterial" type="StandardMaterial3D" albedo_color="Color(0.95,0.08,0.05,1)"
+              emission_enabled="true" emission="Color(0.95,0.08,0.05,1)" emission_energy_multiplier="3"/>
+    <Resource id="GreenMaterial" type="StandardMaterial3D" albedo_color="Color(0.08,0.95,0.18,1)"
+              emission_enabled="true" emission="Color(0.08,0.95,0.18,1)" emission_energy_multiplier="3"/>
+    <Resource id="LocalBallMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.2,0.25,0.9,1)" metallic="0.25" roughness="0.28"/>
+    <Resource id="AuthorityBallMaterial" type="StandardMaterial3D"
+              albedo_color="Color(0.1,0.9,0.35,1)" metallic="0.25" roughness="0.28"/>
+    <Resource id="Environment" type="Environment"
+              background_mode="2" background_color="Color(0.025,0.035,0.06,1)"
+              ambient_light_source="3" ambient_light_color="Color(0.18,0.22,0.35,1)"
+              ambient_light_energy="0.55"/>
+  </vrwml>
+</body>
+</html>

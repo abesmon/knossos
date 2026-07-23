@@ -117,6 +117,8 @@ next_build_number() {
   [[ -z "$n" ]] && n=0
   n=$((n + 1))
   mkdir -p "$BUILD"
+  # Godot иначе сканирует/импортирует артефакты сборки (2+ ГБ .app/zip) — прячем их от редактора.
+  [[ -f "$BUILD/.gdignore" ]] || : > "$BUILD/.gdignore"
   printf '%s\n' "$n" > "$BUILD_NUMBER_FILE"
   printf '%s' "$n"
 }
@@ -196,6 +198,11 @@ build_mac() {
   else
     warn "Не нашёл libgdffmpeg в .app — видеоплеер может не работать"
   fi
+  if find "$app/Contents" -name 'libgdluau.darwin.arm64.dylib' | grep -q .; then
+    ok "Luau GDExtension в бандле"
+  else
+    die "Не нашёл Luau GDExtension в .app — page scripting недоступен"
+  fi
 
   step "Добавляю helper и инструкцию для первого запуска"
   cp "$MACOS_PACKAGE_FILES/Open Knossos.command" "$dir/"
@@ -224,6 +231,11 @@ build_win() {
     ok "FFmpeg dll рядом с exe"
   else
     warn "Не нашёл ffmpeg dll рядом с exe — видеоплеер может не работать"
+  fi
+  if [[ -f "$dir/gdluau.windows.amd64.dll" ]]; then
+    ok "Luau dll рядом с exe"
+  else
+    die "Не нашёл Luau dll рядом с exe — page scripting недоступен"
   fi
 
   step "Упаковка в zip"
@@ -255,6 +267,11 @@ build_linux() {
   else
     warn "Не нашёл WebRTC/TwoVoIP so рядом с бинарём — мультиплеер/голос могут не работать"
   fi
+  if [[ -f "$dir/libgdluau.linux.x86_64.so" ]]; then
+    ok "Luau so рядом с бинарём"
+  else
+    die "Не нашёл Luau so рядом с бинарём — page scripting недоступен"
+  fi
 
   step "Упаковка в zip"
   local zip="$BUILD/$NAME-$ARCHIVE_TAG-linux-x86_64.zip"
@@ -280,6 +297,7 @@ build_maker_kit() {
   rm -rf "$stage/.godot" "$stage/dist"
   cp -R "$ROOT/addons/vrweb_tools" "$stage/addons/vrweb_tools"
   cp "$ROOT/packaging/maker-kit/README.md" "$stage/README.md"
+  cp -R "$ROOT/docs" "$stage/docs"
   cp "$ROOT/packaging/maker-kit/vscode-settings.json" "$stage/.vscode/settings.json"
   cp "$ROOT/schemas/vrweb-html-data.json" "$stage/schemas/vrweb-html-data.json"
   stage_maker_changelog "$stage/CHANGELOG.md"
@@ -360,6 +378,7 @@ verify_maker_kit_archive() {
   fi
   [[ -s "$project/dist/world.html" && -s "$project/dist/report.json" \
       && -s "$project/compatibility.json" \
+      && -s "$project/docs/maker-workflow.md" \
       && -s "$project/schemas/vrweb-html-data.json" ]] || {
     tail -30 "$log" >&2
     rm -rf "$work"

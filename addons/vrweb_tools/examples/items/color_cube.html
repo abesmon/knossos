@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb item — color cube</title>
+  <script type="application/vrweb+luau" id="cube.behavior">
+-- Переносимый предмет (docs/space/portable-tools.md): grabbable-кубик, use перекрашивает.
+-- Скрипт исполняется в СОБСТВЕННОМ realm предмета со стандартным capability pool.
+local cube = document.query("#item-cube")
+local material = document.query("#ItemCubeMaterial")
+assert(cube ~= nil and material ~= nil, "item cube scene ids are missing")
+
+local palette = {
+  document.values.color(0.9, 0.35, 0.2, 1.0),
+  document.values.color(0.2, 0.65, 0.9, 1.0),
+  document.values.color(0.5, 0.9, 0.3, 1.0),
+}
+local index = 1
+cube.on("use", function(_event)
+  index = index % #palette + 1
+  material.set("albedo_color", palette[index])
+end, "")
+  </script>
+</head>
+<body>
+  <vrwml>
+    <Resource id="ItemCubeMesh" type="BoxMesh" size="Vector3(0.3,0.3,0.3)"/>
+    <Resource id="ItemCubeMaterial" type="StandardMaterial3D" albedo_color="Color(0.9,0.35,0.2,1)"/>
+    <VRWebGrabbable id="item-cube" mode="adjustable">
+      <MeshInstance3D mesh="SubResource:::ItemCubeMesh" surface_material_override/0="SubResource:::ItemCubeMaterial"/>
+    </VRWebGrabbable>
+  </vrwml>
+</body>
+</html>

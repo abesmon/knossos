@@ -11,7 +11,7 @@ func _ready() -> void:
   <Resource id="Box" type="BoxMesh" size="Vector3(1,1,1)"/>
 </vrwml>
 """)
-	var built := VrwebBuilder.build(doc, "https://example.test/world", null, policy)
+	var built := VrwebBuilder.build(doc, "https://example.test/world", policy)
 	_eq(built.root != null, true, "allow-all policy preserves document materialization")
 	_eq(built.root.get_node_or_null("FromDocument") != null, true,
 			"document declaration remains allowed")
@@ -20,7 +20,7 @@ func _ready() -> void:
 	add_child(view)
 	view.setup(Callable(), {"content_policy": policy, "base_url": "https://example.test/world"})
 	var live_object := {
-		"id": "peer.1", "kind": SceneHtml.KIND_NODE, "author": "peer-user", "parent": "",
+		"id": "peer.1", "kind": SceneHtml.KIND_NODE, "bindings": {"creator": "peer-user"}, "parent": "",
 		"props": {"tag": "Node3D", "attrs": {"name": "FromPeer", "visible": "true"}},
 	}
 	view.call("_on_added", "peer.1", live_object)

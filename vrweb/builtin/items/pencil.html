@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb item — карандаш</title>
+  <script type="application/vrweb+luau" id="pencil.behavior">
+-- Карандаш как переносимый предмет (docs/space/portable-tools.md): держишь в руке,
+-- зажал ЛКМ (use) — ведёшь штрих по прицелу, отпустил (use_end) — один штрих уходит в
+-- эфемерный слой стандартным VRWML-узлом <VRWebStroke>.
+-- Превью по ходу ведения — временные CSG-точки, снимаются при финализации.
+local pencil = document.query("#pencil-item")
+assert(pencil ~= nil, "pencil item scene id is missing")
+
+local STROKE_WIDTH = 0.02
+local MIN_STEP = 0.03      -- прореживание точек (м)
+local MAX_POINTS = 200     -- потолок штриха (props-бюджет слоя)
+local AIR_DIST = 1.2       -- рисование «в воздухе», когда прицел ни во что не упёрся
+
+-- Стабильный цвет по user_id — как у клиентского карандаша (у каждого свой оттенок).
+local me = document.players.local_info()
+local hue = 0
+for i = 1, #tostring(me.user_id) do
+  hue = (hue + string.byte(tostring(me.user_id), i) * 31) % 360
+end
+local function hsv(h)
+  local c, x = 1.0, 1.0 - math.abs((h / 60) % 2 - 1)
+  local r, g, b = 0, 0, 0
+  if h < 60 then r, g, b = c, x, 0 elseif h < 120 then r, g, b = x, c, 0
+  elseif h < 180 then r, g, b = 0, c, x elseif h < 240 then r, g, b = 0, x, c
+  elseif h < 300 then r, g, b = x, 0, c else r, g, b = c, 0, x end
+  return 0.35 + r * 0.65, 0.35 + g * 0.65, 0.35 + b * 0.65
+end
+local cr, cg, cb = hsv(hue)
+
+local drawing = false
+local points = {}          -- плоский массив x,y,z (контракт props штриха)
+local last = nil
+local preview = {}         -- CSG-точки превью
+
+local function draw_point()
+  local aim = document.player.aim()
+  if aim.hit and aim.distance < 3.4 then
+    return aim.position + aim.normal * 0.01
+  end
+  return aim.origin + aim.direction * AIR_DIST
+end
+
+local function clear_preview()
+  for i = 1, #preview do preview[i].destroy() end
+  preview = {}
+end
+
+pencil.on("use", function(_e)
+  drawing = true
+  points = {}
+  last = nil
+end, "")
+
+document.on_update(function(_frame)
+  if not drawing then return end
+  if #points >= MAX_POINTS * 3 then return end
+  local p = draw_point()
+  if last ~= nil and vector.magnitude(p - last) < MIN_STEP then return end
+  last = p
+  points[#points + 1] = p.x
+  points[#points + 1] = p.y
+  points[#points + 1] = p.z
+  -- Превью-точка в мировых координатах: create монтирует узел в корень item'а, поэтому
+  -- позиционируем через global_position уже после создания.
+  local dot = document.create("CSGSphere3D", { radius = STROKE_WIDTH })
+  if dot ~= nil then
+    dot.set("global_position", p)
+    preview[#preview + 1] = dot
+  end
+end)
+
+pencil.on("use_end", function(_e)
+  if not drawing then return end
+  drawing = false
+  clear_preview()
+  if #points < 6 then return end   -- клик без ведения — не штрих
+  local encoded = {}
+  for i = 1, #points do encoded[i] = string.format("%.3f", points[i]) end
+  document.scene.add({ kind = "vrweb-node", parent = "", ttl = 0, props = {
+    tag = "VRWebStroke",
+    attrs = {
+      points = "[" .. table.concat(encoded, ", ") .. "]",
+      color = string.format("Color(%.4f, %.4f, %.4f, 1)", cr, cg, cb),
+      width = tostring(STROKE_WIDTH),
+    },
+  } })
+  points = {}
+end, "")
+
+pencil.on("drop", function(_e)
+  -- Выпал из руки посреди ведения (G/кража) — незавершённый штрих отменяется.
+  drawing = false
+  clear_preview()
+  points = {}
+end, "")
+  </script>
+</head>
+<body>
+  <vrwml>
+    <Resource id="PencilBody" type="CylinderMesh" top_radius="0.004" bottom_radius="0.013" height="0.4"/>
+    <Resource id="PencilMaterial" type="StandardMaterial3D" albedo_color="Color(0.95,0.75,0.2,1)"/>
+    <VRWebGrabbable id="pencil-item" theft="deny" grip="Transform3D(1,0,0, 0,0,-1, 0,1,0, 0,0,-0.2)">
+      <MeshInstance3D mesh="SubResource:::PencilBody" surface_material_override/0="SubResource:::PencilMaterial"/>
+    </VRWebGrabbable>
+  </vrwml>
+</body>
+</html>

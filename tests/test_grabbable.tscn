@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cgrabbtest001"]
+
+[ext_resource type="Script" path="res://tests/test_grabbable.gd" id="1_grabbtest"]
+
+[node name="GrabbableTest" type="Node"]
+script = ExtResource("1_grabbtest")

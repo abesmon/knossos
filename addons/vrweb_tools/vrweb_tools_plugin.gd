@@ -19,14 +19,15 @@ const EDITOR_LAUNCH_MODE_SETTING := "vrweb_maker/launch_mode"
 var _dock: VBoxContainer
 var _dock_scroll: ScrollContainer
 var _integration_slot: VBoxContainer
+var _script_opt: OptionButton
+var _script_id_edit: LineEdit
+var _script_source_edit: TextEdit
+var _script_src_edit: LineEdit
+var _script_integrity_edit: LineEdit
+var _element_id_edit: LineEdit
 var _prop_edit: LineEdit
 var _url_edit: LineEdit
 var _type_opt: OptionButton
-var _module_id_edit: LineEdit
-var _module_version_edit: LineEdit
-var _module_permissions_edit: LineEdit
-var _module_requires_edit: LineEdit
-var _module_optional_edit: LineEdit
 var _status: Label
 var _file_dialog: EditorFileDialog
 var _knossos_file_dialog: EditorFileDialog
@@ -37,6 +38,7 @@ var _launch_mode_opt: OptionButton
 var _pending_launch_path := ""
 var _portable_html_importer: EditorSceneFormatImporter
 var _integration: Object
+var _refreshing_authoring_ui := false
 
 
 func _enter_tree() -> void:
@@ -87,27 +89,6 @@ func _build_dock() -> void:
 	_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_dock_scroll.add_child(_dock)
 
-	_dock.add_child(_heading("Script выбранного узла"))
-	var trusted_note := Label.new()
-	trusted_note.text = "Trusted GDScript получает права процесса. permissions — описание для review, не sandbox. Inline: один файл; package: зависимости и manifest."
-	trusted_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_dock.add_child(trusted_note)
-	_dock.add_child(_button("Экспортировать inline", _on_script_inline_pressed))
-	_dock.add_child(_button("Экспортировать package", _on_script_package_pressed))
-	_dock.add_child(_button("Не экспортировать Script", _on_script_off_pressed))
-	_module_id_edit = _module_edit("module id (например, acme.lights)")
-	_dock.add_child(_module_id_edit)
-	_module_version_edit = _module_edit("version (SemVer, например 1.0.0)")
-	_dock.add_child(_module_version_edit)
-	_module_permissions_edit = _module_edit("permissions через запятую")
-	_dock.add_child(_module_permissions_edit)
-	_module_requires_edit = _module_edit("required capabilities через запятую")
-	_dock.add_child(_module_requires_edit)
-	_module_optional_edit = _module_edit("optional capabilities через запятую")
-	_dock.add_child(_module_optional_edit)
-	_dock.add_child(_button("Применить metadata модуля", _on_module_metadata_pressed))
-
-	_dock.add_child(_sep())
 	_dock.add_child(_heading("Внешний ресурс → выбранный узел"))
 	_prop_edit = LineEdit.new()
 	_prop_edit.placeholder_text = "свойство (напр. texture); пусто = ExtScene"
@@ -122,6 +103,34 @@ func _build_dock() -> void:
 	_dock.add_child(_button("Привязать к узлу", _on_bind_pressed))
 	_dock.add_child(_button("Привязать local asset…", _on_bind_local_pressed))
 	_dock.add_child(_button("Убрать привязку", _on_unbind_pressed))
+
+	_dock.add_child(_sep())
+	_dock.add_child(_heading("Luau-скрипты мира"))
+	_script_opt = OptionButton.new()
+	_script_opt.item_selected.connect(_on_script_selected)
+	_dock.add_child(_script_opt)
+	_script_id_edit = LineEdit.new()
+	_script_id_edit.placeholder_text = "id скрипта, например world.behavior"
+	_dock.add_child(_script_id_edit)
+	_script_source_edit = TextEdit.new()
+	_script_source_edit.placeholder_text = "inline Luau source"
+	_script_source_edit.custom_minimum_size.y = 150
+	_dock.add_child(_script_source_edit)
+	_script_src_edit = LineEdit.new()
+	_script_src_edit.placeholder_text = "или linked src, например behavior.luau"
+	_dock.add_child(_script_src_edit)
+	_script_integrity_edit = LineEdit.new()
+	_script_integrity_edit.placeholder_text = "integrity для linked script (необязательно)"
+	_dock.add_child(_script_integrity_edit)
+	_dock.add_child(_button("Сохранить скрипт", _on_save_script_pressed))
+	_dock.add_child(_button("Удалить выбранный скрипт", _on_remove_script_pressed))
+
+	_dock.add_child(_sep())
+	_dock.add_child(_heading("Queryable id → выбранный узел"))
+	_element_id_edit = LineEdit.new()
+	_element_id_edit.placeholder_text = "id для document.query(\"#id\")"
+	_dock.add_child(_element_id_edit)
+	_dock.add_child(_button("Сохранить id узла", _on_save_element_id_pressed))
 
 	_dock.add_child(_sep())
 	_dock.add_child(_heading("Build & Run · production runtime"))
@@ -139,6 +148,7 @@ func _build_dock() -> void:
 	_launch_mode_opt.select(1 if saved_mode == VrwebLauncher.MODE_DEEPLINK else 0)
 	_dock.add_child(_launch_mode_opt)
 	_dock.add_child(_button("Build & Run in Knossos", _on_build_run_pressed))
+	_dock.add_child(_button("Открыть руководство разработчика", _on_open_guide_pressed))
 
 	_integration_slot = VBoxContainer.new()
 	_integration_slot.name = "Integration"
@@ -292,8 +302,8 @@ func _on_export_path_chosen(path: String) -> void:
 	var warnings: Array = report.get("warnings", [])
 	var suffix := "; warnings: %d — смотрите Output" % warnings.size() \
 			if not warnings.is_empty() else ""
-	_say("Экспортировано: %s; packages: %d%s" % [
-		path, report.get("packages", []).size(), suffix])
+	_say("Экспортировано: %s; scripts: %d%s" % [
+		path, report.get("scripts", []).size(), suffix])
 	_show_export_review(report, path, true)
 
 
@@ -392,15 +402,12 @@ func _show_export_review(report: Dictionary, path: String, written: bool) -> voi
 		"Output: %s" % path,
 		"Profile: %s (policy %s)" % [report.get("profile", ""),
 			report.get("policy_version", "")],
-		"Packages: %d" % report.get("packages", []).size(),
+		"Scripts: %d" % report.get("scripts", []).size(),
 		"Assets: %d" % report.get("assets", []).size(),
 	]
 	var output_file: Dictionary = report.get("output_file", {})
 	if not output_file.is_empty():
 		lines.append("Output SHA-256: %s" % output_file.get("sha256", ""))
-	for package in report.get("packages", []):
-		lines.append("Package: %s; SHA-256: %s; files: %d" % [
-			package.get("file", ""), package.get("hash", ""), package.get("files", []).size()])
 	var asset_manifest: Dictionary = report.get("asset_manifest", {})
 	if not asset_manifest.is_empty():
 		lines.append("Asset manifest: %s; SHA-256: %s" % [asset_manifest.get("file", ""),
@@ -429,94 +436,137 @@ func _sha256_text(content: String) -> String:
 	return context.finish().hex_encode()
 
 
-func _on_script_inline_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if not (node.get_script() is GDScript):
-		_say("У выбранного узла нет GDScript.")
-		return
-	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_INLINE)
-	_mark_dirty()
-	_say("Script «%s» будет экспортирован inline." % node.name)
-
-
-func _on_script_off_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if node.has_meta(VrwebExporter.META_SCRIPT_MODE):
-		node.remove_meta(VrwebExporter.META_SCRIPT_MODE)
-	_mark_dirty()
-	_say("Script «%s» не будет экспортирован." % node.name)
-
-
-func _on_script_package_pressed() -> void:
-	var node := _selected_node()
-	if node == null:
-		return
-	if not (node.get_script() is GDScript):
-		_say("У выбранного узла нет GDScript.")
-		return
-	node.set_meta(VrwebExporter.META_SCRIPT_MODE, VrwebExporter.SCRIPT_MODE_PACKAGE)
-	_mark_dirty()
-	_say("Script «%s» будет экспортирован в .vrmod." % node.name)
-
-
 func _on_selection_changed() -> void:
-	_load_module_metadata(_selected_node())
+	_refresh_element_id()
 
 
-func _load_module_metadata(node: Node) -> void:
-	if _module_id_edit == null:
+func _refresh_authoring_ui() -> void:
+	if _script_opt == null:
 		return
-	var enabled := node != null and node.get_script() is GDScript
-	for field in [_module_id_edit, _module_version_edit, _module_permissions_edit,
-			_module_requires_edit, _module_optional_edit]:
-		field.editable = enabled
-	if not enabled:
-		_module_id_edit.text = ""
-		_module_version_edit.text = ""
-		_module_permissions_edit.text = ""
-		_module_requires_edit.text = ""
-		_module_optional_edit.text = ""
-		return
-	var metadata := VrwebModuleMetadata.from_node(node, _module_fallback_id(node))
-	_module_id_edit.text = metadata.id
-	_module_version_edit.text = metadata.version
-	_module_permissions_edit.text = VrwebModuleMetadata.list_text(metadata.permissions)
-	_module_requires_edit.text = VrwebModuleMetadata.list_text(metadata.requires)
-	_module_optional_edit.text = VrwebModuleMetadata.list_text(metadata.optional)
+	_refreshing_authoring_ui = true
+	_script_opt.clear()
+	_script_opt.add_item("Новый скрипт…")
+	var root := EditorInterface.get_edited_scene_root()
+	if root != null:
+		for raw in root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, []):
+			if raw is Dictionary:
+				_script_opt.add_item(str(raw.get("id", "без id")))
+	_script_opt.select(0)
+	_clear_script_editor()
+	_refreshing_authoring_ui = false
+	_refresh_element_id()
 
 
-func _on_module_metadata_pressed() -> void:
-	var node := _selected_node()
-	if node == null or not (node.get_script() is GDScript):
-		_say("Выберите узел с GDScript.")
+func _clear_script_editor() -> void:
+	_script_id_edit.text = ""
+	_script_source_edit.text = ""
+	_script_src_edit.text = ""
+	_script_integrity_edit.text = ""
+
+
+func _on_script_selected(index: int) -> void:
+	if _refreshing_authoring_ui:
 		return
-	var errors := VrwebModuleMetadata.apply_to_node(node, {
-		"id": _module_id_edit.text,
-		"version": _module_version_edit.text,
-		"permissions": VrwebModuleMetadata.parse_list(_module_permissions_edit.text),
-		"requires": VrwebModuleMetadata.parse_list(_module_requires_edit.text),
-		"optional": VrwebModuleMetadata.parse_list(_module_optional_edit.text),
-	})
-	if not errors.is_empty():
-		_say("Metadata не сохранена: %s" % "; ".join(errors))
+	_clear_script_editor()
+	if index <= 0:
 		return
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
+		return
+	var scripts: Array = root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, [])
+	if index - 1 >= scripts.size() or not scripts[index - 1] is Dictionary:
+		return
+	var raw: Dictionary = scripts[index - 1]
+	_script_id_edit.text = str(raw.get("id", ""))
+	_script_source_edit.text = str(raw.get("source", ""))
+	_script_src_edit.text = str(raw.get("src", ""))
+	_script_integrity_edit.text = str(raw.get("integrity", ""))
+
+
+func _on_save_script_pressed() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null:
+		_say("Нет открытой сцены для скрипта.")
+		return
+	var raw := {"id": _script_id_edit.text.strip_edges(),
+		"source": _script_source_edit.text, "src": _script_src_edit.text.strip_edges(),
+		"integrity": _script_integrity_edit.text.strip_edges()}
+	var prepared := VrwebInlineExporter.prepare(raw)
+	if not bool(prepared.get("ok", false)):
+		_say("Скрипт не сохранён: %s." % prepared.get("error", "неверное объявление"))
+		return
+	var scripts: Array = root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, []).duplicate(true)
+	var target := _script_opt.selected - 1
+	for index in scripts.size():
+		if index != target and scripts[index] is Dictionary \
+				and str(scripts[index].get("id", "")) == str(raw.id):
+			_say("Скрипт не сохранён: id %s уже используется." % raw.id)
+			return
+	if target >= 0 and target < scripts.size():
+		scripts[target] = raw
+	else:
+		scripts.append(raw)
+	root.set_meta(VrwebExporter.META_PAGE_SCRIPTS, scripts)
 	_mark_dirty()
-	_say("Metadata модуля «%s» сохранена." % _module_id_edit.text)
+	_refresh_authoring_ui()
+	_say("Скрипт %s сохранён в сцене; выполните Build & Run для проверки в sandbox." % raw.id)
 
 
-func _module_fallback_id(node: Node) -> String:
-	var candidate := str(node.name).to_snake_case()
-	var safe := ""
-	for character in candidate:
-		safe += character if character.to_lower() in \
-				"abcdefghijklmnopqrstuvwxyz0123456789_.-" else "_"
-	if safe.is_empty() or not safe[0].to_lower() in "abcdefghijklmnopqrstuvwxyz_":
-		safe = "module_" + safe
-	return safe
+func _on_remove_script_pressed() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	var target := _script_opt.selected - 1
+	if root == null or target < 0:
+		_say("Выберите существующий скрипт.")
+		return
+	var scripts: Array = root.get_meta(VrwebExporter.META_PAGE_SCRIPTS, []).duplicate(true)
+	if target >= scripts.size():
+		return
+	var script_id := str(scripts[target].get("id", "")) if scripts[target] is Dictionary else ""
+	scripts.remove_at(target)
+	if scripts.is_empty():
+		root.remove_meta(VrwebExporter.META_PAGE_SCRIPTS)
+	else:
+		root.set_meta(VrwebExporter.META_PAGE_SCRIPTS, scripts)
+	_mark_dirty()
+	_refresh_authoring_ui()
+	_say("Скрипт %s удалён из сцены." % script_id)
+
+
+func _refresh_element_id() -> void:
+	if _element_id_edit == null:
+		return
+	var selected := EditorInterface.get_selection().get_selected_nodes()
+	_element_id_edit.text = "" if selected.is_empty() else str(
+			selected[0].get_meta(VrwebExporter.META_ELEMENT_ID, ""))
+
+
+func _on_save_element_id_pressed() -> void:
+	var node := _selected_node()
+	if node == null:
+		return
+	var value := _element_id_edit.text.strip_edges()
+	if value.is_empty():
+		node.remove_meta(VrwebExporter.META_ELEMENT_ID)
+		_say("Queryable id узла «%s» удалён." % node.name)
+	elif not VrwebInlineExporter.valid_id(value):
+		_say("Id узла недопустим: используйте латиницу, цифры, точку, '_' или '-'.")
+		return
+	else:
+		node.set_meta(VrwebExporter.META_ELEMENT_ID, value)
+		_say("Узел «%s» доступен скриптам как #%s." % [node.name, value])
+	_mark_dirty()
+
+
+func _on_open_guide_pressed() -> void:
+	for path in ["res://DEVELOPER_GUIDE.md", "res://docs/maker-workflow.md"]:
+		if FileAccess.file_exists(path):
+			var error := OS.shell_open(ProjectSettings.globalize_path(path))
+			if error == OK:
+				_say("Открыто руководство разработчика.")
+			else:
+				_say("Не удалось открыть руководство (код %d): %s" % [error, path])
+			return
+	_say("Руководство не найдено в проекте; откройте README Maker Kit.")
 
 
 func _on_bind_pressed() -> void:
@@ -597,9 +647,9 @@ func _save_external_data() -> void:
 
 
 func _on_editor_scene_changed(root: Node) -> void:
+	_refresh_authoring_ui()
 	if _integration != null and _integration.has_method("on_scene_changed"):
 		_integration.call("on_scene_changed", root)
-	_load_module_metadata(null)
 
 
 func _selected_node() -> Node:
@@ -627,13 +677,6 @@ func _button(text: String, handler: Callable) -> Button:
 	button.text = text
 	button.pressed.connect(handler)
 	return button
-
-
-func _module_edit(placeholder: String) -> LineEdit:
-	var edit := LineEdit.new()
-	edit.placeholder_text = placeholder
-	edit.editable = false
-	return edit
 
 
 func _sep() -> HSeparator:

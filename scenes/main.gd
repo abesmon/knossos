@@ -7,7 +7,6 @@ extends Node
 const PLAYER_SCENE := preload("res://actors/player/player.tscn")
 const REMOTE_VIEW_SCRIPT := preload("res://scripts/remote_players_view.gd")
 const EPHEMERAL_VIEW_SCRIPT := preload("res://scripts/ephemeral_view.gd")
-const SCRIPT_PERMISSION_DIALOG := preload("res://scripts/scripting_modules/scripting_module_permission_dialog.gd")
 
 @onready var _world: Node3D = $world
 @onready var _ui: MainUI = $UI
@@ -25,14 +24,13 @@ var _fetcher: PageFetcher
 # Загрузчик внешних CSS (docs/css-cascade.md). Постоянный (не в _world): стили нужны до
 # сборки мира, а кэш переживает навигацию — same-site переходы не качают таблицы заново.
 var _css_fetcher: CssFetcher
-var _module_fetcher: ScriptingModuleFetcher
-var _script_permission_dialog: ScriptingModulePermissionDialog
-var _script_permission_focus_token := 0
+var _script_fetcher: VrwebScriptFetcher
+var _script_runtime: VrwebLuauRuntime
+var _script_pick_open := false   # OS-диалог document.files.pick уже открыт (один на клиента)
 var _address_focus_token := 0
 var _settings_focus_token := 0
 var _chat_focus_token := 0
 var _console_focus_token := 0
-var _image_dialog_focus_token := 0
 # Пока активного мира нет, отдельный lease удерживает свободный курсор для навигационного UI.
 # Это также закрывает синхронную ошибку fetch: хвост _on_go не сможет снова захватить мышь.
 var _loading_hub_focus_token := 0
@@ -53,6 +51,8 @@ var _page_space: Dictionary = {}
 var _page_seed := 0
 var _world_image_loader: ImageLoader = null
 var _video_manager: VrwebVideoManager = null
+var _grab_manager: GrabManager = null
+var _item_toolbelt: ItemToolbelt = null
 var _base_scene_mode := VrwebBuilder.MODE_COMBINE
 var _effective_scene_mode := VrwebBuilder.MODE_COMBINE
 @onready var _status: Label = _ui.status
@@ -91,7 +91,7 @@ var _base_url: String = ""
 var _page_meta: Dictionary = {}
 # Фактические hashes executable modules текущей страницы. Пока runtime поддерживает inline
 # allow-all; структура уже пригодна для compatibility/trust UI следующих этапов.
-var _scripting_module_hashes: Dictionary = {}
+var _script_hashes: Dictionary = {}
 var _content_policy := VrwebContentPolicy.new(VrwebContentPolicy.Mode.ALLOW_ALL)
 # ХРАНИМОЕ дерево HtmlNode текущей страницы — источник HTML-репрезентации пространства для
 # консоли (`~`). Из геометрии HTML не восстановим, поэтому документ живёт здесь после парсинга.
@@ -115,7 +115,7 @@ var _loading: bool = false
 # при повторной навигации, а не копить его (омнибокс браузера: A→C, а не A→B→C).
 var _pending_history_push: bool = false
 
-var _image_dialog_open := false   # открыт файловый диалог инструмента размещения (кнопка 3)
+var _ui_pick_finish: Callable = Callable()   # ожидающий fallback-пикер document.files.pick
 @onready var _settings_overlay: Control = _ui.settings_overlay
 @onready var _debug_panel: PanelContainer = _ui.debug_panel
 @onready var _debug_label: Label = _ui.debug_label
@@ -137,7 +137,7 @@ var _mouse_captured: bool = true
 func _ready() -> void:
 	_setup_environment()
 	_setup_ui_extras()
-	_ui.image_file_chosen.connect(_image_file_chosen)
+	_ui.image_file_chosen.connect(_on_ui_file_chosen)
 
 	_fetcher = PageFetcher.new()
 	add_child(_fetcher)
@@ -146,8 +146,8 @@ func _ready() -> void:
 
 	_css_fetcher = CssFetcher.new()
 	add_child(_css_fetcher)
-	_module_fetcher = ScriptingModuleFetcher.new()
-	add_child(_module_fetcher)
+	_script_fetcher = VrwebScriptFetcher.new()
+	add_child(_script_fetcher)
 
 	_player = PLAYER_SCENE.instantiate()
 	_player.aim_target_changed.connect(_on_aim_target_changed)
@@ -161,14 +161,10 @@ func _ready() -> void:
 	# Esc при уже свободной мыши (возимся с UI) открывает настройки.
 	_player.settings_requested.connect(_open_settings)
 	_world.add_child(_player)
-	# Система инструментов (см. docs/client/tools.md) создаётся в Player._ready — подключаемся
-	# после add_child. Подсказки инструментов — в строку статуса; инструменту размещения картинки
-	# нужен файловый диалог — пикер (UI) живёт здесь, результат возвращается через provide_file.
+	# Системные инструменты (пузырь, см. docs/client/tools.md) создаются в Player._ready —
+	# подключаемся после add_child. Пользовательские инструменты теперь — переносимые предметы
+	# (ItemToolbelt в _rebuild_world, docs/space/portable-tools.md).
 	_player.tools.status_hint.connect(_set_status)
-	_player.tools.image_pick_requested.connect(_on_image_pick_requested)
-	# База для относительных URL офлайн-размещения картинок — знание о навигации остаётся тут.
-	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
-	image_tool.base_url_provider = func() -> String: return _base_url
 
 	_cancel.pressed.connect(_on_cancel)
 	_refresh.pressed.connect(_on_refresh)
@@ -334,12 +330,8 @@ func _on_cancel() -> void:
 ## его выставит вызывающий (_on_cancel снимает, _navigate тут же поднимает под новую загрузку).
 func _cancel_load() -> void:
 	_fetcher.cancel()
-	if _module_fetcher != null:
-		_module_fetcher.cancel()
-	if is_instance_valid(_script_permission_dialog):
-		_script_permission_dialog.queue_free()
-		_script_permission_dialog = null
-	_restore_mouse_after_script_permission()
+	if _script_fetcher != null:
+		_script_fetcher.cancel()
 	_nav_id += 1
 
 
@@ -530,98 +522,33 @@ func _finish_page(doc: HtmlNode, sheet_refs: Array, css_by_url: Dictionary,
 		else:
 			css_texts.append(css_by_url.get(PageFetcher.resolve_url(ref["href"], base_url), ""))
 	StyleResolver.resolve(doc, css_texts)
-	var module_collection := ScriptingModuleCollector.collect(doc, base_url)
-	for module_error in module_collection.errors:
-		Log.warn("modules", str(module_error))
+	var collection := VrwebScriptDeclaration.collect(doc, base_url)
+	for script_error in collection.errors:
+		Log.warn("scripts", str(script_error))
 	var nav := _nav_id
-	_set_status("Загрузка модулей (%d)…" % module_collection.modules.size())
-	_module_fetcher.fetch_all(module_collection.modules, final_url, func(module_result: Dictionary):
+	_set_status("Загрузка скриптов (%d)…" % collection.scripts.size())
+	_script_fetcher.fetch_all(collection.scripts, func(script_result: Dictionary):
 		if nav == _nav_id:
-			_materialize_page(doc, final_url, base_url, t0, module_result))
+			_materialize_page(doc, final_url, base_url, t0, script_result))
 
 
 func _materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
-		module_result: Dictionary) -> void:
+		script_result: Dictionary) -> void:
 	# Собственный синтаксис VRWeb: блок <vrwml> описывает 3D-сцену напрямую узлами Godot.
 	# mode="exclusive" — HTML игнорируется; "combine" — сцена vrweb добавляется поверх HTML.
 	# base_url — база для резолва путей внешних ресурсов (<ExtResource>, <img>, <video>).
-	for module_error in module_result.errors:
-		Log.warn("modules", "%s: %s" % [str(module_error.get("module_id", "")),
-				str(module_error.get("code", ""))])
-	var fetched_modules: Array = module_result.modules
-	var runnable_modules: Array = []
-	for module in fetched_modules:
-		if str(module.get("kind", "")) == "package":
-			var unpacked := ScriptingModulePackage.unpack(module)
-			if bool(unpacked.ok):
-				runnable_modules.append(unpacked.module)
-			else:
-				Log.warn("modules", "%s: package %s" % [str(module.get("id", "")),
-						str(unpacked.error)])
-		else:
-			runnable_modules.append(module)
-	_authorize_scripting_modules(runnable_modules, final_url, func(allowed_modules: Array):
-		if not is_inside_tree() or final_url != _current_url:
-			return
-		_finish_materialize_page(doc, final_url, base_url, t0, allowed_modules))
-
-
-## Разделяет уже integrity-проверенные модули на известные allow/block и неизвестные. В ask
-## неизвестные показываются одним preflight; до ответа registry.prepare (компиляция) не зовётся.
-func _authorize_scripting_modules(modules: Array, page_url: String, done: Callable) -> void:
-	var origin := ScriptingModuleIntegrity.origin_of(page_url)
-	if origin.is_empty():
-		origin = page_url.get_base_dir()
-	var allowed: Array = []
-	var pending: Array = []
-	for module in modules:
-		var decision := Settings.scripting_module_decision(origin, str(module.get("id", "")),
-				str(module.get("hash", "")))
-		if decision == "allow":
-			allowed.append(module)
-		elif decision != "block":
-			pending.append(module)
-	if pending.is_empty():
-		done.call(allowed)
-		return
-	_set_status("Ожидание разрешения для %d скриптов…" % pending.size())
-	_script_permission_focus_token = _player.claim_mouse_focus("scripting_module_permission")
-	_script_permission_dialog = SCRIPT_PERMISSION_DIALOG.new()
-	add_child(_script_permission_dialog)
-	_script_permission_dialog.decisions_submitted.connect(func(decisions: Dictionary):
-		_script_permission_dialog = null
-		_restore_mouse_after_script_permission()
-		for module in pending:
-			var choice: Dictionary = decisions.get(str(module.get("id", "")), {})
-			var allow := bool(choice.get("allow", false))
-			if bool(choice.get("remember", false)):
-				Settings.remember_scripting_module_decision(origin, module, "allow" if allow else "block")
-			if allow:
-				allowed.append(module)
-		done.call(allowed), CONNECT_ONE_SHOT)
-	_script_permission_dialog.present(pending, page_url)
-
-
-func _restore_mouse_after_script_permission() -> void:
-	if is_instance_valid(_player):
-		_player.release_mouse_focus(_script_permission_focus_token)
-	_script_permission_focus_token = 0
+	for script_error in script_result.errors:
+		Log.warn("scripts", "%s: %s" % [str(script_error.get("script_id", "")),
+				str(script_error.get("code", ""))])
+	_finish_materialize_page(doc, final_url, base_url, t0, script_result.scripts)
 
 
 func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String, t0: int,
-		runnable_modules: Array) -> void:
+		scripts: Array) -> void:
+	var navigation := _nav_id
 	_set_loading(false)
 	_set_status("Сборка пространства…")
-	var module_registry := ScriptingModuleRegistry.new()
-	var module_prepared := module_registry.prepare(
-			runnable_modules, ScriptingModuleRegistry.ScriptMode.ALLOW_ALL)
-	for module_error in module_prepared.errors:
-		Log.warn("modules", str(module_error))
-	_scripting_module_hashes.clear()
-	for module in runnable_modules:
-		if not str(module.get("hash", "")).is_empty():
-			_scripting_module_hashes[str(module.get("id", ""))] = str(module.get("hash", ""))
-	var vrweb := VrwebBuilder.build(doc, base_url, module_registry, _content_policy)
+	var vrweb := VrwebBuilder.build(doc, base_url, _content_policy)
 	# Индекс vrweb-узлов страницы (детерминированные id) — основа слитого документа консоли
 	# и адресации эфемерного оверлея (vrweb-patch/vrweb-node). См. docs/space-console.md.
 	_vrweb_index = SceneHtml.build_page_index(doc)
@@ -635,6 +562,30 @@ func _finish_materialize_page(doc: HtmlNode, final_url: String, base_url: String
 	# вешает его на узлы — для отладочного инспектора прицела (F3, см. _on_debug_*).
 	var space := TopologyBuilder.build(doc, true)
 	_rebuild_world(space, final_url, vrweb, base_url)
+	# scene-ready: _ready() уже прошёл при add_child, но физические тела и viewport input
+	# становятся наблюдаемыми только на границе physics frame. Page scripts по умолчанию
+	# стартуют после этой границы, а не в промежуточном состоянии материализации.
+	await get_tree().physics_frame
+	# Пока ждали lifecycle boundary, пользователь мог начать другую навигацию.
+	if navigation != _nav_id:
+		return
+	_script_runtime = VrwebLuauRuntime.new()
+	_script_runtime.name = "VrwebLuauRuntime"
+	_script_runtime.file_picker = _script_file_picker()
+	_world.add_child(_script_runtime)
+	var script_root: Node = vrweb.get("root")
+	if script_root == null:
+		var generated_root := Node3D.new()
+		generated_root.name = "ScriptObjects"
+		_world.add_child(generated_root)
+		script_root = generated_root
+	_script_runtime.setup(script_root, _build_script_targets(vrweb), base_url, _player,
+			_content_policy)
+	var script_activation := _script_runtime.activate(scripts)
+	for script_error in script_activation.errors:
+		Log.warn("scripts", "%s/%s: %s" % [str(script_error.script_id),
+				str(script_error.phase), str(script_error.message)])
+	_script_hashes = _script_runtime.active_hashes()
 	# Переход назад/вперёд: возвращаем игрока туда, где он стоял на этой странице, поверх
 	# дефолтного спавна из _rebuild_world. Мир детерминирован по URL, поза остаётся валидной.
 	if _pending_restore_pose != null:
@@ -783,11 +734,17 @@ func _leave_loading_hub() -> void:
 ## Удаляет всё содержимое страницы, сохраняя локального Player как контроллер следующего мира.
 ## remove_child нужен сразу: queue_free удаляет из дерева только в конце кадра.
 func _clear_world() -> void:
+	if is_instance_valid(_script_runtime):
+		_script_runtime.close()
+	_script_runtime = null
+	_script_hashes.clear()
 	_world_gen = null
 	_html_layer = null
 	_page_space = {}
 	_world_image_loader = null
 	_video_manager = null
+	_grab_manager = null
+	_item_toolbelt = null
 	_base_scene_mode = VrwebBuilder.MODE_COMBINE
 	_effective_scene_mode = VrwebBuilder.MODE_COMBINE
 	_remote_view = null
@@ -796,6 +753,21 @@ func _clear_world() -> void:
 			continue
 		_world.remove_child(child)
 		child.queue_free()
+
+
+## Stable document id -> materialized object map shared by scripting and live overlays.
+func _build_script_targets(vrweb: Dictionary) -> Dictionary:
+	var targets := {}
+	var node_map: Dictionary = vrweb.get("nodes", {})
+	for node_id in _vrweb_index.get("nodes", {}):
+		var record: Dictionary = _vrweb_index["nodes"][node_id]
+		var built = node_map.get(record.get("elem"))
+		if built != null:
+			targets[node_id] = built
+	for resource_id in vrweb.get("resources", {}):
+		if not targets.has(resource_id):
+			targets[resource_id] = vrweb["resources"][resource_id]
+	return targets
 
 
 func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url: String) -> void:
@@ -819,6 +791,16 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 	_world.add_child(_remote_view)
 	_remote_view.setup(_player)
 
+	# Менеджер grabbable-предметов: hold-состояние через Replicated State + attachment-модель
+	# (предмет в руке следует за якорем аватара держателя). Живёт в мире и сносится при
+	# навигации. Создаётся ДО вьюхи эфемерных изменений: её setup сразу материализует текущее
+	# состояние комнаты, и предметы из снимка (при входе в комнату) должны найти менеджера
+	# уже готовым. См. docs/client/grabbable.md.
+	_grab_manager = GrabManager.new()
+	_grab_manager.name = "GrabManager"
+	_world.add_child(_grab_manager)
+	_grab_manager.setup(_player, _remote_view)
+
 	# Вьюха эфемерных изменений: материализует журнал NetworkManager (пузыри и будущие
 	# инструменты) в объекты мира. Тоже живёт в world — при навигации сносится и пересоздаётся
 	# для новой комнаты. Клики кликабельных объектов идут в тот же _activate_transition, что и
@@ -841,13 +823,22 @@ func _rebuild_world(space: Dictionary, url: String, vrweb: Dictionary, base_url:
 			vrweb_targets[rid] = page_resources[rid]
 	ephemeral_view.setup(_activate_transition,
 		{"targets": vrweb_targets, "resources": page_resources, "base_url": base_url,
-		"content_policy": _content_policy})
+		"content_policy": _content_policy, "player": _player,
+		"file_picker": _script_file_picker()})
 
 	# Менеджер видео-плееров: связывает <VRWebVideoPlayer>/<VRWebVideoScreen> и синхронизирует
 	# воспроизведение по сети. Тоже живёт в мире — при навигации сносится (выход из комнаты).
 	_video_manager = VrwebVideoManager.new()
 	_video_manager.name = "VrwebVideoManager"
 	_world.add_child(_video_manager)
+
+	# Тулбелт item-инструментов: хоткеи слотов спавнят переносимые предметы (карандаш/ластик/
+	# рамка картинок) вместо вшитых в клиент инструментов. См. docs/space/portable-tools.md.
+	_item_toolbelt = ItemToolbelt.new()
+	_item_toolbelt.name = "ItemToolbelt"
+	_world.add_child(_item_toolbelt)
+	_item_toolbelt.setup(_grab_manager)
+	_item_toolbelt.status_hint.connect(_set_status)
 
 	# mode="exclusive" — HTML-сцену не строим вовсе, в мире только узлы vrweb.
 	var exclusive: bool = vrweb.get("found", false) and vrweb.get("mode", "") == VrwebBuilder.MODE_EXCLUSIVE
@@ -1389,33 +1380,51 @@ func _on_debug_probed(text: String) -> void:
 		_debug_label.text = text if text != "" else "Наведи прицел на объект…"
 
 
-# --- Файловый пикер для инструмента размещения изображений (кнопка 3) ---
-# Пикер — UI, поэтому живёт здесь; логика инструмента (прицеливание, спавн) — в
-# ImagePlacementTool. См. docs/network/realtime-resources.md и docs/client/tools.md.
+# --- Файловый пикер скриптов (document.files.pick, capability vrweb/files/1) ---
+# Пикер — UI, поэтому живёт здесь. Сам выбор файла пользователем — явное согласие (модель
+# <input type="file">); скрипт получает только байты выбранного файла, путь ОС не уезжает.
 
-## Инструменту нужен файл картинки: открыть диалог и вернуть результат через provide_file.
-func _on_image_pick_requested(filters: PackedStringArray) -> void:
-	if _image_dialog_open:
-		return   # диалог уже открыт; его колбэк и завершит ожидание инструмента (provide_file)
-	_image_dialog_open = true
-	_image_dialog_focus_token = _player.claim_mouse_focus("image_file_dialog")
-	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
-		DisplayServer.file_dialog_show("Разместить изображение", "", "", false,
-			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters,
-			func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
-				_image_file_chosen(ok and not paths.is_empty(), paths[0] if not paths.is_empty() else ""))
-		return
-	# Fallback без нативного диалога ОС принадлежит MainUI, а не сцене мира.
-	_ui.open_image_dialog(filters)
+func _script_file_picker() -> Callable:
+	return func(kind: String, done: Callable) -> void:
+		if _script_pick_open:
+			done.call(false, "", PackedByteArray())
+			return
+		_script_pick_open = true
+		var focus_token := _player.claim_mouse_focus("script_file_dialog")
+		var finish := func(path: String) -> void:
+			_script_pick_open = false
+			_player.release_mouse_focus(focus_token)
+			_player.capture_mouse(true)
+			var bytes := FileAccess.get_file_as_bytes(path) if path != "" else PackedByteArray()
+			done.call(path != "" and not bytes.is_empty(), path.get_file(), bytes)
+		if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+			DisplayServer.file_dialog_show("Выбрать файл", "", "", false,
+				DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, _script_pick_filters(kind),
+				func(ok: bool, paths: PackedStringArray, _filter: int) -> void:
+					finish.call(paths[0] if ok and not paths.is_empty() else ""))
+			return
+		# Fallback без нативного диалога ОС — FileDialog в MainUI (результат — _on_ui_file_chosen).
+		_ui_pick_finish = finish
+		_ui.open_image_dialog(_script_pick_filters(kind))
 
 
-## Файл выбран (или диалог отменён): вернуть захват мыши и отдать результат инструменту.
-func _image_file_chosen(ok: bool, path: String) -> void:
-	_image_dialog_open = false
-	_release_focus_token(&"_image_dialog_focus_token")
-	_player.capture_mouse(true)
-	var image_tool: ImagePlacementTool = _player.tools.get_tool(&"image")
-	image_tool.provide_file(ok, path)
+## Результат fallback-диалога MainUI: завершить ожидающий files.pick.
+func _on_ui_file_chosen(ok: bool, path: String) -> void:
+	var finish := _ui_pick_finish
+	_ui_pick_finish = Callable()
+	if finish.is_valid():
+		finish.call(path if ok else "")
+
+
+func _script_pick_filters(kind: String) -> PackedStringArray:
+	match kind:
+		"image":
+			return PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp,*.gif,*.bmp;Изображения"])
+		"audio":
+			return PackedStringArray(["*.mp3,*.ogg,*.wav;Аудио"])
+		"model":
+			return PackedStringArray(["*.glb,*.gltf;3D-модели"])
+	return PackedStringArray(["*;Все файлы"])
 
 
 ## Подсветка прицела: над кликабельным/портальным объектом включается активная нода курсора,

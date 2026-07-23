@@ -13,7 +13,6 @@ static func definition(default_rank: int) -> Dictionary:
 			"playing": {"type": "bool", "default": false},
 			"anchor_position": {"type": "float", "default": 0.0, "min": 0.0, "max": MAX_POSITION},
 			"anchor_authority_msec": {"type": "int", "default": 0, "min": 0},
-			"media_revision": {"type": "int", "default": 0, "min": 0},
 		},
 		"sample_fields": {
 			"position": {"type": "float", "default": 0.0, "min": 0.0, "max": MAX_POSITION},
@@ -31,21 +30,21 @@ static func definition(default_rank: int) -> Dictionary:
 static func reduce_set_playing(_state: Dictionary, args: Dictionary, context: Dictionary) -> Dictionary:
 	if typeof(args.get("playing")) != TYPE_BOOL or not _valid_position(args.get("position")):
 		return {}
-	return {
+	return {"state": {
 		"playing": bool(args["playing"]),
 		"anchor_position": float(args["position"]),
 		"anchor_authority_msec": int(context.get("authority_msec", 0)),
-	}
+	}}
 
 
 static func reduce_seek(state: Dictionary, args: Dictionary, context: Dictionary) -> Dictionary:
 	if not _valid_position(args.get("position")):
 		return {}
-	return {
+	return {"state": {
 		"playing": bool(state.get("playing", false)),
 		"anchor_position": float(args["position"]),
 		"anchor_authority_msec": int(context.get("authority_msec", 0)),
-	}
+	}}
 
 
 static func _valid_position(value) -> bool:

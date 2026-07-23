@@ -1,5 +1,7 @@
 extends SceneTree
 
+const PolicyEvaluatorImpl = preload("res://scripts/network/policy_evaluator.gd")
+
 ## Контракт чистого ReplicatedStateStore без RPC.
 ## Запуск: godot --headless --path . --script res://tests/test_replicated_state.gd
 
@@ -8,7 +10,10 @@ var _failed := false
 
 func _initialize() -> void:
 	_test_access_rules()
+	_test_sample_binding_rule()
 	_test_command_delta_and_snapshot()
+	_test_atomic_binding_transaction()
+	_test_snapshot_before_schema()
 	_test_validation_and_gap()
 	_test_size_budgets()
 	_test_state_switch_consumer()
@@ -25,8 +30,10 @@ func _schema() -> Dictionary:
 		"default_write_rule": {"rank": {"op": "lte", "value": 10}},
 		"commands": {
 			"set": {"reducer": Callable(self, "_reduce_set")},
-			"owner_set": {
-				"write_rule": {"any_of": ["authority", "object_owner"]},
+			"claim_presenter": {"reducer": Callable(self, "_reduce_claim_presenter")},
+			"invalid_claim": {"reducer": Callable(self, "_reduce_invalid_claim")},
+			"creator_set": {
+				"write_rule": {"any_of": ["authority", {"assigned": "creator"}]},
 				"reducer": Callable(self, "_reduce_set"),
 			},
 		},
@@ -36,11 +43,22 @@ func _schema() -> Dictionary:
 func _reduce_set(_state: Dictionary, args: Dictionary, _context: Dictionary) -> Dictionary:
 	if typeof(args.get("value")) not in [TYPE_FLOAT, TYPE_INT]:
 		return {}
-	return {"value": float(args["value"]), "enabled": true}
+	return {"state": {"value": float(args["value"]), "enabled": true}}
 
 
 func _reduce_payload(_state: Dictionary, args: Dictionary, _context: Dictionary) -> Dictionary:
-	return args.duplicate()
+	return {"state": args.duplicate()}
+
+
+func _reduce_claim_presenter(_state: Dictionary, _args: Dictionary,
+		context: Dictionary) -> Dictionary:
+	return {"state": {"enabled": true},
+		"bindings": {"presenter": str(context.get("actor_user_id", ""))}}
+
+
+func _reduce_invalid_claim(_state: Dictionary, _args: Dictionary,
+		_context: Dictionary) -> Dictionary:
+	return {"state": {"enabled": true}, "bindings": {"invalid-slot": "alice"}}
 
 
 func _test_size_budgets() -> void:
@@ -95,27 +113,70 @@ func _test_state_switch_consumer() -> void:
 
 
 func _reduce_toggle(state: Dictionary, _args: Dictionary, _context: Dictionary) -> Dictionary:
-	return {"enabled": not bool(state.get("enabled", false))}
+	return {"state": {"enabled": not bool(state.get("enabled", false))}}
 
 
 func _test_access_rules() -> void:
-	var base := {"rank": 10, "user_id": "alice", "owner_user_id": "alice", "verified": true}
-	_eq(ReplicatedStateStore.evaluate_rule({"rank": {"op": "lt", "value": 11}}, base), true, "rank lt")
-	_eq(ReplicatedStateStore.evaluate_rule({"rank": {"op": "eq", "value": 10}}, base), true, "rank exact")
-	_eq(ReplicatedStateStore.evaluate_rule({"rank": {"op": "gte", "value": 11}}, base), false, "rank gte")
-	_eq(ReplicatedStateStore.evaluate_rule({"all_of": ["object_owner", "verified_identity"]}, base), true, "all_of")
-	_eq(ReplicatedStateStore.evaluate_rule({"any_of": ["authority", {"rank": {"op": "lte", "value": 10}}]}, base), true, "any_of")
-	_eq(ReplicatedStateStore.evaluate_rule("unknown", base), false, "unknown predicate deny")
+	var base := {"rank": 10, "actor_user_id": "alice",
+			"bindings": {"creator": "alice"}, "verified": true}
+	_eq(PolicyEvaluatorImpl.evaluate({"rank": {"op": "lt", "value": 11}}, base), true, "rank lt")
+	_eq(PolicyEvaluatorImpl.evaluate({"rank": {"op": "eq", "value": 10}}, base), true, "rank exact")
+	_eq(PolicyEvaluatorImpl.evaluate({"rank": {"op": "gte", "value": 11}}, base), false, "rank gte")
+	_eq(PolicyEvaluatorImpl.evaluate({"all_of": [{"assigned": "creator"}, "verified_identity"]}, base), true, "all_of")
+	_eq(PolicyEvaluatorImpl.evaluate({"any_of": ["authority", {"rank": {"op": "lte", "value": 10}}]}, base), true, "any_of")
+	_eq(PolicyEvaluatorImpl.evaluate({"vacant": "holder"}, base), true, "vacant")
+	_eq(PolicyEvaluatorImpl.evaluate("unknown", base), false, "unknown predicate deny")
+	_eq(PolicyEvaluatorImpl.evaluate({"not": "unknown"}, base), false,
+			"unknown predicate remains deny under not")
+	_eq(PolicyEvaluatorImpl.evaluate({"rank": {"op": "lte", "value": "10"}}, base), false,
+			"malformed rank fails closed")
+
+
+func _test_sample_binding_rule() -> void:
+	var store := ReplicatedStateStore.new()
+	var schema := {
+		"version": 1,
+		"fields": {"epoch": {"type": "int", "default": 1}},
+		"sample_fields": {"tick": {"type": "int", "default": 0}},
+		"sample_write_rule": {"assigned": "simulator"},
+		"commands": {},
+	}
+	_eq(store.register_schema("physics", schema), true, "sample schema registered")
+	_eq(store.ensure_object("ball", "physics", {}, {"simulator": "alice"}), true,
+			"sample object registered")
+	_eq(store.validate_sample("ball", "physics", 1, {"tick": 7}), true,
+			"sample shape accepted")
+	_eq(store.authorize_sample("ball", "physics", 1,
+			{"actor_user_id": "alice", "is_authority": false}), true,
+			"assigned simulator may publish sample")
+	_eq(store.authorize_sample("ball", "physics", 1,
+			{"actor_user_id": "bob", "is_authority": true}), false,
+			"authority does not bypass assigned sample rule")
+	_eq(store.authorize_sample("ball", "physics", 1,
+			{"actor_user_id": "", "is_authority": false}), false,
+			"anonymous sample denied")
+
+	var legacy := ReplicatedStateStore.new()
+	var legacy_schema := schema.duplicate(true)
+	legacy_schema.erase("sample_write_rule")
+	legacy.register_schema("legacy", legacy_schema)
+	legacy.ensure_object("video", "legacy")
+	_eq(legacy.authorize_sample("video", "legacy", 1,
+			{"actor_user_id": "alice", "is_authority": false}), false,
+			"legacy sample remains authority-only")
+	_eq(legacy.authorize_sample("video", "legacy", 1,
+			{"actor_user_id": "host", "is_authority": true}), true,
+			"legacy authority sample accepted")
 
 
 func _test_command_delta_and_snapshot() -> void:
 	var authority := ReplicatedStateStore.new()
 	_eq(authority.register_schema("test", _schema()), true, "schema registered")
-	_eq(authority.ensure_object("one", "test", {}, "alice"), true, "object registered")
+	_eq(authority.ensure_object("one", "test", {}, {"creator": "alice"}), true, "object registered")
 	authority.begin_authority()
 	var base := authority.snapshot()
 	var result := authority.commit_command("one", "test", 1, "set", {"value": 42.0},
-			{"rank": 10, "user_id": "bob", "is_authority": false})
+			{"rank": 10, "actor_user_id": "bob", "is_authority": false})
 	_eq(result.get("ok"), true, "allowed command committed")
 	_eq(authority.revision_of("one", "test"), 1, "revision incremented")
 
@@ -132,19 +193,89 @@ func _test_command_delta_and_snapshot() -> void:
 	_eq(float(late.state_of("one", "test")["value"]), 42.0, "late join state complete")
 
 
+func _test_atomic_binding_transaction() -> void:
+	var authority := ReplicatedStateStore.new()
+	authority.register_schema("binding-test", _schema())
+	authority.ensure_object("stage", "binding-test")
+	authority.begin_authority()
+	var binding_events := []
+	authority.bindings_changed.connect(func(_object, _schema, current, changed, revision):
+		binding_events.append({"current": current, "changed": changed, "revision": revision}))
+	var result := authority.commit_command("stage", "binding-test", 1, "claim_presenter", {},
+			{"rank": 0, "actor_user_id": "alice", "is_authority": true})
+	_eq(result.get("ok"), true, "state and custom binding committed")
+	_eq(authority.bindings_of("stage", "binding-test").get("presenter"), "alice",
+			"custom binding stored")
+	_eq(authority.state_of("stage", "binding-test").get("enabled"), true,
+			"state committed in same revision")
+	_eq(result["delta"]["binding_changes"].get("presenter"), "alice",
+			"binding replicated in delta")
+	_eq(binding_events.size(), 1, "binding event emitted")
+	_eq(binding_events[0].revision, 1, "binding and state share revision")
+
+	var before_state := authority.state_of("stage", "binding-test")
+	var before_bindings := authority.bindings_of("stage", "binding-test")
+	var invalid := authority.commit_command("stage", "binding-test", 1, "invalid_claim", {},
+			{"rank": 0, "actor_user_id": "alice", "is_authority": true})
+	_eq(invalid.get("error"), "invalid_patch", "invalid slot rejects entire transaction")
+	_eq(authority.state_of("stage", "binding-test"), before_state,
+			"invalid binding does not partially mutate state")
+	_eq(authority.bindings_of("stage", "binding-test"), before_bindings,
+			"invalid binding does not partially mutate bindings")
+
+	var follower := ReplicatedStateStore.new()
+	follower.register_schema("binding-test", _schema())
+	var initial := ReplicatedStateStore.new()
+	initial.register_schema("binding-test", _schema())
+	initial.ensure_object("stage", "binding-test")
+	initial.begin_authority()
+	_eq(follower.apply_snapshot(initial.snapshot()), true, "binding follower loaded base")
+	_eq(follower.apply_delta(result.delta), "ok", "binding transaction delta applied")
+	_eq(follower.bindings_of("stage", "binding-test").get("presenter"), "alice",
+			"custom binding converged")
+
+
+## Реальный порядок late join: сетевой snapshot приходит раньше, чем страница загрузилась и
+## её consumer зарегистрировал схему. Канон нельзя терять только из-за порядка lifecycle.
+func _test_snapshot_before_schema() -> void:
+	var authority := ReplicatedStateStore.new()
+	authority.register_schema("late.tool", _schema())
+	authority.ensure_object("held-pencil", "late.tool")
+	authority.begin_authority()
+	authority.commit_command("held-pencil", "late.tool", 1, "set", {"value": 7.0},
+			{"rank": 0, "actor_user_id": "holder", "is_authority": true})
+
+	var late := ReplicatedStateStore.new()
+	var received := []
+	late.state_changed.connect(func(object_id, schema_id, state, _changed, revision):
+		received.append({"object": object_id, "schema": schema_id,
+				"state": state, "revision": revision}))
+	_eq(late.apply_snapshot(authority.snapshot()), true,
+			"snapshot accepted before consumer schema exists")
+	_eq(late.revision_of("held-pencil", "late.tool"), -1,
+			"unknown schema remains hidden before registration")
+	_eq(late.register_schema("late.tool", _schema()), true, "late consumer schema registered")
+	_eq(late.ensure_object("held-pencil", "late.tool"), true, "late consumer object registered")
+	_eq(late.revision_of("held-pencil", "late.tool"), 1,
+			"deferred snapshot record materialized with canonical revision")
+	_eq(float(late.state_of("held-pencil", "late.tool")["value"]), 7.0,
+			"deferred snapshot preserves canonical state")
+	_eq(received.size(), 1, "materialized state emitted once to consumer")
+
+
 func _test_validation_and_gap() -> void:
 	var authority := ReplicatedStateStore.new()
 	authority.register_schema("test", _schema())
-	authority.ensure_object("one", "test", {}, "alice")
+	authority.ensure_object("one", "test", {}, {"creator": "alice"})
 	authority.begin_authority()
 	var denied := authority.commit_command("one", "test", 1, "set", {"value": 1.0},
-			{"rank": 11, "user_id": "bob", "is_authority": false})
+			{"rank": 11, "actor_user_id": "bob", "is_authority": false})
 	_eq(denied.get("error"), "access_denied", "rank denied")
-	var owner := authority.commit_command("one", "test", 1, "owner_set", {"value": 2.0},
-			{"rank": 999, "user_id": "alice", "is_authority": false})
-	_eq(owner.get("ok"), true, "object owner allowed")
+	var owner := authority.commit_command("one", "test", 1, "creator_set", {"value": 2.0},
+			{"rank": 999, "actor_user_id": "alice", "is_authority": false})
+	_eq(owner.get("ok"), true, "creator binding allowed")
 	var invalid := authority.commit_command("one", "test", 1, "set", {"value": 101.0},
-			{"rank": 0, "user_id": "admin", "is_authority": true})
+			{"rank": 0, "actor_user_id": "admin", "is_authority": true})
 	_eq(invalid.get("error"), "invalid_patch", "field limit enforced")
 
 	var fresh := ReplicatedStateStore.new()

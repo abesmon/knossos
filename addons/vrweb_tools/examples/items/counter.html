@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb item — счётчик</title>
+  <script type="application/vrweb+luau" id="counter">
+-- Минимальный предмет с СОБСТВЕННЫМ реплицируемым состоянием: каждый use увеличивает
+-- счётчик. Фикстура для гарантии из docs/space/tool-authoring.md: два экземпляра одного
+-- предмета в комнате независимы — wire-адреса схемы/объекта namespace'ятся id объекта слоя.
+local counter = document.query("#counter-item")
+assert(counter ~= nil, "counter item scene id is missing")
+
+assert(document.state.define("cnt", {
+  version = 1,
+  fields = { n = { type = "int", default = 0 } },
+  default_write_rule = { rank = { op = "lte", value = 1073741824 } },
+  commands = { bump = { reducer = function(event)
+    return { state = { n = event.state.n + 1 } }
+  end } },
+}))
+assert(document.state.ensure("box", "cnt", { n = 0 }, {}))
+
+counter.on("use", function(_event)
+  document.state.command("box", "cnt", 1, "bump", {})
+end, "")
+  </script>
+</head>
+<body>
+  <vrwml>
+    <Resource id="CounterMesh" type="BoxMesh" size="Vector3(0.2,0.2,0.2)"/>
+    <VRWebGrabbable id="counter-item">
+      <MeshInstance3D mesh="SubResource:::CounterMesh"/>
+    </VRWebGrabbable>
+  </vrwml>
+</body>
+</html>

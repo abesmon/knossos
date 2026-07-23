@@ -11,10 +11,17 @@
 
 - [multiplayer.md](multiplayer.md) — мультиплеер: WebRTC-mesh, сигнальный сервер только для
   handshake, синхронизация капсул, чат, переподключения.
+- [adaptive-representations.md](adaptive-representations.md) — предложение о разных
+  platform/client-представлениях одного инстанса через HTTP request header и требования к
+  совместимости вариантов.
 - [authority.md](authority.md) — авторитет комнаты: кто из пиров считается источником правды
   для общего состояния сцены.
+- [subject-bindings.md](subject-bindings.md) — общий механизм именованных назначений
+  (`creator`, `holder`, `presenter`) и policies без отдельной сущности ownership.
 - [replicated-state.md](replicated-state.md) — исследование VRChat Udon Synced Variables и
   решение о типизированном общем состоянии компонентов; пилот — видео-плеер.
+- [rigidbody-networking.md](rigidbody-networking.md) — реализованный профиль сетевого
+  `RigidBody3D`: binding simulator, samples, handoff, recovery и публичная демка.
 - [ranks.md](ranks.md) — ранги: таблица прав в комнате (кто что может менять).
 - [ephemeral-changes.md](ephemeral-changes.md) — эфемерные изменения сцены (граффити и т.п.),
   живущие в реалтайм-слое и по умолчанию не сохраняемые.

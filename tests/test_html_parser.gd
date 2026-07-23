@@ -15,10 +15,10 @@ func _initialize() -> void:
 		ok = _check(h1.collect_text() == "✶ scenemime's home ✶", "numeric entities decode to Unicode text") and ok
 
 	var attr_doc := HtmlParser.parse("<a title=\"&#10038; &amp; &#x2736;\">x</a>")
-	var script_doc := HtmlParser.parse("<script type=\"application/vrweb+gdscript\">\nextends Node\nvar x = 1 < 2\n</script>")
+	var script_doc := HtmlParser.parse("<script type=\"application/vrweb+luau\">\nlocal x = 1 < 2\n</script>")
 	var script := script_doc.find_descendant("script")
 	ok = _check(script != null and script.collect_text().contains("var x = 1 < 2"),
-			"script raw-text сохраняется для inline scripting modules") and ok
+			"script raw-text сохраняется для inline Luau") and ok
 	var a := attr_doc.find_descendant("a")
 	ok = _check(a != null, "a parsed") and ok
 	if a != null:

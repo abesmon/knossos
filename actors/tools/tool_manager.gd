@@ -1,19 +1,16 @@
 class_name ToolManager
 extends Node
 
-## Держатель инструментов игрока: создаёт их, маршрутизирует ввод от Player и следит, чтобы
-## активен был максимум один. Хоткей слота — «запрос активации» инструменту: тот сам решает,
-## что происходит (вложенный цикл режимов у рисования, тумблер у картинки). Нажатие чужого
-## хоткея снимает текущий инструмент. Системные инструменты (bubble) не имеют слота и
-## вызываются программно. См. docs/client/tools.md.
+## Держатель СИСТЕМНЫХ инструментов игрока (сейчас — только пузырь навигации, вызывается
+## программно). Пользовательские инструменты стали переносимыми предметами и живут в
+## ItemToolbelt (docs/space/portable-tools.md); слотов у этого менеджера больше нет —
+## остаётся контракт «максимум один активный» и маршрутизация ввода на случай будущих
+## системных инструментов. См. docs/client/tools.md.
 
-## Сменился активный инструмент: tool_id ("drawing"/"image"/…), "" — все инструменты убраны.
+## Сменился активный инструмент: tool_id, "" — все инструменты убраны.
 signal tool_changed(tool_id: String)
 ## Подсказка для строки статуса (ретрансляция PlayerTool.hint_changed) — main пишет в _set_status.
 signal status_hint(text: String)
-## Инструменту размещения нужен файл: main открывает диалог и возвращает результат через
-## get_tool(&"image").provide_file(ok, path). Пикер — UI, он остаётся у main; спавн — у инструмента.
-signal image_pick_requested(filters: PackedStringArray)
 
 var _active: PlayerTool = null
 var _slots: Dictionary = {}   # имя input-действия (StringName) -> PlayerTool
@@ -22,18 +19,15 @@ var _tools: Dictionary = {}   # tool_id (StringName) -> PlayerTool
 
 ## Player зовёт после добавления в дерево: создаёт инструменты и раздаёт им контекст.
 func setup(camera: Camera3D, world_root: Node3D, player: Player) -> void:
-	var drawing := DrawingTool.new()
-	var image := ImagePlacementTool.new()
 	var bubble := BubbleTool.new()
-	for t: PlayerTool in [drawing, image, bubble]:
+	for t: PlayerTool in [bubble]:
 		t.name = String(t.tool_id()).to_pascal_case() + "Tool"
 		add_child(t)
 		t.setup(camera, world_root, player)
 		t.hint_changed.connect(status_hint.emit)
 		t.finished.connect(_on_tool_finished.bind(t))
 		_tools[t.tool_id()] = t
-	image.pick_requested.connect(image_pick_requested.emit)
-	_slots = {&"tool_slot_2": drawing, &"tool_slot_3": image}
+	_slots = {}
 
 
 func get_tool(id: StringName) -> PlayerTool:

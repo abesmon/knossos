@@ -18,7 +18,7 @@ script = ExtResource("1_canvas")
 [node name="SubViewport" type="SubViewport" parent="."]
 disable_3d = true
 size = Vector2i(512, 512)
-render_target_update_mode = 1
+render_target_update_mode = 4
 
 [node name="Mesh" type="MeshInstance3D" parent="."]
 mesh = SubResource("Quad")

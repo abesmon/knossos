@@ -18,18 +18,18 @@
 
 ## Где проект находится сейчас
 
-**Текущий продуктовый этап: поздний Milestone 3 — Custom Worlds hardening и подготовка
-Trusted Modules MVP.**
+**Текущий продуктовый этап: поздний Milestone 3 — Custom Worlds hardening и переносимый
+Luau scripting MVP.**
 
 Уже работают singleplayer 3D browser, multiplayer с текстом и голосом, идентичность домашних
 серверов, аватары, декларативные VRWeb-сцены, видео, replicated state, persistence, editor
-exporter и базовый trusted scripting vertical slice. Активная работа сосредоточена на четырёх
+exporter и sandboxed page scripting vertical slice. Активная работа сосредоточена на четырёх
 связанных направлениях:
 
 1. безопасный opt-in профиль декларативного контента;
-2. multiplayer-совместимость scripting modules;
+2. доставка realtime script revisions и multiplayer-совместимость hashes;
 3. navigation/redirect hardening и hostile regressions;
-4. E2E и platform matrix для Trusted Modules MVP.
+4. E2E и platform matrix для Luau runtime.
 
 ## Продуктовые milestones
 
@@ -61,19 +61,25 @@ exporter и базовый trusted scripting vertical slice. Активная р
 - editor exporter и preview;
 - home server, подтверждённая идентичность и анонимный режим;
 - persistence и personal spaces;
-- inline/src/package scripting modules, `.vrmod`, integrity/cache/trust/lifecycle;
-- public Scripting API v1 и self-contained package-demo.
+- inline/linked Luau, общий browser-like page realm, opt-in integrity и staged lifecycle;
+- portable `document` API v1, client quotas и атомарная hot replacement;
+- единый контракт host-вызовов (`value [, error_code]`, опускаемые опциональные аргументы,
+  наблюдаемый ACK команд), явный `realm` id страницы и фазовый контракт API;
+- переносимые инструменты-предметы: item-runtime (`vrweb-item`), `document.scene`, прицел,
+  выбор файла и скриптовая поверхность grabbable ([итог](space/portable-tools.md)).
 
-До завершения milestone остаются P0/P1-блоки ниже и server-to-server federation. Trusted
-GDScript остаётся явно доверенным режимом с правами процесса; настоящий sandbox относится к
-отдельному Milestone 4.
+До завершения milestone остаются P0/P1-блоки ниже и server-to-server federation. Скриптинг
+страницы больше не зависит от Godot; user permissions и instance ACL остаются следующими слоями.
 
-### Milestone 4 — Sandboxed extensibility и расширение экосистемы — будущее
+### Milestone 4 — Расширение sandboxed extensibility и экосистемы — будущее
 
-- capability sandbox без raw Godot Object;
-- безопасный запуск модулей неизвестного происхождения;
+- WASM как отдельный эффективный runtime profile при появлении сценария;
+- user permissions и instance ACL поверх capability pool клиента;
 - расширенные представления клиента: VR/full-body и облегчённый voice-only клиент;
-- дальнейшие федеративные и social-возможности поверх открытых контрактов.
+- дальнейшие федеративные и social-возможности поверх открытых контрактов;
+- локальный инвентарь переносимых предметов (сама item-модель уже реализована в Milestone 3,
+  см. [space/portable-tools.md](space/portable-tools.md); инвентарь отслеживается в
+  [P2 — Subject Bindings](#p2--subject-bindings-объектов-и-артефактов)).
 
 ## Ближайший критический путь
 
@@ -99,33 +105,32 @@ GDScript остаётся явно доверенным режимом с пра
 Связанные контракты: [content-policy.md](space/content-policy.md),
 [security.md](security.md), [vrwml-tags.md](space/vrwml-tags.md).
 
-### P0 — Scripting preflight и transport boundaries
+### P0 — Scripting transport boundaries
 
-- [ ] Показывать runtime и permissions каждого пакета в preflight; сохранить default deny и
-  добавить UI integration test.
-- [ ] Завершить redirect policy: повторно проверять origin/integrity на каждом переходе и
-  запрещать downgrade.
-- [ ] Не принимать executable bytes от пира как авторитетный источник: каждый клиент получает
-  URL/hash из документа, скачивает сам и применяет собственную policy.
-- [ ] Добавить hostile fixtures: raw script, неверный manifest JSON, ZIP traversal/collision,
-  zip bomb, oversized asset и отмену навигации во время fetch/compile.
+- [ ] Завершить redirect policy для linked scripts и запрещать downgrade.
+- [ ] Не принимать source bytes от пира как авторитетный источник: каждый клиент получает
+  URL/hash из документа, скачивает сам и применяет собственные limits.
+- [ ] Добавить hostile fixtures: oversized source, malformed integrity, cancellation во время
+  fetch/compile, callback timeout и memory pressure.
+- [ ] Оценить hard allocator ceiling в Luau GDExtension; это client hardening без изменения
+  стандарта.
 
-### P1 — Module identity и multiplayer compatibility
+### P1 — Script identity и multiplayer compatibility
 
-- [ ] Включить ordered `(module id, runtime, hash)` в room/page identity.
+- [ ] Включить ordered `(script id, runtime profile, hash)` в room/page identity.
 - [ ] При mismatch показывать явный compatibility outcome.
 - [ ] Не регистрировать несовместимую replicated schema молча.
-- [ ] Проверить двумя чистыми клиентами package-переключатель, late join, смену authority,
+- [ ] Проверить двумя чистыми клиентами state-driven script behavior, late join, смену authority,
   refresh, reconnect и уход со страницы.
 
-Критерий готовности: одинаковые hashes синхронизируют модульный переключатель; другой hash
+Критерий готовности: одинаковые hashes синхронизируют поведение; другой hash
 получает видимый отказ/несовместимость до сетевой регистрации схемы.
 
 ### P1 — Navigation pipeline
 
-- [ ] Проверять navigation generation token на стадиях fetch → validate → trust → compile →
+- [ ] Проверять navigation generation token на стадиях fetch → integrity → compile →
   mount/materialize.
-- [ ] Добавить loading/cancel UI с текущей стадией и модулем.
+- [ ] Добавить loading/cancel UI с текущей стадией и script id.
 - [ ] Локализовать compile/mount failure: статическая часть страницы продолжает работать.
 - [ ] Покрыть refresh/navigation во время fetch и поздние callbacks после unmount.
 
@@ -136,10 +141,7 @@ GDScript остаётся явно доверенным режимом с пра
   `load()`/`preload()`.
 - [ ] Проверить bundled images/audio/glTF/GLB и сложные import options в editor/export builds
   на macOS, Windows и Linux.
-- [ ] Подтвердить byte-identical `.vrmod` ZIP на поддерживаемых платформах.
 - [ ] Добавить в export report явные skipped files с причинами и полный dependency graph.
-- [ ] Добавить явную диагностику autoload/native libs и выхода package dependencies за полный
-  разрешённый graph.
 - [ ] Запускать preview через обычный runtime и content policy клиента.
 - [ ] Добавить save-hook, автоматически снимающий preview-свойства перед сохранением.
 - [ ] Добавить экспорт declarative events/действий после фиксации их контракта.
@@ -154,18 +156,39 @@ GDScript остаётся явно доверенным режимом с пра
 ### P2 — Release confidence
 
 - [ ] E2E: exporter → HTTP fixture → чистая exported build → два multiplayer-клиента.
-- [ ] Покрыть local/HTTP/redirect, inline/src/package, две версии и два модуля с одинаковыми
-  внутренними именами.
-- [ ] Добавить debug UI активных модулей, безопасные логи `origin/module/hash` и метрики
+- [ ] Покрыть local/HTTP/redirect, inline/linked и две ревизии с одинаковыми script ids.
+- [ ] Добавить debug UI активных scripts, безопасные логи `origin/script/hash` и метрики
   download/compile/mount.
-- [ ] После MVP определить широкие origin rules и импорт подписанных trust lists/repositories,
-  не меняющих локальные решения без явной подписки пользователя.
+- [ ] Спроектировать user permissions и instance ACL как пересечение с capability pool клиента.
 - [ ] Подтвердить runtime compilation и структурированные ошибки в CI-артефактах трёх платформ.
-- [ ] Проверить каталог только из `index.html` и `lights.vrmod` в чистой сборке и полную очистку
+- [ ] Проверить каталог из HTML и linked `.luau` в чистой сборке и полную очистку
   nodes/signals/timers при навигации.
 
-`context.fetch` и namespaced `context.storage` с quota добавляются после появления первого
-реального потребителя; они не блокируют текущий Scripting API v1.
+Persistent namespaced storage с quota добавляется после появления первого реального
+потребителя; сетевое чтение уже закрыто `vrweb/assets/2` (`document.assets.fetch`) и текущий
+Scripting API v1 это не блокирует.
+
+### P2 — Консолидация стандарта scripting/VRWeb
+
+Итоги ревью стандарта (июль 2026). Единый контракт host-вызовов, арность, явный realm id,
+фазовый контракт и консолидация поверхности уже реализованы; остаются отложенные пункты:
+
+- [ ] Словарь переносимых событий: сейчас `handle.on` принимает имена объявленных сигналов
+  движка, и словарь сигналов Godot остаётся неявной частью стандарта. Легализовать его по
+  образцу shader-дескрипторов: каталог переносимых событий стандартных ролей (`pressed`,
+  `value_changed`, …) со статусами либо явный profile-дескриптор словаря сигналов.
+- [ ] Единая грамматика портируемых значений: сегодня сосуществуют VRWML-литералы,
+  JSON-массивы эфемерного слоя, `float[7]` wire-конвенция grabbable и `document.values`.
+  Вынести грамматику значений в отдельный нормативный документ, на который ссылаются все слои.
+- [ ] Реестр capability по образцу [vrwml-tags.md](space/vrwml-tags.md): имя, статус
+  (stable/evolving), документ-владелец контракта; там же — правила эволюции (что является
+  совместимым добавлением, когда рождается новая major-версия) и обнаружение суб-фич внутри
+  версии (сейчас `features.has` работает только на целых capability).
+- [ ] Выделить нормативный контракт Replicated State (COMMAND/DELTA/SNAPSHOT/ACK, схемы,
+  write-rules) из исследовательского [replicated-state.md](network/replicated-state.md) —
+  по образцу разделения [grabbable.md](space/grabbable.md) / client-документа.
+- [ ] Снять или явно объявить policy лимит «сигналы с 0–4 аргументами» — единственное число
+  реализации, выглядящее как контракт.
 
 ## Multiplayer, identity и persistence
 
@@ -177,11 +200,45 @@ GDScript остаётся явно доверенным режимом с пра
 - [ ] Провести длительный двухклиентский soak: simultaneous seek, late join, authority change и
   reconnect.
 
+### P2 — Subject Bindings объектов и артефактов
+
+- [x] Ввести общие bindings и PolicyEvaluator; перевести SceneChanges,
+  Replicated State и grabbable ([контракт](network/subject-bindings.md)).
+- [ ] Построить локальный inventory поверх неизменяемого slot `player` и сериализуемого item
+  descriptor; home server оставить опциональной синхронизацией между клиентами.
+
+### P2 — Сетевые Rigidbody-объекты
+
+Базовый профиль реализован поверх Subject Bindings и общего `SAMPLE`. Текущий контракт и
+оставшаяся interoperability-матрица — [network/rigidbody-networking.md](network/rigidbody-networking.md).
+
+- [x] Добавить binding-aware `SAMPLE` от назначенного simulator; частота принадлежит автору,
+  локальная фильтрация и diagnostics — policy клиента, не ограничение стандарта.
+- [x] Реализовать общий interpolation/extrapolation proxy для не-simulator клиентов.
+- [x] Определить reliable keyframe: pose, linear/angular velocity, sleep, epoch и tick.
+- [x] Сделать атомарный simulator handoff и recovery после disconnect grace.
+- [x] Связать обычный VRWML `<RigidBody3D>` с сетевым subject через `document.physics` для
+  bind/claim/handoff/local impulse, не вводя заменяющий физический тег.
+- [x] Интегрировать единственный прямой физический корень `VRWebGrabbable`: grab передаёт
+  simulator, release оставляет его бросившему.
+- [x] Добавить публичную внешнюю демку и двухклиентский WebRTC E2E передачи simulator.
+- [ ] Покрыть loss/latency, late join, handoff, authority change, sleep/wake и несколько тел E2E.
+- [ ] Добавить capability negotiation physics-профиля между разными реализациями клиента.
+
 ### P1 — Federation и instance contract
 
 - [ ] Реализовать server-to-server federation signaling, чтобы пользователи разных signaling
   servers попадали в один mesh.
 - [ ] Стандартизировать приватный query-параметр, рабочий вариант `vrweb-instance=<code>`.
+- [ ] Обкатать server-provided adaptive representations через request header с рабочим именем
+  `VRWeb-Capability-Code`, не меняя URL/room key и не создавая registry конкретных codes заранее.
+- [ ] Зафиксировать cache contract (`Vary`), redirect policy (same-origin и cross-origin)
+  и HTTP/CDN test vectors negotiation для reference implementation.
+- [ ] Определить минимальный проверяемый network ABI вариантов в Maker Kit и способ его
+  объявления автором для нескольких responses.
+- [ ] Решить, нужен ли response header с фактически выбранным representation code
+  для diagnostics.
+- [ ] Оценить, понадобится ли structured negotiation рядом с простой строкой capability code.
 - [ ] Добавить явный compatibility/discovery contract для сторонних клиентов и серверов.
 
 ### P2 — Personal spaces и persistence vNext
@@ -191,7 +248,8 @@ GDScript остаётся явно доверенным режимом с пра
 - [ ] Несколько пространств пользователя, сохранив `home` дефолтом.
 - [ ] Федеративный auth приватного fetch.
 - [ ] Протокольное выселение гостей при закрытии пространства.
-- [ ] HTML-представление и flush мировых `stroke`/`bubble` объектов.
+- [ ] HTML-представление и flush мировых `bubble`-объектов (`VRWebStroke` уже проходит
+  общий flush как `vrweb-node`).
 - [ ] Мягкое уведомление `page-revised` после flush.
 - [ ] Доставка результата `deferred` через pending endpoint или webhook.
 - [ ] Более тонкие серверные права и квоты по зонам/kind.
@@ -210,7 +268,7 @@ GDScript остаётся явно доверенным режимом с пра
   поддерживаемого набора мутаций.
 - [ ] GC persisted overlay objects после подтверждения, что база всех peers достигла нужной rev.
 - [ ] Пользовательская policy доверия действиям неподтверждённых peers.
-- [ ] Выдать rank scripting modules через версионированную capability после определения модели
+- [ ] Выдать право публикации script revisions через версионированную capability после определения модели
   доверия.
 
 ## Client и media
@@ -219,7 +277,8 @@ GDScript остаётся явно доверенным режимом с пра
 
 - [ ] 3D-позиционное аудио видеоповерхности.
 - [ ] HLS/DASH поверх существующей прогрессивной докачки.
-- [ ] Передача роли контроллера и owner-presenter mode.
+- [ ] Передача роли presenter через общий subject binding
+  ([контракт](network/subject-bindings.md)), без video-specific owner state.
 - [ ] Интерактивный seek по progress bar и регулятор громкости.
 - [ ] Адаптивный voice bitrate/DTX по transport pressure.
 - [ ] При росте комнат оценить SFU вместо квадратичного mesh uplink.
@@ -231,8 +290,6 @@ GDScript остаётся явно доверенным режимом с пра
 - [ ] Реальный замер высоты RichPanel вместо эвристики текста.
 - [ ] Согласованный reflow геометрии после загрузки медиа без HTML-размеров.
 - [ ] Зарегистрировать deeplink-схему в packaged builds через installer/first-run integration.
-- [ ] Определить inventory/ownership и материализацию сериализуемых `tool-*` объектов, прежде
-  чем отправлять `PlayerTool.descriptor()` в ephemeral layer.
 - [ ] Добавить визуальный avatar picker и валидировать расширяющийся набор avatar parameters.
 - [ ] Зафиксировать правила spawn/teleport points для custom VRWeb scenes.
 
@@ -269,8 +326,12 @@ GDScript остаётся явно доверенным режимом с пра
 - [ ] Реализовать ownership handles, quotas, instruction/time budget, termination и отзыв
   capabilities после unmount.
 - [ ] Перенести Scripting API adapters поверх ABI; prompts fetch/storage/mic сделать deny-first.
-- [ ] Сделать sandboxed LightSwitch и hostile fixtures: infinite loop, memory growth, чужой
-  handle, path/network escape и callback после unmount.
+- [x] Перенести LightSwitch на sandboxed Luau: обычные VRWML-узлы, opaque handles,
+  `document.state`, page-defined reducer и scene subscription; специальные state/action tags удалены.
+- [x] Добавить типизированные адресованные `document.remote` calls и реактивный read-only
+  `document.players` для локальных authority/rank правил и roster UI.
+- [ ] Расширить hostile fixtures: sustained memory growth, чужой handle, дополнительные
+  path/network escape и callback после unmount (infinite top-level/callback loops уже покрыты).
 
 Критерий: модуль неизвестного origin запускается без прав процесса, а hostile fixtures
 детерминированно ограничиваются host runtime.
@@ -281,7 +342,7 @@ GDScript остаётся явно доверенным режимом с пра
 - Нужен ли открытый формат community/site-specific правил трансляции HTML → 3D?
 - Какой default warning/skip profile выбрать для неизвестных декларативных классов после audit?
 - Достаточен ли `vrweb-instance` как общеэкосистемный private-instance contract?
-- Какие реальные потребители должны сформировать `fetch/storage` capabilities?
+- Какие реальные потребители должны сформировать persistent `storage` capability?
 - Когда масштаб комнат оправдает SFU и облегчённый voice-only клиент?
 
 ## Правило сопровождения

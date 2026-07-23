@@ -1,76 +1,618 @@
-# VRWeb Scripting API v1
+# VRWeb scripting API (`vrweb-luau/1`)
 
-`context` — переносимый контракт между scripting module и VRWeb-клиентом. Trusted GDScript также
-может пользоваться публичным Godot API, но внутренние классы/autoload-ы Knossos не являются API
-и не получают гарантий совместимости. Для trusted runtime `context` — compatibility boundary,
-а не security sandbox.
+Скрипт получает global table `document`. Все объекты сцены представлены opaque handles; их нельзя
+преобразовать в Godot `Object` или сохранить как движковую ссылку.
 
-## Capabilities
+> Это справочник по API. Практические рецепты авторских систем синхронизации (якорная
+> модель, плейлист с владельцами, выбор между state и remote) —
+> в [scripting-patterns.md](scripting-patterns.md); как собрать свой инструмент-предмет —
+> в [tool-authoring.md](tool-authoring.md).
 
-| Capability | Facade | Статус |
+Top-level код всегда входит в VM на lifecycle-границе `scene-ready`: декларативная сцена уже
+находится в дереве и прошла первый physics frame. Отдельного `DOMContentLoaded` callback в v1 нет,
+потому что сам запуск скрипта является его эквивалентом.
+
+## Контракт host-вызовов
+
+Единые правила для всей поверхности `document` и методов host-объектов (handle, file,
+resource, shader, material):
+
+- **Результат — пара `value [, error_code]`.** Успешный вызов возвращает значение (вторая
+  позиция пуста); неуспешный — `nil` и строковый код. Обычная проверка `if not x` продолжает
+  работать; код нужен, когда автору важна причина:
+
+  ```lua
+  local handle, err = document.create("OmniLight3D")
+  if not handle then
+    document.log.warning("create failed: " .. tostring(err))
+  end
+  ```
+
+- **Словарь кодов** (закрытый для синхронных отказов):
+
+  | Код | Смысл |
+  |---|---|
+  | `invalid_args` | аргументы не проходят структурную проверку |
+  | `not_found` | адресат (объект, свойство, сигнал, запись) не существует |
+  | `denied` | отклонено content policy или правами |
+  | `unsupported` | операция, класс или формат не поддержаны этим клиентом |
+  | `limit` | исчерпан бюджет или превышен размер |
+  | `lifecycle` | вызов недоступен в текущей фазе realm (см. [фазовый контракт](scripting.md#фазовый-контракт-host-api)) |
+  | `busy` | занято другим незавершённым запросом |
+  | `internal` | внутренняя ошибка host |
+
+  Легитимная пустота ошибкой не является: `document.query` на отсутствующий id возвращает
+  `nil` без кода, `state.read` несуществующей записи — `{}`.
+
+- **Необязательные аргументы можно опускать.** Хвостовые опциональные аргументы
+  (`hint` у `handle.on`, `props` у `document.create`, `callback` у `document.scene.add`,
+  alpha у `values.color`…) дозаполняются самим биндингом; явный `nil` эквивалентен пропуску.
+
+- **Асинхронный исход приходит envelope-таблицей `{ok, error, ...}`.** Callback-события
+  (`files.pick`, `assets.fetch/load`, `scene.add`, ACK команд) несут `ok` и, при неуспехе,
+  код в `error`/`code`. Capability может уточнять причину доменными кодами
+  (`download_failed`, `invalid_json`, `access_denied`…) — их словарь принадлежит её контракту.
+
+- **Исход команды наблюдаем.** `document.state.command(...)` и
+  `document.physics.claim/handoff/command` принимают опциональный callback, получающий
+  `{ok, code, revision, request_id}` из ACK авторитета.
+
+## Scene
+
+- `document.query("#id") -> handle?`
+- `document.query_all("#id") -> {handle}`
+- `document.create(type, properties) -> handle?`
+- `handle.get(property)` / `handle.set(property, value)`
+- `handle.call(method, arguments)`
+- `handle.on(event_or_signal, callback, hint?)`
+- `handle.destroy()` — только для созданного page realm объекта.
+
+Knossos v1 разрешает создание безопасного подмножества 3D nodes и методы `show`, `hide`, `play`,
+`stop`. Свойства проходят тот же content-policy фильтр, что атрибуты VRWML. HTML `id` адресует
+материализованный объект независимо от его Godot `name`; id декларативного `<Resource>` адресует
+тот же ресурс через такой же opaque handle. Поэтому скрипт может, например, менять
+`StandardMaterial3D.albedo_color`, не получая прямую engine-ссылку. Запись read-only, служебных и
+несовместимых по типу свойств отклоняется до commit. Неуспешный `document.create` транзакционно
+удаляет заготовку, поэтому частично созданный объект не остаётся в сцене.
+
+`activate` — переносимое событие пространственного взаимодействия с `{position}`. Кроме него
+handle принимает имя объявленного сигнала материализованного объекта. Callback получает
+`{type, args}` и именованные поля аргументов, когда движок публикует их имена. Непереносимый
+аргумент превращается в `nil`; известный странице объект остаётся opaque handle. Текущий Knossos
+поддерживает сигналы с нулём–четырьмя аргументами. Благодаря этому стандартные `Button`,
+`CodeEdit`, `Slider`, `ColorPicker` и другие `Control` не требуют отдельных scripting API.
+Третий аргумент `hint` опционален: для сигнал-событий достаточно
+`handle.on("signal_name", callback)`. Для `activate` непустой hint задаёт подпись взаимодействия.
+
+Для переносимого создания значений доступны:
+
+| Вызов | Смысл |
+|---|---|
+| `document.values.vector3(x, y, z)` | вектор |
+| `document.values.color(r, g, b, a)` | цвет |
+| `document.values.transform_facing(origin, front, up_hint)` | поза объекта, лицевая сторона (+Z) которого смотрит вдоль `front` — размещение на поверхности по её нормали; при почти вертикальном `front` (пол/потолок) мировой «верх» вырождается, и в этой роли берётся горизонтальная часть `up_hint` (обычно направление взгляда) |
+| `document.values.to_literal(value)` | портируемое значение → литерал VRWML (та же грамматика, что у атрибутов разметки) — чтобы строить `props` объектов слоя из вычисленных значений, не склеивая строки вручную |
+
+Они возвращают типизированные значения host, пригодные для `handle.set`, и не раскрывают
+конструкторы движка.
+
+## Session
+
+`document.session` — ограниченная по размеру сериализуемая table страницы, общая для всех её
+script tags. Она переносится при успешной hot replacement и исчезает при закрытии страницы.
+Это единственный API сессии: скрипт читает и пишет обычные поля table.
+
+## Distributed state
+
+`document.state` — общая page-facing надстройка над generic replicated-state subsystem:
+
+- `define(schema_id, definition)`;
+- `ensure(object_id, schema_id, initial?, bindings?)`;
+- `read(object_id, schema_id)`, `bindings(...)`, `binding(..., name)` и `revision(...)`;
+- `command(object_id, schema_id, version, command, args?, callback?) -> request_id` —
+  callback получает `{ok, code, revision, request_id}` из ACK авторитета;
+- `on(object_id, schema_id, callback)` и `on_bindings(object_id, schema_id, callback)`.
+
+Bindings — общий механизм named roles (`creator`, `holder`, `presenter`), а не отдельное
+ownership API. Полный контракт: [Subject Bindings](../network/subject-bindings.md). Практические
+рецепты для сторонних авторов: [руководство по Subject Bindings](subject-bindings-guide.md).
+
+Wire ids namespaced identity page realm: её задаёт явный атрибут `realm` script-тега
+(см. [scripting.md](scripting.md#объявление-в-html)), а без атрибута — `id` первого валидного
+script tag. Регистрация и top-level commands staged до успешного запуска страницы.
+Живой realm сохраняет свои schema/object registrations при подключении или смене комнаты:
+сетевой reset очищает локальный Store, после чего client bridge повторяет идемпотентную
+регистрацию на `authority_changed`. Начальное значение действует до canonical snapshot от
+authority; пользовательский скрипт не должен повторно вызывать `define`/`ensure` из-за reconnect.
+
+Reducer в `definition.commands[name].reducer` получает один event:
+`{ state, args, context }` и возвращает атомарную транзакцию
+`{state = field_patch, bindings = binding_patch}`. `context.actor_user_id` и
+`context.bindings` выданы authority, а не взяты из args. Callback `on` получает
+`{state, changed, revision}`, `on_bindings` — `{bindings, changed, revision}`. Представление остаётся обычной сценой: subscription вызывает
+`handle.set(...)`, а интеракция — `handle.on("activate", ...)` и затем `state.command(...)`.
+Полный копируемый пример: [демо общего света](../client/state-switch-demo.md) и его
+[inline Luau](../../addons/vrweb_tools/examples/state_switch.html).
+
+В offline mode Knossos обрабатывает `command` тем же Store/reducer/delta путём локально, считая
+клиент временным standalone authority. При появлении комнаты это локальное состояние заменяется
+canonical snapshot по обычным правилам; специальной ветки в page script не требуется.
+
+## Сетевой `RigidBody3D` (`vrweb/physics/1`)
+
+`document.physics` связывает уже материализованный обычный VRWML `<RigidBody3D>` с одним
+replicated-state record. Новый тег рядом с `RigidBody3D` не вводится. У назначенного
+`bindings.simulator` узел остаётся динамическим и показывает непосредственный результат
+локальной физики; у остальных участников тот же узел становится frozen proxy и отображает
+поток simulator со сглаживанием.
+
+```lua
+local ball = assert(document.query("#ball"))
+assert(document.physics.bind(ball, "ball", {
+  sample_hz = 20,
+  keyframe_interval = 1.0,
+  interpolation_delay = 0.10,
+  auto_claim = true,
+}))
+
+ball.on("activate", function()
+  if not document.physics.is_local_simulator("ball") then
+    document.physics.claim("ball")
+  end
+  document.physics.apply_impulse("ball", document.values.vector3(0, 4, -7))
+end, "Взять симуляцию и бросить")
+```
+
+`bind(body, object_id, options) -> bool` разрешён только до commit top-level script (вне этой
+фазы — `nil, "lifecycle"`) и только для handle `RigidBody3D`. `object_id` действует в namespace
+page realm. Options:
+
+- `auto_claim` — authority занимает свободный `simulator`; после истечения reconnect grace
+  он также восстанавливает симуляцию ушедшего участника;
+- `sample_hz`, `keyframe_interval`, `interpolation_delay` — авторские параметры потока и
+  презентации. Это не нормативные лимиты VRWeb: автор выбирает значения, а конкретный клиент
+  может независимо фильтровать или пропускать события по своей policy;
+- `fields` и `commands` — дополнительные поля и reducers того же record. Они не создают
+  отдельную physics-policy: reducer меняет обычный `bindings.simulator` вместе с state.
+
+| Вызов | Смысл |
+|---|---|
+| `claim(object_id, callback?) -> request_id` | стандартная атомарная передача simulator вызывающему |
+| `handoff(object_id, command_name, callback?) -> request_id` | вызвать custom reducer, автоматически передав текущие pose/скорости/tick |
+| `apply_impulse(object_id, vector) -> bool` | применить локальный импульс, только если этот клиент simulator |
+| `command(object_id, command_name, args?, callback?) -> request_id` | обычная команда того же physics record |
+| `simulator(object_id) -> user_id` | канонический `bindings.simulator` (`""` — свободен) |
+| `is_local_simulator(object_id) -> bool` | является ли локальный клиент simulator, включая optimistic handoff |
+| `on_simulator(object_id, callback) -> bool` | подписаться на `{simulator, revision}` |
+
+Опциональный `callback` — тот же ACK-контракт `{ok, code, revision, request_id}`, что у
+`document.state.command`.
+
+Смена simulator валидна только как единая транзакция: новое binding, увеличенный ровно на один
+`simulation_epoch`, pose, linear/angular velocity и tick. Поэтому запоздалые samples прежнего
+simulator не могут стать новым каноном. `claim`/`handoff` переключают локальную презентацию
+оптимистично; отказ authority возвращает тело к canonical proxy.
+
+Полное руководство и custom reducer: [networked-rigidbody.md](networked-rigidbody.md).
+Рабочая внешняя страница: [networked_rigidbody.html](../../addons/vrweb_tools/examples/networked_rigidbody.html).
+
+## Эфемерный слой сцены (`vrweb/scene-objects/1`)
+
+`document.scene` — доступ к [слою эфемерных изменений](../network/ephemeral-changes.md).
+Скрипт действует **от имени локального пользователя**: действия идут обычным протоколом
+action/event, авторитет валидирует их против своих прав (`bindings.creator`, ранги) —
+capability не добавляет собственной модели прав. Kind не ограничивается: авторитет и
+content policy — единственные судьи.
+
+- `document.scene.add(spec, callback?) -> id?` — `spec = {kind, parent?, ttl?, props?}`;
+  `id` генерится клиентом (адрес СВОЕГО объекта), `callback` получает `{ok, id, error}` после
+  решения авторитета (отказ слоя — `error = "denied"`);
+- `document.scene.update(id, props, callback?) -> bool` — патч props;
+- `document.scene.remove(id, callback?) -> bool`;
+- `document.scene.object(id) -> table` — плоские данные объекта слоя (`{}` если нет);
+- `document.scene.objects(kind?) -> {table}` — перечисление объектов слоя (по kind; без
+  аргумента — все) для инструментов-модификаторов; размер ограничен самим слоем.
+
+Top-level вызовы стейджатся до успешного commit realm. Закрытие страницы/realm НЕ удаляет
+созданные объекты — артефакты принадлежат пользователю, как штрихи карандаша. В offline mode
+слой работает локальной standalone-машиной (симметрично `document.state`); локальные объекты —
+сессионные и заменяются снимком комнаты при подключении.
+
+## Прицел (`vrweb/aim/1`)
+
+`document.player.aim() -> {hit, origin, direction, position?, normal?, distance?, target?}` —
+`origin`/`direction` луча взаимодействия отдаются **всегда** (прицеливание «в воздух»:
+`origin + direction * d`); точка/нормаль/дистанция — при попадании; `target` — html id узла
+под прицелом, если он адресуем скриптом (поднимается к ближайшему адресуемому предку
+коллайдера). Poll-модель: вызов из `document.on_update` или обработчиков не расходует
+handle-бюджет. Держимый предмет исключён из собственного луча. В VR той же формой будут
+отдаваться лучи рук.
+
+## Выбор файла (`vrweb/files/1`)
+
+`document.files.pick(kind, callback) -> bool` — модель `<input type="file">`: клиент
+показывает системный диалог, сам выбор — явное согласие пользователя. `kind`
+(`"image" | "audio" | "model" | "any"`) — **только подсказка фильтра диалога**: содержимое
+файла она не меняет и ничего не гарантирует. Путь ОС скрипту не сообщается. Один
+pending-выбор на realm; в staged top-level недоступен.
+
+Callback получает `{ok, name, size, error?, file?}`, где `file` — **непрозрачный handle**
+выбранного файла (тот же приём, что у ресурсов `document.assets`): байты не попадают в VM
+сами по себе. Поле `file.inline_limit` сообщает бюджет чтения байт в скрипт этим клиентом,
+а сделать с файлом можно ровно две вещи —
+
+| Вызов | Смысл |
+|---|---|
+| `file.publish(resource_type) -> url` | положить в контент-адресуемый стор → `vrwebblob://` URL. Работает и с файлами крупнее `inline_limit` — байты не проходят через VM |
+| `file.bytes() -> bytes?` | прочитать содержимое в скрипте (`nil, "limit"`, если файл больше `inline_limit` — для таких есть `publish`) |
+
+`resource_type` — словарь `document.assets` (`image`, `audio-*`, `mesh-gltf`) плюс `binary`.
+Для типов, где нормализация осмысленна, клиент приводит содержимое к бюджету блоба (сейчас
+это изображения: проверка сигнатуры + пережим); для остальных байты сохраняются как есть.
+**Тип задаёт скрипт** — host не решает за него по имени файла или фильтру диалога.
+
+Callback всегда вызывается **отложенно, обычным кадром главного потока**, а не из колбэка
+системного диалога: нативный диалог ОС уведомляет о выборе из вложенного контекста цикла
+(на части платформ — из чужого потока), и вход в VM оттуда рушит realm. Реализация клиента
+обязана соблюдать это независимо от того, как показан диалог.
+
+## Grabbable-предметы (`vrweb/grabbable/1`)
+
+Материализованный `<VRWebGrabbable>` (норматив — [grabbable.md](grabbable.md)) адресуется
+обычным `document.query` и, кроме событий `grab`/`drop`/`use`/`use_end`, принимает
+типизированные методы через `handle.call`:
+
+| Вызов | Смысл |
+|---|---|
+| `call("release")` | положить предмет (действует только на клиенте держателя) |
+| `call("holder")` | `user_id` держателя (`""` — свободен) |
+| `call("simulator")` | `user_id` клиента, симулирующего физический корень (`""` — не назначен) |
+| `call("held_hand")` | рука держателя (`""` — свободен) |
+| `call("set_enabled", {bool})` | разрешить/запретить захват (аналог VRChat `pickupable`) |
+| `call("is_enabled")` | текущее состояние |
+
+## Адресованные remote calls
+
+Capability `vrweb/remote/1` реализует мимолётные адресованные вызовы между page realms на
+выбранных клиентах. `target_script_id` адресует identity целевого page realm; локальный код одной
+страницы взаимодействует обычными globals и вызовами функций, без RPC. Это event, а не replicated
+state: вызов не хранится, не имеет snapshot и не воспроизводится late joiner.
+
+Для мимолётных адресованных действий, особенно над локальным игроком, нужен отдельный путь, не
+превращающий вызов в replicated state. Автор страницы регистрирует локальный endpoint с
+типизированной схемой аргументов, а другой участник вызывает его на выбранном клиенте:
+
+```lua
+document.remote.expose("move-player", {
+  version = 1,
+  args = { "vector3" },
+}, function(event)
+  -- event.caller выдан transport/session layer, а не прислан вызывающим в args.
+  if may_move_player(event.caller) then
+    document.player.set("position", event.args[1])
+  end
+end)
+
+document.remote.call(target_peer_id, "room.controller", "move-player", 1, {
+  document.values.vector3(0, 2, 0),
+})
+```
+
+Handler исполняется в realm страницы **на целевом клиенте**. Поэтому remote peer не получает
+`player.set("position", ...)` над чужим игроком: он передаёт только намерение, а локальный код автора
+мира решает, разрешить ли его и как применить. Автор может проверять rank, object ownership,
+подтверждённую identity, игровое состояние или собственные правила. Для телепортации это тот же
+принцип, что `network event → LocalPlayer.TeleportTo` в VRChat.
+
+Адрес endpoint включает target `peer_id`, `script_id`, имя и версию. Одного глобального строкового
+имени недостаточно: два скрипта не должны перехватывать вызовы друг друга. `event.caller`
+формируется из фактического transport peer и содержит неприсланные отправителем identity/rank
+facts; claims из обычных аргументов не считаются полномочиями. Handler дополнительно получает
+`event.endpoint`, `event.version` и типизированный `event.args`.
+
+Инфраструктура отвечает только за структурные инварианты:
+
+- аутентичную связь сообщения с transport sender и выбранным target;
+- точную адресацию document/script/endpoint/version;
+- allowlist wire-типов, пределы размера, rate limit и deadline callback;
+- отсутствие late-join replay и snapshot у remote calls;
+- исполнение только через безопасный стандартный host API: RPC не открывает engine, ОС, файлы,
+  произвольные сокеты/сетевые классы или иные полномочия за пределами уже доступных странице
+  ограниченных capability `document`.
+
+Семантическую авторизацию инфраструктура не навязывает: endpoint может разрешать host, owner,
+команду, конкретного пользователя или всех — это код автора мира. Страница может написать
+`allow all`, как обычная web-страница может сама решить, что делать по click/network event.
+Отдельного permission per origin/document для locomotion стандарт не требует: безопасность
+строится на том, что сам `vrweb/player/1` спроектирован как безопасный page API, а реализация
+браузера соблюдает его контракт. Пользователь, зайдя в мир, доверяет его поведению в пределах
+этого sandbox так же, как при открытии HTML-страницы доверяет браузеру исполнить JavaScript в
+пределах Web API.
+
+Remote calls и `document.state.command` решают разные задачи. Телепорт, haptic pulse или локальный
+UI prompt — transient local effect и идут прямо target-клиенту. Открытая дверь, счёт или inventory
+— canonical state и должны проходить через authority, reducer, `DELTA` и snapshot. Handler remote
+call при необходимости может сам послать state command, но remote transport не должен подменять
+каноническую ветку.
+
+Knossos ограничивает realm 32 опубликованными endpoints, вызов — 8 аргументами и 8 KiB wire
+данных, вложенность переносимых контейнеров — четырьмя уровнями, а входящий поток — 20 вызовами
+в секунду от одного peer. Поддерживаются примитивы, строки, byte arrays, `vector2/3/4`, `color`,
+`quaternion`, массивы и словари со строковыми ключами. Endpoint schema дополнительно проверяет
+число и объявленные типы аргументов до входа в callback.
+
+Полный пример трёх разных правил допуска: [remote-call demo](../client/remote-call-demo.md).
+
+## Участники и реактивные права
+
+Capability `vrweb/players/1` даёт read-only снимки локального участника и текущего инстанса:
+
+- `document.players.local_info() -> player`;
+- `document.players.all() -> {player}`;
+- `document.players.on_changed(callback)` — сразу вызывает callback и повторяет его при изменении
+  состава, identity, rank, authority, P2P/room connection или локального login/settings state.
+
+Callback получает `{ local_player = player, players = {player} }`. Каждый player содержит `peer_id`, `user_id`, `nick`,
+`rank`, `rank_assigned`, `is_local`, `is_authority`, `can_manage_ranks`, `verified`,
+`verified_address`, `online`, `in_room`, `p2p_connected`, `p2p_lost` и сведения о текущем
+authority. Это снимки: после события следует использовать новый event, а не ожидать мутацию
+старой table.
+
+## Remote data и runtime-ресурсы
+
+Capability `vrweb/assets/2` строится из трёх независимо комбинируемых операций:
+
+- `document.assets.resolve(relative_url) -> url` — разрешение URL относительно страницы;
+- `document.assets.fetch(url, "text" | "json" | "bytes", callback) -> bool`;
+- `document.assets.fetch_with(url, response_type, options, callback) -> bool`;
+- `document.assets.decode(bytes, resource_type) -> resource?`;
+- `document.assets.load(url, resource_type, callback) -> bool` — сокращение `fetch + decode` для
+  случая, когда обрабатывать байты в Luau не требуется.
+- `document.assets.load_with(url, resource_type, options, callback) -> bool`.
+
+`fetch` вызывает callback с `{ok, url, response_type, data, error}`. Для `json` поле `data` — уже
+переносимая table, для `text` — строка, для `bytes` — byte array. `load` вызывает callback с
+`{ok, url, resource_type, resource, error, status, credentials}`. `fetch` возвращает те же
+`status` и `credentials`. Поддерживаемые типы ресурсов:
+`image`, `audio-mp3`, `audio-ogg`, `audio-wav`, `mesh-gltf`.
+
+Ресурс остаётся opaque handle и предоставляет только
+`resource.apply(target_handle, property) -> bool`. Host повторно проверяет существование и
+записываемость свойства, точный ожидаемый класс ресурса и content policy. Поэтому скрипт может
+заменить `StandardMaterial3D.albedo_texture`, `AudioStreamPlayer.stream` или
+`MeshInstance3D.mesh`, но не получает Godot object и не может применить аудио к texture-свойству.
+Один realm хранит до 64 runtime-ресурсов, одновременно держит до 64 запросов; переносимый ответ
+`fetch` ограничен 2 MiB. Низкоуровневый загрузчик коалесцирует одинаковые URL и кэширует результат.
+
+URL разрешается относительно страницы. HTTP(S) доступен страницам; `vrweblocal://` и
+`vrwebresource://` доступны только документу из соответствующей локальной схемы, чтобы remote
+page не превратила API в чтение файлов пользователя или bundle. GET — единственная сетевая
+операция v2: нет произвольных headers, cookies, методов записи, сокетов или доступа к ответу вне
+заявленного типа.
+
+### Credentials и ограничения владельца ресурса
+
+Обычные `fetch`/`load` используют режим `credentials = "same-origin"`: Bearer автоматически
+прикладывается, только когда и документ, и target URL находятся на origin собственного Home
+Server пользователя. Токен никогда не выдаётся сторонней странице, даже если она явно укажет
+URL Home Server. Запрос к остальным origin остаётся анонимным.
+
+Для ресурса, которому нужна федеративно проверяемая личность, автор явно выбирает
+`credentials = "include"`:
+
+```lua
+document.assets.fetch_with("https://assets.example.org/private/data.json", "json", {
+  credentials = "include",
+}, function(event)
+  if event.ok then
+    render(event.data)
+  elseif event.status == 401 or event.status == 403 then
+    show_access_denied()
+  end
+end)
+```
+
+Если документ сам загружен с Home Server пользователя, `include` может использовать его
+origin-scoped Bearer. В остальных случаях — включая запрос сторонней страницы к Home Server —
+HTTPS origin получает только сертификат identity и одноразовый proof владения приватным ключом.
+Если действующего сертификата нет или URL использует открытый HTTP, операция не стартует и
+возвращает `false`. `credentials = "omit"` запрещает даже same-origin Bearer.
+
+Сертификат содержит стабильный адрес пользователя и поэтому позволяет владельцу ресурса
+атрибутировать запрос, вести allowlist/квоты и вернуть обычный `401`/`403`. Это одновременно
+privacy-sensitive действие: сертификат не отправляется стороннему origin по умолчанию; явный
+`include` виден в исходнике страницы.
+
+Credentialed-запрос не следует redirect автоматически. Это не позволяет ответу своего сервера
+перенаправить Bearer или identity на другой origin. Script получает 3xx в `status` и при
+необходимости делает новый запрос к явно выбранному URL, для которого создаётся новый proof.
+
+Запросы асинхронны и стартуют только после успешного commit realm. При hot replacement/навигации
+старые callbacks становятся недействительны. Порядок завершения не гарантирован; для карусели
+автору следует использовать generation/token и игнорировать устаревшие ответы.
+
+Сетевой transport API не синхронизирует загруженный `Resource`: каждый клиент загружает и
+декодирует данные локально. Для синхронного выбора URL/индекса authority отправляет маленькое
+намерение через `document.remote.call`; endpoint на каждом клиенте проверяет `event.caller` и
+запускает ту же локальную композицию `fetch/decode/apply`. Поздно подключившимся участникам нужен
+`document.state`, если выбранный индекс должен иметь snapshot.
+
+Полный пример с локальной и authority-синхронизированной каруселью:
+[remote data demo](../client/remote-data-demo.md).
+
+## Видео-плееры (`vrweb/video/1`)
+
+Материализованный `<VRWebVideoPlayer>` адресуется обычным `document.query("#id")` и, кроме
+общих операций handle, принимает типизированные транспортные методы через `handle.call`:
+
+| Вызов | Смысл |
+|---|---|
+| `call("play")` / `call("pause")` / `call("toggle")` | транспорт |
+| `call("seek", {seconds})` | перемотка (секунды, число) |
+| `call("set_source", {url})` | смена источника на лету; URL резолвится относительно страницы |
+| `call("source")` | текущий URL источника |
+| `call("position")` / `call("duration")` | таймкоды, секунды |
+| `call("is_playing")` / `call("is_buffering")` | состояние |
+| `call("set_volume", {v})` | громкость 0..1 |
+| `call("last_error")` | `""` / `download_failed` / `decoder_unavailable` / `decode_failed` |
+| `on("transport_changed", callback)` | локальные play/pause/seek (`event.action`, `event.position`) |
+| `on("texture_ready", callback)` | появился (или сменился после `set_source`) кадр |
+| `on("finished", callback)` | реальный конец ролика (не ложный EOF докачки; при `loop` не эмитится) — база для плейлистов |
+| `on("playback_error", callback)` | терминальная ошибка, `event.code` — как в `last_error` |
+
+Ошибка, случившаяся до активации скрипта (например, отсутствие FFmpeg-аддона при
+материализации тега), сигналом не доедет — её видно опросом `last_error`. `set_source`
+сбрасывает ошибку и начинает заново.
+
+Как и остальные `handle.call`, транспорт недоступен в staged top-level — управлять плеером
+следует из callbacks (кнопки, таймеры, `document.state.on`, `document.on_update`).
+
+Уровни синхронизации (см. [video-player.md](../client/video-player.md#архитектура-базовый-уровень-и-надстройки)):
+
+- **Плеер по умолчанию (synced).** Скриптовые `play`/`pause`/`seek` эквивалентны клику
+  игрока по экрану: уходят команде authority и распространяются стандартной синхронизацией.
+  `set_source` стандартная надстройка **не** реплицирует — намеренно: у синтезированного
+  плеера источник задан разметкой, а любая его смена по определению исходит из авторского
+  скрипта, поэтому синхронизацию источника всегда ведёт сам скрипт (одинаковая
+  детерминированная логика у всех либо кастомный `document.state`, см.
+  [границу надстройки](../client/video-player.md#архитектура-базовый-уровень-и-надстройки)).
+- **`sync="none"`.** Чисто локальный базовый плеер: все вызовы действуют только на этом
+  клиенте, а синхронизацию (если нужна) автор строит сам поверх `document.state` /
+  `document.remote` / `document.clock` — от караоке с компенсацией задержки до плеера,
+  управляемого по рангам. `document.assets` для видео не нужен: источник задаётся URL.
+
+URL в `set_source` подчиняется тем же схемным ограничениям, что `document.assets`: http(s) —
+любым страницам, `vrweblocal://`/`vrwebresource://` — только документу той же локальной
+схемы.
+
+**Рекомендуемый паттерн кастомной синхронизации — якорь, а не тики.** Вместо периодической
+рассылки таймкода страница реплицирует через `document.state` канон
+`{src, playing, anchor_position, anchor_time}`, меняющийся только при действиях
+(`anchor_time` reducer берёт из `context.authority_msec / 1000` — это та же шкала, что
+`document.clock.authority_time()` у каждого клиента). Текущая позиция выводится локально:
+`target = anchor_position + (authority_time - anchor_time)`, а правила дрифт-коррекции
+(порог, кулдаун, караоке-сдвиг на задержку голоса) — обычный авторский код в
+`document.on_update`. Подписка на сигнал `transport_changed` превращает и клики по экрану,
+и программные вызовы в state-команды (флаг «применяю канон» рвёт цикл). Snapshot бесплатно
+решает late join; периодического трафика нет. `document.remote` остаётся для адресных
+transient-действий («пересинхронизируйся сейчас», действия ведущего над одним клиентом),
+которые не должны попадать в канон и доигрываться поздно вошедшим. Полный референс:
+[scripted video demo](../../addons/vrweb_tools/examples/scripted_video.html)
+(`vrwebresource://examples/scripted_video.html`).
+
+## Runtime shaders и материалы
+
+Capability `vrweb/shaders/1` даёт два общих примитива: создать shader из точно
+объявленного формата и создать/применить материал, не раскрывая объект движка.
+
+```lua
+local format = {
+  language = "godot-shader",
+  version = "4.6",
+  type = "spatial",
+}
+
+if document.shaders.supports(format) then
+  format.source = "shader_type spatial; void fragment() { ALBEDO = vec3(1.0); }"
+  local result = document.shaders.compile(format)
+  if result.ok then
+    local material = result.shader.create_material()
+    material.set_parameter("tint", document.values.color(1, 0, 0, 1))
+    material.apply(document.query("#surface"), "material_override")
+  end
+end
+```
+
+- `document.shaders.supports(descriptor) -> bool` требует точного совпадения
+  `language + version + type`;
+- `document.shaders.constants() -> {descriptor}` перечисляет стандартные shader globals;
+- `compile(descriptor) -> {ok, shader, diagnostics, error}`;
+- `shader.format()`, `shader.parameters()`, `shader.create_material()`;
+- `material.set_parameter(name, value)`, `get_parameter(name)`,
+  `apply(target_handle, property)`.
+
+В Knossos первая реализация поддерживает `godot-shader` ровно версии текущего Godot major.minor
+и типы `spatial`, `canvas_item`, `particles`, `sky`, `fog`. Это намеренно engine-specific формат:
+автор явно выбирает язык, а клиент без него возвращает unsupported. Автоматической трансляции и
+обещания переносимости исходника между shader-языками нет. Более универсальный формат может быть
+добавлен позже отдельным значением `language`, не меняя композицию shader → material → apply.
+
+### Стандартные shader inputs VRWeb
+
+Клиент автоматически объявляет зарезервированные inputs во всех shaders, созданных через
+`document.shaders`. Автор использует имя напрямую и не добавляет engine-specific
+объявление самостоятельно. В реализации Godot input становится `uniform`, который runtime
+обновляет на каждом созданном `ShaderMaterial`; другая реализация может отобразить ту же семантику
+на собственный shader backend.
+
+| Имя | Тип | Семантика |
 |---|---|---|
-| `vrweb/core/1` | `mount(context)`, `unmount()`, identity/lifecycle | stable |
-| `vrweb/scene/1` | `context.scene.root/find/is_valid` | stable, минимальный |
-| `vrweb/state/1` | `context.state` replicated schema/object/command/read/subscriptions | stable |
-| `vrweb/assets/1` | `context.assets.has/load/text/bytes` | stable |
-| `vrweb/timers/1` | `context.timers.start/cancel/cancel_all` | stable |
-| `vrweb/input/1` | `context.input.on_activate/off_activate` | stable, только activate |
-| `vrweb/log/1` | `context.log.debug/info/warning/error` | stable |
-| `vrweb/features/1` | `context.features.has/require` | stable |
-| `godot/engine/4` | публичный API Godot 4 в `trusted-gdscript` | runtime extension |
+| `AUTHORITY_TIME` | `float`, секунды | Та же монотонная шкала, что `document.clock.authority_time()`. У authority равна его локальным ticks, у остальных оценивается по clock sync; вне комнаты используется локальный monotonic fallback. |
 
-Старые `context.has("lifecycle/1"|"scene-root/1"|"replicated-state/1"|...)` оставлены как
-совместимые aliases. Новый код использует `context.features.has("vrweb/.../1")`.
+```glsl
+shader_type spatial;
 
-Имя `context.log` остаётся частью стабильного контракта. В host-реализации facade разрешается
-динамически, чтобы не затенять глобальную функцию Godot `log()`, но для module-кода это по-прежнему
-обычное свойство с методами `debug/info/warning/error`.
-
-## Manifest
-
-Package объявляет обязательные и опциональные capabilities:
-
-```json
-{
-  "format": 1,
-  "id": "demo.lights",
-  "runtime": "trusted-gdscript",
-  "requires": ["vrweb/core/1", "vrweb/scene/1", "godot/engine/4"],
-  "optional": ["vrweb/state/1", "vrweb/input/1"],
-  "exports": {"default": {"script": "light_switch.gd", "base": "StaticBody3D"}}
+void fragment() {
+  float pulse = 0.5 + 0.5 * sin(AUTHORITY_TIME * 2.0);
+  ALBEDO = vec3(pulse, 0.2, 1.0 - pulse);
 }
 ```
 
-Неизвестная обязательная capability останавливает только данный модуль до инстанцирования.
-Неизвестная optional capability видна через feature detection. Ошибка модуля не должна ломать
-статическую часть страницы.
+В отличие от встроенного Godot `TIME`, который идёт независимо на каждом клиенте,
+`AUTHORITY_TIME` позволяет вычислять одинаковую фазу производной shader-анимации у участников.
+Это не canonical state и не источник авторизации. Список зарезервированных globals может
+расширяться совместимыми добавлениями capability; их runtime-представление доступно через
+`shaders.constants()`. Зарезервированные inputs read-only для автора: runtime обновляет их
+значения, а `material.set_parameter` не позволяет их переопределить.
 
-## Input
+Runtime resources остаются opaque и применяются через ту же проверку свойства и content policy,
+что загруженные assets. Текущий Knossos возвращает структурные boundary diagnostics; ошибки
+низкоуровневого GPU compiler пока остаются в renderer diagnostics и журнале клиента.
 
-`context.input.on_activate(target, callback, hint)` принимает только `target` из ветки
-компонента. В Knossos target должен быть физическим collider, на который попадает луч игрока.
-Host связывает его со своим input protocol; модуль не обращается к `Player`:
+## Остальной host API
 
-```gdscript
-func mount(context):
-    context.input.on_activate(self, func(_point):
-        context.state.command("demo", "switch", 1, "toggle")
-    , "Toggle shared light")
-```
+- `document.clock.set_timeout(seconds, callback)`;
+- `document.clock.set_interval(seconds, callback)`;
+- `document.clock.cancel(timer_id)`;
+- `document.clock.local_time()` — время активной сцены в секундах от её materialize;
+- `document.clock.authority_time()` — монотонная шкала текущего authority;
+- `document.clock.authority_ready()` — синхронизирована ли authority-шкала с удалённым host;
+- `document.on_update(callback)` — callback каждого render frame с
+  `{delta, local_time, authority_time, authority_ready}`;
+- `document.player.get("position" | "flying")` и `document.player.set("position", vector)` —
+  локальный игрок в той же get/set-идиоме, что остальные handle; `aim()` описан выше;
+- `document.log.debug/info/warning/error(value)`;
+- `document.features.has(capability)`;
+- `document.features.require(capability)`.
 
-Hover, drag, grab, axes, `fetch` и `storage` не входят в v1: capability расширяется после
-появления реального потребителя.
+Capability names MVP: `vrweb/core/1`, `vrweb/scene/1`, `vrweb/state/1`, `vrweb/remote/1`,
+`vrweb/players/1`, `vrweb/player/1`, `vrweb/assets/2`, `vrweb/clock/1`,
+`vrweb/log/1`, `vrweb/shaders/1`, `vrweb/video/1`, `vrweb/scene-objects/1`,
+`vrweb/aim/1`, `vrweb/files/1`, `vrweb/grabbable/1`, `vrweb/physics/1`.
 
-## Package-demo
+Имя capability всегда имеет форму `vrweb/<домен>/<целая версия>`. Профиль семантики runtime
+(`vrweb-luau/1` в script type/объявлении) — отдельный namespace: он описывает язык и
+наблюдаемую семантику VM, а не обнаруживаемую возможность `document`, и через
+`features.has` не запрашивается.
 
-Открыть `vrwebresource://package_script.html`. Исходник —
-[`tests/fixtures/package_demo/light_switch.gd`](../../tests/fixtures/package_demo/light_switch.gd),
-готовый пакет — [`test_pages/lights.vrmod`](../../test_pages/lights.vrmod). Пересборка:
+`local_time` общее для page realm и начинается заново при навигации.
+`authority_time` у host совпадает с его монотонными ticks, а у остальных клиентов оценивается
+периодическим ping/pong с компенсацией половины RTT. Вне сетевой комнаты шкала продолжает идти
+локально, но `authority_ready == false`. Она предназначена для вычисления производного состояния
+вроде фазы анимации; canonical игровые решения по-прежнему должны проходить через
+`document.state` и authority validation.
 
-```bash
-HOME=/tmp/knossos-godot-home godot --headless --path . \
-  --log-file /tmp/knossos-package-demo.log --script tests/build_package_demo.gd
-```
+## Ошибки и лимиты
 
-Команда печатает integrity и hash. При изменении пакета новое значение integrity нужно перенести
-в `test_pages/package_script.html`; trust по старому exact hash намеренно не наследуется.
+CPU-бюджет ограничивает **исполнение скрипта**, а не длительность операций, которые скрипт
+законно попросил у клиента: время внутри небыстрого host-вызова (пережим картинки при
+публикации, декод ресурса, компиляция шейдера) не засчитывается в дедлайн. Иначе публикация
+крупного файла убивала бы realm по «execution deadline exceeded».
+
+Недоступная операция отказывает по [контракту host-вызовов](#контракт-host-вызовов)
+(`nil` + код); скрипт не получает fallback-доступ к движку. Knossos ограничивает один source 256 KiB, страницу 32 скриптами, page realm 256 handles, 64 timers,
+10 000 host calls на один контролируемый вход VM, 75 ms top-level и 25 ms на callback. Текущий memory watchdog использует soft
+budget 16 MiB. Эти числа — политика reference client, не wire contract стандарта.
+
+Ошибка callback и CPU timeout закрывают общий page realm и очищают выданные им
+handlers/timers/owned objects. Декларативная сцена продолжает работать.

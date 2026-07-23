@@ -1,5 +1,10 @@
 # docs / space
 
+Практические руководства для авторов контента:
+
+- [subject-bindings-guide.md](subject-bindings-guide.md) — назначаемые роли `creator`,
+  `holder`, `presenter`, `editor`, `driver`: policies, атомарные reducers и сложные сценарии.
+
 Здесь собраны документы про то, как из веб-страницы получается **3D-пространство**: правила
 процедурной генерации из обычного HTML и правила сборки декларативной сцены из VRWML. Это ядро Слоя 1
 из обзора ([../README.md](../README.md)).
@@ -10,7 +15,7 @@ GDScript-классы, структуру Godot-сцен, конкретные A
 [client/implementation.md](../client/implementation.md).
 При расхождении документов нормативным источником для процедурной генерации и организации
 пространства считается `space/`; `client/` фиксирует только текущее поведение реализации.
-Public API внешних scripting modules и capability contract — в [scripting-api.md](scripting-api.md).
+Public page scripting API и capability contract — в [scripting-api.md](scripting-api.md).
 Единая passthrough/audit boundary декларативного контента — в
 [content-policy.md](content-policy.md).
 
@@ -38,3 +43,19 @@ Public API внешних scripting modules и capability contract — в [scrip
   единый формат сцен, все Godot-классы, специальные стандартные классы и формы доставки.
 - [vrwml-tags.md](vrwml-tags.md) — подробный реализованный каталог стандартных тегов VRWML,
   режимы композиции, загрузка внешних GLB-ресурсов и ограничения текущего Knossos runtime.
+
+## Предметы и инструменты
+
+- [grabbable.md](grabbable.md) — нормативный контракт предметов, которые участник берёт в
+  руку: тег, hold-состояние, точки крепления, события.
+- [networked-rigidbody.md](networked-rigidbody.md) — руководство автора по сетевому
+  `<RigidBody3D>`, передаче `bindings.simulator` и custom reducers.
+- [portable-tools.md](portable-tools.md) — архитектура переносимых инструментов: почему
+  инструмент это предмет со скриптом, что уже есть и куда расти.
+- [tool-authoring.md](tool-authoring.md) — руководство автора: как собрать свой
+  инструмент-предмет, паттерны ввода, артефакты, лимиты и чек-лист.
+
+## Исследования других платформ
+
+- [vrchat-developer-api.md](vrchat-developer-api.md) — карта SDK/Udon, Player API, persistence,
+  media, avatars, OSC и внешнего HTTP API VRChat; ограничения и выводы для API VRWeb.

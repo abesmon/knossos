@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb — Remote Call permissions demo</title>
+  <script type="application/vrweb+luau" id="demo.remote-call">
+local SCRIPT_ID = "demo.remote-call"
+local ALLOWED_RANK = 10
+
+local local_info = document.query("#local-info")
+local roster_info = document.query("#roster-info")
+local unchecked_status = document.query("#unchecked-status")
+local authority_status = document.query("#authority-status")
+local rank_status = document.query("#rank-status")
+local unchecked_button = document.query("#unchecked-button")
+local authority_button = document.query("#authority-button")
+local rank_button = document.query("#rank-button")
+
+if not local_info or not roster_info or not unchecked_status or not authority_status
+    or not rank_status or not unchecked_button or not authority_button or not rank_button then
+  error("remote call demo scene ids are missing")
+end
+
+local destinations = {
+  unchecked = document.values.vector3(-4.5, 0.15, 2.5),
+  authority = document.values.vector3(0.0, 0.15, 2.5),
+  rank = document.values.vector3(4.5, 0.15, 2.5),
+}
+
+local function yes_no(value)
+  return value and "да" or "нет"
+end
+
+local function rank_text(player)
+  if player.rank_assigned then
+    return tostring(player.rank)
+  end
+  return "не назначен (" .. tostring(player.rank) .. ")"
+end
+
+local function render_people(event)
+  local me = event.local_player
+  local_info.set("text", table.concat({
+    "ЛОКАЛЬНЫЕ ПРАВА",
+    "nick: " .. me.nick,
+    "peer / user: " .. tostring(me.peer_id) .. " / " .. me.user_id,
+    "rank: " .. rank_text(me),
+    "authority: " .. yes_no(me.is_authority),
+    "может управлять ranks: " .. yes_no(me.can_manage_ranks),
+    "identity verified: " .. yes_no(me.verified),
+    "online / in room: " .. yes_no(me.online) .. " / " .. yes_no(me.in_room),
+    "authority peer: " .. tostring(me.authority_peer_id),
+  }, "\n"))
+
+  local lines = { "ВСЕ УЧАСТНИКИ ИНСТАНСА (" .. tostring(#event.players) .. ")" }
+  for _, player in ipairs(event.players) do
+    local flags = {}
+    if player.is_local then table.insert(flags, "local") end
+    if player.is_authority then table.insert(flags, "authority") end
+    if player.verified then table.insert(flags, "verified") end
+    if player.p2p_connected then table.insert(flags, "p2p") end
+    local suffix = #flags > 0 and " [" .. table.concat(flags, ", ") .. "]" or ""
+    table.insert(lines, string.format("%s · peer %d · rank %s%s",
+      player.nick, player.peer_id, rank_text(player), suffix))
+    table.insert(lines, "  user: " .. player.user_id)
+  end
+  roster_info.set("text", table.concat(lines, "\n"))
+end
+
+assert(document.players.on_changed(render_people))
+
+local function caller_text(caller)
+  return string.format("%s (peer %d, rank %s)", caller.nick, caller.peer_id, rank_text(caller))
+end
+
+local function accepted(label, event, reason)
+  local moved = document.player.set("position", event.args[1])
+  label.set("modulate", document.values.color(0.2, 1.0, 0.45, 1.0))
+  label.set("text", "ПРИНЯТО: " .. caller_text(event.caller) .. "\n" .. reason
+    .. (moved and "" or " · player пока недоступен"))
+end
+
+local function denied(label, event, reason)
+  label.set("modulate", document.values.color(1.0, 0.28, 0.22, 1.0))
+  label.set("text", "ОТКЛОНЕНО: " .. caller_text(event.caller) .. "\n" .. reason)
+end
+
+assert(document.remote.expose("move-unchecked", { version = 1, args = { "vector3" } },
+  function(event)
+    accepted(unchecked_status, event, "обработчик не выполняет проверок")
+  end))
+
+assert(document.remote.expose("move-authority", { version = 1, args = { "vector3" } },
+  function(event)
+    if event.caller.is_authority then
+      accepted(authority_status, event, "caller является authority")
+    else
+      denied(authority_status, event, "caller не является authority")
+    end
+  end))
+
+assert(document.remote.expose("move-rank", { version = 1, args = { "vector3" } },
+  function(event)
+    if event.caller.rank_assigned and event.caller.rank <= ALLOWED_RANK then
+      accepted(rank_status, event, "rank <= " .. tostring(ALLOWED_RANK))
+    else
+      denied(rank_status, event, "нужен назначенный rank <= " .. tostring(ALLOWED_RANK))
+    end
+  end))
+
+local function send_to_everyone(endpoint, destination, status)
+  local sent = 0
+  for _, player in ipairs(document.players.all()) do
+    if document.remote.call(player.peer_id, SCRIPT_ID, endpoint, 1, { destination }) then
+      sent = sent + 1
+    end
+  end
+  status.set("modulate", document.values.color(1.0, 0.82, 0.25, 1.0))
+  status.set("text", "ОТПРАВЛЕНО адресатам: " .. tostring(sent) .. "\nждём локальных решений")
+end
+
+unchecked_button.on("activate", function(_event)
+  send_to_everyone("move-unchecked", destinations.unchecked, unchecked_status)
+end, "Remote Call без проверки")
+
+authority_button.on("activate", function(_event)
+  send_to_everyone("move-authority", destinations.authority, authority_status)
+end, "Remote Call только от authority")
+
+rank_button.on("activate", function(_event)
+  send_to_everyone("move-rank", destinations.rank, rank_status)
+end, "Remote Call для rank 10 или выше")
+  </script>
+</head>
+<body>
+  <vrwml mode="exclusive">
+    <MeshInstance3D mesh="SubResource:::FloorMesh" position="Vector3(0,0.05,0)">
+      <StaticBody3D><CollisionShape3D shape="SubResource:::FloorShape"/></StaticBody3D>
+    </MeshInstance3D>
+    <WorldEnvironment environment="SubResource:::Environment"/>
+    <DirectionalLight3D rotation_degrees="Vector3(-55,-25,0)" light_energy="0.75"/>
+
+    <Label3D position="Vector3(0,4.55,-6.5)" text="REMOTE CALL: решение принимает скрипт мира на клиенте адресата"
+             font_size="40" outline_size="10" pixel_size="0.005"/>
+    <Label3D position="Vector3(0,4.05,-6.5)" text="Нажатие отправляет запрос всем. Цвет статуса показывает локальный результат."
+             font_size="28" outline_size="8" pixel_size="0.0045"/>
+
+    <Node3D name="Buttons" position="Vector3(0,2.25,-6.5)">
+      <StaticBody3D id="unchecked-button" position="Vector3(-4.5,0,0)">
+        <MeshInstance3D mesh="SubResource:::ButtonMesh" material_override="SubResource:::OpenMaterial">
+          <Label3D position="Vector3(0,0,0.09)" text="БЕЗ ПРОВЕРОК" font_size="34" outline_size="8" pixel_size="0.0045"/>
+        </MeshInstance3D>
+        <CollisionShape3D shape="SubResource:::ButtonShape"/>
+      </StaticBody3D>
+      <StaticBody3D id="authority-button">
+        <MeshInstance3D mesh="SubResource:::ButtonMesh" material_override="SubResource:::AuthorityMaterial">
+          <Label3D position="Vector3(0,0,0.09)" text="ТОЛЬКО AUTHORITY" font_size="32" outline_size="8" pixel_size="0.0043"/>
+        </MeshInstance3D>
+        <CollisionShape3D shape="SubResource:::ButtonShape"/>
+      </StaticBody3D>
+      <StaticBody3D id="rank-button" position="Vector3(4.5,0,0)">
+        <MeshInstance3D mesh="SubResource:::ButtonMesh" material_override="SubResource:::RankMaterial">
+          <Label3D position="Vector3(0,0,0.09)" text="RANK &lt;= 10" font_size="34" outline_size="8" pixel_size="0.0045"/>
+        </MeshInstance3D>
+        <CollisionShape3D shape="SubResource:::ButtonShape"/>
+      </StaticBody3D>
+    </Node3D>
+
+    <Label3D id="unchecked-status" position="Vector3(-4.5,1.05,-6.5)" text="Ещё не вызывался"
+             font_size="26" outline_size="8" pixel_size="0.004" width="950"/>
+    <Label3D id="authority-status" position="Vector3(0,1.05,-6.5)" text="Ещё не вызывался"
+             font_size="26" outline_size="8" pixel_size="0.004" width="950"/>
+    <Label3D id="rank-status" position="Vector3(4.5,1.05,-6.5)" text="Ещё не вызывался"
+             font_size="26" outline_size="8" pixel_size="0.004" width="950"/>
+
+    <MeshInstance3D position="Vector3(-3.6,2.35,-1.2)" mesh="SubResource:::PanelMesh"
+                    material_override="SubResource:::PanelMaterial"/>
+    <Label3D id="local-info" position="Vector3(-3.6,2.35,-1.12)" text="ЛОКАЛЬНЫЕ ПРАВА\nзагрузка…"
+             horizontal_alignment="0" vertical_alignment="0" font_size="27" outline_size="7"
+             pixel_size="0.0042" width="1350"/>
+
+    <MeshInstance3D position="Vector3(3.6,2.35,-1.2)" mesh="SubResource:::PanelMesh"
+                    material_override="SubResource:::PanelMaterial"/>
+    <Label3D id="roster-info" position="Vector3(3.6,2.35,-1.12)" text="ВСЕ УЧАСТНИКИ\nзагрузка…"
+             horizontal_alignment="0" vertical_alignment="0" font_size="25" outline_size="7"
+             pixel_size="0.004" width="1350"/>
+
+    <Node3D name="Destinations">
+      <MeshInstance3D position="Vector3(-4.5,0.12,2.5)" mesh="SubResource:::PadMesh" material_override="SubResource:::OpenMaterial"/>
+      <Label3D position="Vector3(-4.5,0.55,2.5)" text="без проверок" font_size="28" outline_size="7" pixel_size="0.004"/>
+      <MeshInstance3D position="Vector3(0,0.12,2.5)" mesh="SubResource:::PadMesh" material_override="SubResource:::AuthorityMaterial"/>
+      <Label3D position="Vector3(0,0.55,2.5)" text="authority" font_size="28" outline_size="7" pixel_size="0.004"/>
+      <MeshInstance3D position="Vector3(4.5,0.12,2.5)" mesh="SubResource:::PadMesh" material_override="SubResource:::RankMaterial"/>
+      <Label3D position="Vector3(4.5,0.55,2.5)" text="rank &lt;= 10" font_size="28" outline_size="7" pixel_size="0.004"/>
+    </Node3D>
+
+    <VRWebSpawner mode="first"><SpawnerPoint transform="Transform3D(1,0,0, 0,1,0, 0,0,1, 0,0,-2.5)"/></VRWebSpawner>
+
+    <Resource id="FloorMesh" type="BoxMesh" size="Vector3(16,0.1,16)"/>
+    <Resource id="FloorShape" type="BoxShape3D" size="Vector3(16,0.1,16)"/>
+    <Resource id="ButtonMesh" type="BoxMesh" size="Vector3(3.5,0.9,0.16)"/>
+    <Resource id="ButtonShape" type="BoxShape3D" size="Vector3(3.5,0.9,0.2)"/>
+    <Resource id="PanelMesh" type="BoxMesh" size="Vector3(6.4,4.8,0.12)"/>
+    <Resource id="PadMesh" type="CylinderMesh" top_radius="1.35" bottom_radius="1.35" height="0.18"/>
+    <Resource id="OpenMaterial" type="StandardMaterial3D" albedo_color="Color(0.12,0.68,0.95,1)" emission_enabled="true" emission="Color(0.05,0.3,0.55,1)"/>
+    <Resource id="AuthorityMaterial" type="StandardMaterial3D" albedo_color="Color(0.95,0.52,0.12,1)" emission_enabled="true" emission="Color(0.5,0.2,0.03,1)"/>
+    <Resource id="RankMaterial" type="StandardMaterial3D" albedo_color="Color(0.52,0.3,0.95,1)" emission_enabled="true" emission="Color(0.25,0.1,0.5,1)"/>
+    <Resource id="PanelMaterial" type="StandardMaterial3D" albedo_color="Color(0.055,0.075,0.12,0.96)" metallic="0.15" roughness="0.5"/>
+    <Resource id="Environment" type="Environment" background_mode="2" background_color="Color(0.018,0.026,0.05,1)" ambient_light_source="3" ambient_light_color="Color(0.2,0.28,0.48,1)" ambient_light_energy="0.65"/>
+  </vrwml>
+</body>
+</html>

@@ -3,7 +3,7 @@ extends RefCounted
 
 ## Чистый слой данных/геометрии штриха карандаша (engine-agnostic, как SceneChanges): накапливает
 ## сэмплы пути, прореживает их на лету, упрощает (Douglas–Peucker) и сериализует в плоский props
-## для эфемерного объекта kind="stroke". НЕ знает про сеть и 3D-ноды — оперирует точками (Vector3
+## для специального VRWML-тега <VRWebStroke>. НЕ знает про сеть и 3D-ноды — оперирует точками (Vector3
 ## как математический примитив) и на выходе даёт ПЛОСКИЙ массив float, чтобы сериализованную форму
 ## мог реализовать и не-Godot слой. Полное описание инструмента — в docs/pencil-tool.md, протокол
 ## объекта — в docs/ephemeral-changes.md.
@@ -76,7 +76,8 @@ func to_flat() -> Array:
 	return out
 
 
-## Готовый props для op=add: { points:[…], color:[r,g,b], width }. Всё JSON-сериализуемо.
+## Готовые геометрические данные { points:[…], color:[r,g,b], width }. Вызывающий может
+## закодировать их в строковые attrs <VRWebStroke>.
 func build_props(color: Color, width: float) -> Dictionary:
 	return {
 		"points": to_flat(),

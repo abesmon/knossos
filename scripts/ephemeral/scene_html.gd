@@ -577,7 +577,7 @@ static func _parse_scene_children(node: HtmlNode, parent_entry: int, entries: Ar
 
 ## Дифф единого документа: (индекс страницы, текущее состояние, записи правки) -> дельта.
 ## Правки узлов СТРАНИЦЫ становятся vrweb-patch (id "vpatch:<узел>"), новые PascalCase-теги —
-## vrweb-node, новые lowercase-теги — мировые kind'ы (bubble/stroke/будущие). Наружу уходит
+## vrweb-node, новые lowercase-теги — мировые kind'ы (bubble/будущие). Наружу уходит
 ## ТОЛЬКО дельта — сами узлы страницы никуда не отправляются.
 static func diff_scene(index: Dictionary, objects: Dictionary, parsed: Dictionary,
 		make_id: Callable, config_attrs: Dictionary = {}) -> Dictionary:

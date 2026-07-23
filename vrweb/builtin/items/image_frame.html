@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb item — рамка для картинок</title>
+  <script type="application/vrweb+luau" id="image-frame.behavior">
+-- Размещение изображений как переносимый предмет (docs/space/tool-authoring.md).
+-- Пока рамка в руке, она проецирует перед собой луч (1.5 м) с полупрозрачным маркером на
+-- конце: маркер прижимается к поверхности и разворачивается по её нормали, а в пустоте
+-- висит на конце луча лицом к игроку. ЛКМ (use) фиксирует позу и открывает выбор файла;
+-- картинка уезжает в blob store и ставится в мир обычным vrweb-node <VRWebImage>.
+--
+-- Луч и маркер — ЛОКАЛЬНОЕ превью: сцена предмета строится у всех, но показывает их только
+-- тот клиент, чей пользователь держит рамку.
+local frame = document.query("#image-frame-item")
+local beam = document.query("#aim-beam")
+local marker = document.query("#aim-marker")
+assert(frame ~= nil and beam ~= nil and marker ~= nil, "image frame item scene ids are missing")
+
+local REACH = 1.5           -- длина луча размещения, м
+local SURFACE_GAP = 0.02    -- отступ от поверхности вдоль нормали (антизазор), м
+-- Размер картинки НЕ задаём: без width/height панель берёт натуральный размер текстуры
+-- (пиксели в метрах, с потолком). Зададим width — и все размещённые картинки станут
+-- одинаковой ширины, что убивает разницу между большим постером и маленькой иконкой.
+
+local me = document.players.local_info()
+local aiming = false        -- держим ли рамку МЫ (превью только у держателя)
+local last_pose = nil       -- поза превью с прошлого кадра — её и фиксирует ЛКМ
+
+local function set_preview_visible(on)
+  beam.set("visible", on)
+  marker.set("visible", on)
+end
+
+-- Поза размещения по прицелу: попали — прижимаем к поверхности и разворачиваем по нормали;
+-- мимо — вешаем на конце луча лицом к игроку.
+local function placement_pose()
+  local aim = document.player.aim()
+  local forward = aim.direction
+  if aim.hit and aim.distance <= REACH then
+    local pos = aim.position + aim.normal * SURFACE_GAP
+    return document.values.transform_facing(pos, aim.normal, forward), pos
+  end
+  local pos = aim.origin + forward * REACH
+  return document.values.transform_facing(pos, -forward, forward), pos
+end
+
+frame.on("grab", function(event)
+  aiming = tostring(event.user_id) == tostring(me.user_id)
+  set_preview_visible(aiming)
+end, "")
+
+frame.on("drop", function(_event)
+  aiming = false
+  set_preview_visible(false)
+end, "")
+
+document.on_update(function(_frame)
+  if not aiming then return end
+  local pose, point = placement_pose()
+  last_pose = pose
+  marker.set("global_transform", pose)
+  -- Луч: тонкий брус от «дула» рамки до точки прицела. Ставим середину и вытягиваем по -Z.
+  local aim = document.player.aim()
+  local from = aim.origin + aim.direction * 0.25
+  local length = math.max(0.05, vector.magnitude(point - from))
+  beam.set("global_transform",
+      document.values.transform_facing((from + point) * 0.5, point - from, aim.direction))
+  beam.set("scale", document.values.vector3(1, 1, length))
+end)
+
+frame.on("use", function(_event)
+  if not aiming or last_pose == nil then return end
+  local pose = last_pose        -- фиксируем позу на момент нажатия (диалог откроется позже)
+  document.files.pick("image", function(pick)
+    if not pick.ok then return end
+    -- Публикуем выбранный файл как изображение: тип задаём МЫ, host по имени файла ничего
+    -- не решает. Крупное фото при этом не втаскивается в память скрипта.
+    local url = pick.file.publish("image")
+    if url == "" then return end
+    document.scene.add({ kind = "vrweb-node", parent = "", ttl = 0, props = {
+      tag = "VRWebImage",
+      attrs = {
+        src = url,
+        alt = tostring(pick.name),
+        -- Полная поза одним атрибутом: позиция + разворот по нормали/лицом к игроку.
+        transform = document.values.to_literal(pose),
+      },
+    } })
+  end)
+end, "")
+  </script>
+</head>
+<body>
+  <vrwml>
+    <Resource id="FrameBody" type="BoxMesh" size="Vector3(0.3,0.22,0.015)"/>
+    <Resource id="FrameMaterial" type="StandardMaterial3D" albedo_color="Color(0.35,0.55,0.9,1)"/>
+    <VRWebGrabbable id="image-frame-item" theft="deny">
+      <MeshInstance3D mesh="SubResource:::FrameBody" surface_material_override/0="SubResource:::FrameMaterial"/>
+    </VRWebGrabbable>
+
+    <!-- Локальное превью прицеливания: луч и маркер места размещения. Оба top_level —
+         живут в мировых координатах, скрипт ставит им global_transform каждый кадр. -->
+    <Resource id="BeamMesh" type="BoxMesh" size="Vector3(0.012,0.012,1)"/>
+    <Resource id="BeamMaterial" type="StandardMaterial3D"
+        albedo_color="Color(0.4,0.85,1,0.5)" transparency="1" shading_mode="0" cull_mode="2"/>
+    <MeshInstance3D id="aim-beam" top_level="true" visible="false"
+        mesh="SubResource:::BeamMesh" material_override="SubResource:::BeamMaterial"/>
+
+    <Resource id="MarkerMesh" type="QuadMesh" size="Vector2(0.3,0.3)"/>
+    <Resource id="MarkerMaterial" type="StandardMaterial3D"
+        albedo_color="Color(0.4,0.85,1,0.35)" transparency="1" shading_mode="0" cull_mode="2"/>
+    <MeshInstance3D id="aim-marker" top_level="true" visible="false"
+        mesh="SubResource:::MarkerMesh" material_override="SubResource:::MarkerMaterial"/>
+  </vrwml>
+</body>
+</html>

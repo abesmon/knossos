@@ -8,7 +8,7 @@ extends Node
 func _ready() -> void:
 	var node := VrwebBuilder.build_element("VRWebVideoScreen", {
 		"player": "main", "size": "3.2:1.8",
-	}, {}, "vrwebresource://video.html")
+	}, {}, "vrwebresource://examples/video.html")
 	var ok := node is VrwebVideoScreen \
 			and node.has_node("Mesh") \
 			and node.has_node("Collision") \
@@ -31,7 +31,7 @@ func _ready() -> void:
 	root.add_child(manager)
 	var src_screen = VrwebBuilder.build_element("VRWebVideoScreen", {
 		"src": "https://example.test/video.mp4",
-	}, {}, "vrwebresource://video.html")
+	}, {}, "vrwebresource://examples/video.html")
 	root.add_child(src_screen)
 	manager.scan(root)
 	var had_synthetic := manager.get_child_count() > 0

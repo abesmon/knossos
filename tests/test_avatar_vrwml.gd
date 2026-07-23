@@ -50,7 +50,7 @@ func _test_avatar_policy() -> void:
 	var integrated := AvatarVrwmlPolicy.new()
 	var built := VrwebBuilder.build(HtmlParser.parse(
 			"<vrwml><Avatar><HTTPRequest><Node3D name=\"Preserved\"/></HTTPRequest>" \
-			+ "</Avatar></vrwml>"), "test://avatar", null, integrated)
+			+ "</Avatar></vrwml>"), "test://avatar", integrated)
 	_check(integrated.has_errors(), "builder records rejected child instead of silent partial loss")
 	var holder := built.get("root") as Node3D
 	_check(holder != null and holder.get_child_count() == 1 \
@@ -84,7 +84,7 @@ func _test_animation_tree_applier_roundtrip() -> void:
 	_check(text.contains("type=\"AvatarParamBinding\""),
 			"binding exports as public resource")
 
-	var built := VrwebBuilder.build(HtmlParser.parse(text), "res://tests/animated.vrwml", null,
+	var built := VrwebBuilder.build(HtmlParser.parse(text), "res://tests/animated.vrwml",
 			AvatarVrwmlPolicy.new())
 	var holder := built.get("root") as Node3D
 	_check(holder != null and holder.get_child_count() == 1,
@@ -139,7 +139,7 @@ func _test_avatar(idx: int, write: bool) -> void:
 			_check(FileAccess.get_file_as_string(generated_path) == text,
 					"avatar_%d generated artifact matches authoring scene" % idx)
 
-	var built := VrwebBuilder.build(HtmlParser.parse(text), source_path, null, AvatarVrwmlPolicy.new())
+	var built := VrwebBuilder.build(HtmlParser.parse(text), source_path, AvatarVrwmlPolicy.new())
 	var holder := built.get("root") as Node3D
 	_check(holder != null and holder.get_child_count() == 1,
 			"avatar_%d builds one root" % idx)

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cnetgrabtest01"]
+
+[ext_resource type="Script" path="res://tests/net_grabbable_test.gd" id="1_netgrab"]
+
+[node name="NetGrabbableTest" type="Node"]
+script = ExtResource("1_netgrab")

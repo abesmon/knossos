@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VRWeb item — ластик</title>
+  <script type="application/vrweb+luau" id="eraser.behavior">
+-- Ластик как переносимый предмет: зажал ЛКМ (use) — стирает СВОИ штрихи под прицелом.
+-- Штрихи — стандартные vrweb-node с tag="VRWebStroke"; чужие фильтруются по creator binding
+-- заранее (авторитет всё равно отклонил бы remove чужого объекта).
+local eraser = document.query("#eraser-item")
+assert(eraser ~= nil, "eraser item scene id is missing")
+
+local RADIUS = 0.12       -- штрих стирается, если его линия ближе этого к точке прицела
+local SCAN_INTERVAL = 0.12 -- частота сканирования слоя при зажатой ЛКМ
+
+local me = document.players.local_info()
+local erasing = false
+local accum = 0
+
+local function erase_point()
+  local aim = document.player.aim()
+  if aim.hit and aim.distance < 3.4 then
+    return aim.position
+  end
+  return aim.origin + aim.direction * 1.2
+end
+
+-- Расстояние точки до отрезка ab (все — нативные векторы).
+local function segment_distance(p, a, b)
+  local ab = b - a
+  local ab_len2 = vector.dot(ab, ab)
+  if ab_len2 < 1e-9 then return vector.magnitude(p - a) end
+  local t = math.clamp(vector.dot(p - a, ab) / ab_len2, 0, 1)
+  return vector.magnitude(p - (a + ab * t))
+end
+
+local function stroke_hit(props, p)
+  local attrs = props.attrs
+  if type(attrs) ~= "table" then return false end
+  local pts = {}
+  local raw = string.gsub(tostring(attrs.points or ""), "[%[%],]", " ")
+  for token in string.gmatch(raw, "[^%s]+") do
+    local value = tonumber(token)
+    if value ~= nil then pts[#pts + 1] = value end
+  end
+  if #pts < 6 then return false end
+  local prev = nil
+  for i = 1, #pts - 2, 3 do
+    local v = document.values.vector3(pts[i], pts[i + 1], pts[i + 2])
+    if prev ~= nil and segment_distance(p, prev, v) <= RADIUS then return true end
+    prev = v
+  end
+  return false
+end
+
+eraser.on("use", function(_e) erasing = true end, "")
+eraser.on("use_end", function(_e) erasing = false end, "")
+eraser.on("drop", function(_e) erasing = false end, "")
+
+document.on_update(function(frame)
+  if not erasing then return end
+  accum = accum + frame.delta
+  if accum < SCAN_INTERVAL then return end
+  accum = 0
+  local p = erase_point()
+  local strokes = document.scene.objects("vrweb-node")
+  for i = 1, #strokes do
+    local stroke = strokes[i]
+    if stroke.props.tag == "VRWebStroke" and stroke.bindings ~= nil
+        and tostring(stroke.bindings.creator) == tostring(me.user_id)
+        and stroke_hit(stroke.props, p) then
+      document.scene.remove(stroke.id)
+    end
+  end
+end)
+  </script>
+</head>
+<body>
+  <vrwml>
+    <Resource id="EraserBody" type="BoxMesh" size="Vector3(0.07,0.05,0.12)"/>
+    <Resource id="EraserMaterial" type="StandardMaterial3D" albedo_color="Color(0.95,0.7,0.75,1)"/>
+    <VRWebGrabbable id="eraser-item" theft="deny">
+      <MeshInstance3D mesh="SubResource:::EraserBody" surface_material_override/0="SubResource:::EraserMaterial"/>
+    </VRWebGrabbable>
+  </vrwml>
+</body>
+</html>

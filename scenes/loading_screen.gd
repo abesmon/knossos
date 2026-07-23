@@ -11,8 +11,6 @@ extends Node
 ## их не касается.
 
 const MAIN_SCENE := "res://scenes/main.tscn"
-const MAKER_SELF_TEST_ARG := "--vrweb-maker-self-test"
-const MAKER_SELF_TEST_SCENE := "res://tests/test_package_demo.tscn"
 ## Максимум ожидания discovery. Меньше HTTP_TIMEOUT домашнего сервера (10с) сознательно:
 ## висящий сервер не должен держать пользователя на заставке — дождётся main.
 const MAX_WAIT_SEC := 6.0
@@ -21,10 +19,6 @@ const MAX_WAIT_SEC := 6.0
 
 
 func _ready() -> void:
-	if MAKER_SELF_TEST_ARG in OS.get_cmdline_user_args():
-		print("VRWEB_MAKER_EXPORTED_SELF_TEST start")
-		get_tree().call_deferred("change_scene_to_file", MAKER_SELF_TEST_SCENE)
-		return
 	_hub.open("Подключаемся к домашнему серверу")
 	if HomeServer.server_url() == "":
 		_hub.set_status("Загрузка")

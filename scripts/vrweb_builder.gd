@@ -44,11 +44,11 @@ const EXT_SCENE_TAG := "ExtScene"
 const MIRROR_TAG := "VRWebMirror"
 const VIDEO_PLAYER_TAG := "VRWebVideoPlayer"
 const VIDEO_SCREEN_TAG := "VRWebVideoScreen"
-const REPLICATED_STATE_TAG := "VRWebReplicatedState"
-const STATE_ACTION_TAG := "VRWebStateAction"
-const COMPONENT_TAG := "VRWebComponent"
 const IMAGE_TAG := "VRWebImage"
+const STROKE_TAG := "VRWebStroke"
 const BLOB_TAG := "VRWebBlob"
+const WORLD_UI_CANVAS_TAG := "WorldUiCanvas"
+const GRABBABLE_TAG := "VRWebGrabbable"
 const SUBRESOURCE_PREFIX := "SubResource:::"
 const EXTRESOURCE_PREFIX := "ExtResource:::"
 const MODE_COMBINE := "combine"
@@ -57,10 +57,9 @@ const MODE_EXCLUSIVE := "exclusive"
 const MIRROR_SCENE := preload("res://scenes/vrweb_mirror.tscn")
 const VIDEO_PLAYER_SCRIPT := preload("res://scripts/vrweb_video_player.gd")
 const VIDEO_SCREEN_SCENE := preload("res://scenes/vrweb_video_screen.tscn")
-const REPLICATED_STATE_SCRIPT := preload("res://scripts/vrweb_replicated_state.gd")
-const STATE_ACTION_SCRIPT := preload("res://scripts/vrweb_state_action.gd")
-
-const REPLICATED_META_TAGS := {"StateField": true, "StateCommand": true, "StateBinding": true}
+const WORLD_UI_CANVAS_SCENE := preload("res://actors/world_ui/world_ui_canvas.tscn")
+const GRABBABLE_SCRIPT := preload("res://actors/grabbable/grabbable.gd")
+const STROKE_SCENE := preload("res://actors/stroke/stroke.tscn")
 
 ## Типы внешних ресурсов по способу загрузки (см. main._inject_ext_resources).
 ## TEXTURE — через ImageLoader; AUDIO/MESH — через VrwebResourceLoader (байты + декод).
@@ -77,6 +76,7 @@ const SPAWN_MODE_FIRST := "first"
 ## Атрибуты <Resource>/<ExtResource>, которые задают сам ресурс, а не его свойства.
 ## src — атрибут-ссылка у <ExtScene>.
 const RESOURCE_RESERVED := {"id": true, "type": true, "path": true, "src": true}
+const NODE_RESERVED := {"id": true}
 
 ## Атрибуты <VRWebMirror>, которые задают сам объект, а не свойства узла Node3D.
 const MIRROR_RESERVED := {"size": true, "resolution_scale": true, "srgb_decode": true}
@@ -84,19 +84,22 @@ const MIRROR_RESERVED := {"size": true, "resolution_scale": true, "srgb_decode":
 ## Атрибуты <VRWebVideoScreen>, которые задают привязку/плеер, а не свойства узла Node3D.
 const VIDEO_SCREEN_RESERVED := {
 	"player": true, "src": true, "size": true,
-	"autoplay": true, "loop": true, "volume": true,
+	"autoplay": true, "loop": true, "volume": true, "sync": true,
 }
 
 ## Атрибуты <VRWebImage>, которые задают саму картинку, а не свойства узла Node3D.
 ## width/height — желаемый размер квада в МЕТРАХ (0/нет = натуральный размер текстуры).
 const IMAGE_RESERVED := {"src": true, "alt": true, "width": true, "height": true}
+const WORLD_UI_CANVAS_RESERVED := {"size": true, "viewport_size": true}
+
+## Атрибуты <VRWebGrabbable>, которые задают сам предмет, а не свойства узла.
+const GRABBABLE_RESERVED := {"id": true, "theft": true, "grip": true, "mode": true}
 
 var _base_url: String = ""
 var _resources: Dictionary = {}     # id -> Resource (встроенные SubResource)
 var _ext_defs: Dictionary = {}      # id -> { type: String, url: String } (внешние ресурсы)
 var _ext_targets: Array = []        # [{ obj: Object, prop: String, id: String }] — куда вставить ext
 var _node_map: Dictionary = {}      # HtmlNode (элемент) -> Node — провенанс для эфемерного оверлея
-var _scripting_modules = null             # ScriptingModuleRegistry, подготовленный до materialization
 var _content_policy: VrwebContentPolicy
 var _policy_context: Dictionary = {}
 
@@ -111,11 +114,10 @@ var _policy_context: Dictionary = {}
 ##     По нему эфемерный оверлей (vrweb-patch/vrweb-node, см. docs/space-console.md)
 ##     адресует РЕАЛЬНЫЕ узлы сцены;
 ##   resources — { id -> Resource }: суб-ресурсы страницы (для резолва ссылок из оверлея).
-static func build(doc: HtmlNode, base_url: String = "", scripting_modules = null,
+static func build(doc: HtmlNode, base_url: String = "",
 		content_policy: VrwebContentPolicy = null) -> Dictionary:
 	var b := VrwebBuilder.new()
 	b._base_url = base_url
-	b._scripting_modules = scripting_modules
 	b._content_policy = content_policy if content_policy != null else VrwebContentPolicy.new()
 	b._policy_context = {"source": VrwebContentPolicy.SOURCE_DOCUMENT, "base_url": base_url}
 	return b._build(doc)
@@ -180,7 +182,7 @@ func _build(doc: HtmlNode) -> Dictionary:
 ## Структурные/мета-теги, которые не инстанцируются как узлы сцены.
 func _is_meta_tag(elem: HtmlNode) -> bool:
 	return elem.raw_tag == RESOURCE_TAG or elem.raw_tag == EXT_RESOURCE_TAG \
-			or elem.raw_tag == SPAWNER_TAG or REPLICATED_META_TAGS.has(elem.raw_tag)
+			or elem.raw_tag == SPAWNER_TAG
 
 
 # --- Внешние ресурсы (<ExtResource>) ---
@@ -281,14 +283,14 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 		return _build_video_player(elem)
 	if elem.raw_tag == VIDEO_SCREEN_TAG:
 		return _build_video_screen(elem)
-	if elem.raw_tag == REPLICATED_STATE_TAG:
-		return _build_replicated_state(elem)
-	if elem.raw_tag == STATE_ACTION_TAG:
-		return _build_state_action(elem)
-	if elem.raw_tag == COMPONENT_TAG:
-		return _build_page_component(elem)
 	if elem.raw_tag == IMAGE_TAG:
 		return _build_image(elem)
+	if elem.raw_tag == STROKE_TAG:
+		return _build_stroke(elem)
+	if elem.raw_tag == WORLD_UI_CANVAS_TAG:
+		return _build_world_ui_canvas(elem)
+	if elem.raw_tag == GRABBABLE_TAG:
+		return _build_grabbable(elem)
 	if elem.raw_tag == BLOB_TAG:
 		# Документная форма realtime-ресурса — не узел: байты уходят в BlobStore.
 		_ingest_blob(elem)
@@ -313,6 +315,62 @@ func _instantiate_node(elem: HtmlNode) -> Node:
 	return node
 
 
+## Публичная 3D-обёртка стандартного Godot UI. Прямые дочерние Control монтируются под
+## внутренний SubViewport, а не под StaticBody3D canvas-а.
+func _build_world_ui_canvas(elem: HtmlNode) -> Node:
+	var canvas := WORLD_UI_CANVAS_SCENE.instantiate() as WorldUiCanvas
+	var size_value: Variant = _resolve_value(elem.get_attr("size", "Vector2(4,2.5)"))
+	var viewport_value: Variant = _resolve_value(
+			elem.get_attr("viewport_size", "Vector2i(1024,640)"))
+	var size_m: Vector2 = size_value if size_value is Vector2 else Vector2(4.0, 2.5)
+	var viewport_size: Vector2i = viewport_value if viewport_value is Vector2i else Vector2i(1024, 640)
+	canvas.setup_canvas(size_m, viewport_size)
+	for key in elem.attributes:
+		if WORLD_UI_CANVAS_RESERVED.has(key) or NODE_RESERVED.has(key):
+			continue
+		if _property_allowed(canvas, str(key), str(elem.attributes[key])):
+			canvas.set(key, _resolve_value(elem.attributes[key]))
+	var content := canvas.content_root()
+	for child in elem.children:
+		if child.is_text() or _is_meta_tag(child):
+			continue
+		var node := _build_node(child)
+		if node == null:
+			continue
+		if node is Control and content != null:
+			content.add_child(node)
+		else:
+			canvas.add_child(node)
+	return canvas
+
+
+## <VRWebGrabbable id="ball" theft="allow|deny" mode="fixed|adjustable" grip="Transform3D(...)">
+## — обёртка, делающая своё VRWML-содержимое предметом, который можно взять в руку (норматив —
+## docs/space/grabbable.md). id обязателен для сетевого hold-состояния (адрес выводится
+## детерминированно); grip — авторский хват режима fixed (поза относительно якоря руки);
+## mode="adjustable" — естественный хват + подстройка держателем;
+## прочие атрибуты (transform и т.п.) — обычные свойства узла.
+func _build_grabbable(elem: HtmlNode) -> Node:
+	var node: Grabbable = GRABBABLE_SCRIPT.new()
+	node.grab_id = elem.get_attr("id")
+	node.theft_allowed = elem.get_attr("theft", "allow").strip_edges().to_lower() \
+			not in ["deny", "false", "no", "off"]
+	node.adjustable = elem.get_attr("mode", "fixed").strip_edges().to_lower() == "adjustable"
+	if elem.has_attr("grip"):
+		var grip: Variant = _resolve_value(elem.get_attr("grip"))
+		if grip is Transform3D:
+			node.grip_transform = grip
+		else:
+			Log.warn("builder", "<VRWebGrabbable> grip не Transform3D — используется identity")
+	for key in elem.attributes:
+		if GRABBABLE_RESERVED.has(key):
+			continue
+		if _property_allowed(node, str(key), str(elem.attributes[key])):
+			node.set(key, _resolve_value(elem.attributes[key]))
+	_append_materialized_children(node, elem)
+	return node
+
+
 ## Аудио-узлы страницы по умолчанию направляем на шину «World» (звуки мира) — чтобы их
 ## громкость регулировал общий ползунок «Мир» в настройках. Если страница явно задала bus
 ## своим атрибутом (значение уже не «Master»), уважаем её выбор.
@@ -327,7 +385,7 @@ func _route_audio_to_world(node: Node) -> void:
 ## и будет вставлен асинхронно. Остальное резолвится и ставится немедленно.
 func _apply_attributes(obj: Object, elem: HtmlNode) -> void:
 	for key in elem.attributes:
-		if RESOURCE_RESERVED.has(key):
+		if RESOURCE_RESERVED.has(key) or obj is Node and NODE_RESERVED.has(key):
 			continue
 		var raw: String = elem.attributes[key]
 		if not _property_allowed(obj, str(key), raw):
@@ -394,9 +452,11 @@ func _build_mirror(elem: HtmlNode) -> Node:
 	return mirror
 
 
-## <VRWebVideoPlayer id="..." src="<url>" autoplay loop volume="0.5"/> — логический видео-плеер
-## (декод в текстуру, см. scripts/vrweb_video_player.gd). Кастомный тег, не класс Godot —
-## headless-узел без геометрии. src резолвится относительно адреса страницы, как ext-ресурсы.
+## <VRWebVideoPlayer id="..." src="<url>" autoplay loop volume="0.5" sync="none"/> —
+## логический видео-плеер (декод в текстуру, см. scripts/vrweb_video_player.gd). Кастомный
+## тег, не класс Godot — headless-узел без геометрии. src резолвится относительно адреса
+## страницы, как ext-ресурсы. sync="none" отключает стандартную сетевую синхронизацию:
+## такой плеер — чисто базовый уровень под ручное управление скриптингом (vrweb/video/1).
 func _build_video_player(elem: HtmlNode) -> Node:
 	var node: Node = VIDEO_PLAYER_SCRIPT.new()
 	var src := ""
@@ -404,6 +464,7 @@ func _build_video_player(elem: HtmlNode) -> Node:
 		src = PageFetcher.resolve_url(elem.get_attr("src"), _base_url)
 	node.setup(elem.get_attr("id"), src, _attr_bool(elem, "autoplay", false),
 			_attr_bool(elem, "loop", false), _attr_float(elem, "volume", 1.0))
+	node.synced = _attr_sync(elem)
 	return node
 
 
@@ -425,109 +486,12 @@ func _build_video_screen(elem: HtmlNode) -> Node:
 	node.autoplay = _attr_bool(elem, "autoplay", false)
 	node.loop = _attr_bool(elem, "loop", false)
 	node.volume = _attr_float(elem, "volume", 1.0)
+	node.synced = _attr_sync(elem)
 	for key in elem.attributes:
 		if VIDEO_SCREEN_RESERVED.has(key):
 			continue
 		if _property_allowed(node, str(key), str(elem.attributes[key])):
 			node.set(key, _resolve_value(elem.attributes[key]))
-	return node
-
-
-## Декларативный behavior-компонент. Страница поставляет схему, reducers ограниченного DSL,
-## bindings и всё визуальное дерево; клиент предоставляет лишь общий state/UI runtime.
-func _build_replicated_state(elem: HtmlNode) -> Node:
-	if elem.get_attr("id").is_empty() or elem.get_attr("schema").is_empty():
-		Log.warn("builder", "<VRWebReplicatedState> требует id и schema")
-		return null
-	var fields := {}
-	var initial := {}
-	var commands := {}
-	var bindings: Array[Dictionary] = []
-	for child in elem.children:
-		match child.raw_tag:
-			"StateField":
-				var field_name := child.get_attr("name")
-				var default_value = _resolve_value(child.get_attr("default", "null"))
-				fields[field_name] = {"type": child.get_attr("type"), "default": default_value}
-				initial[field_name] = default_value
-			"StateCommand":
-				commands[child.get_attr("name")] = {
-					"operation": child.get_attr("operation"), "field": child.get_attr("field"),
-					"arg": child.get_attr("arg", "value"),
-					"value": _resolve_value(child.get_attr("value", "null")),
-				}
-			"StateBinding":
-				bindings.append({
-					"field": child.get_attr("field"), "target": child.get_attr("target"),
-					"property": child.get_attr("property"),
-					"true_value": _resolve_value(child.get_attr("when_true", "true")),
-					"false_value": _resolve_value(child.get_attr("when_false", "false")),
-				})
-	var node := REPLICATED_STATE_SCRIPT.new() as VrwebReplicatedState
-	node.setup({
-		"object_id": elem.get_attr("id"), "schema_id": elem.get_attr("schema"),
-		"version": int(elem.get_attr("version", "1")), "fields": fields, "initial": initial,
-		"commands": commands, "bindings": bindings,
-		"optimistic": _attr_bool(elem, "optimistic", true),
-	})
-	for key in elem.attributes:
-		if ["id", "schema", "version", "optimistic"].has(key):
-			continue
-		if _property_allowed(node, str(key), str(elem.attributes[key])):
-			node.set(key, _resolve_value(elem.attributes[key]))
-	return node
-
-
-## Отдельная WorldUiSurface, вызывающая команду state-узла по относительному NodePath.
-func _build_state_action(elem: HtmlNode) -> Node:
-	if elem.get_attr("state").is_empty() or elem.get_attr("command").is_empty():
-		Log.warn("builder", "<VRWebStateAction> требует state и command")
-		return null
-	var node := STATE_ACTION_SCRIPT.new() as VrwebStateAction
-	node.setup({
-		"state_path": elem.get_attr("state"), "command": elem.get_attr("command"),
-		"hint": elem.get_attr("hint"), "size": _parse_size(elem.get_attr("size", "1:1")),
-		"center": _resolve_value(elem.get_attr("center", "Vector3(0,0,0)")),
-	})
-	for child in elem.children:
-		if child.is_text() or _is_meta_tag(child):
-			continue
-		var sub := _build_node(child)
-		if sub != null:
-			node.add_child(sub)
-	for key in elem.attributes:
-		if ["state", "command", "hint", "size", "center"].has(key):
-			continue
-		if _property_allowed(node, str(key), str(elem.attributes[key])):
-			node.set(key, _resolve_value(elem.attributes[key]))
-	return node
-
-
-## Материализует только заранее собранный и разрешённый export. Загрузка, trust и компиляция
-## намеренно находятся вне Builder, чтобы страница не исполнила код в обход preflight.
-func _build_page_component(elem: HtmlNode) -> Node:
-	var module_id := elem.get_attr("module")
-	var export_name := elem.get_attr("class", "default")
-	if _scripting_modules == null:
-		Log.warn("builder", "<VRWebComponent %s:%s> пропущен: modules не подготовлены" \
-				% [module_id, export_name])
-		return null
-	var result: Dictionary = _scripting_modules.instantiate_export(module_id, export_name)
-	if not str(result.get("error", "")).is_empty():
-		Log.warn("builder", str(result.error))
-		return null
-	var node: Node = result.node
-	for key in elem.attributes:
-		if key in ["module", "class"]:
-			continue
-		if _property_allowed(node, str(key), str(elem.attributes[key])):
-			node.set(key, _resolve_value(elem.attributes[key]))
-	for child in elem.children:
-		if child.is_text() or _is_meta_tag(child):
-			continue
-		var sub := _build_node(child)
-		if sub != null:
-			node.add_child(sub)
 	return node
 
 
@@ -556,6 +520,16 @@ func _build_image(elem: HtmlNode) -> Node:
 	return node
 
 
+## <VRWebStroke points="[x0,y0,z0,x1,y1,z1,…]" color="Color(r,g,b,1)" width="0.02"/> —
+## процедурный штрих-полилиния. Это обычный специальный тег VRWML: в realtime-слое он
+## переносится универсальным kind="vrweb-node", без отдельного клиентского kind'а.
+func _build_stroke(elem: HtmlNode) -> Node:
+	var node := STROKE_SCENE.instantiate() as StrokeActor
+	_apply_attributes(node, elem)
+	_append_materialized_children(node, elem)
+	return node
+
+
 ## <VRWebBlob hash="<64 hex sha256>" data="<base64>"/> — вшитые в документ байты
 ## realtime-ресурса: страница (или запечённый флаш) несёт блоб инлайн, и ссылки
 ## vrwebblob:// резолвятся без p2p. Хэш сверяет BlobStore.ingest — байты, не совпадающие
@@ -576,6 +550,12 @@ func _attr_bool(elem: HtmlNode, key: String, fallback: bool) -> bool:
 		return fallback
 	var v: Variant = _resolve_value(elem.get_attr(key))
 	return v if v is bool else fallback
+
+
+## Атрибут sync видео-тегов: "none"/"off"/"false"/"manual" выключают стандартную
+## синхронизацию (базовый плеер под ручной скриптинг), всё остальное/нет атрибута — включена.
+func _attr_sync(elem: HtmlNode) -> bool:
+	return elem.get_attr("sync").strip_edges().to_lower() not in ["none", "off", "false", "manual"]
 
 
 ## Числовой атрибут элемента (float) или fallback, если атрибута нет/значение не число.
